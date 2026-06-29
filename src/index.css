@@ -111,3 +111,14 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 }
+
+/* Editor utility classes */
+.editor-transition { transition: all 0.15s ease-in-out; }
+.canvas-container-wrapper { display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background: hsl(var(--editor-bg)); }
+@media (max-width: 768px) { .mobile-toolbar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 50; background: hsl(var(--editor-panel)); border-top: 1px solid hsl(var(--border)); } }
+.drop-zone-active { border-color: hsl(var(--primary)) !important; background: hsl(var(--primary) / 0.05) !important; }
+.layer-item:hover { background: hsl(var(--editor-hover)); }
+.panel-scroll::-webkit-scrollbar { width: 6px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-scroll::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.3); border-radius: 3px; }
+.panel-scroll::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
