@@ -3,6 +3,7 @@ import { Canvas as FabricCanvas } from "fabric";
 import { Canvas as FabricCanvasComponent } from "./Canvas";
 import { Toolbar } from "./Toolbar";
 import { PropertiesPanel } from "./PropertiesPanel";
+import { LayersPanel } from "./LayersPanel";
 import { ImageUpload } from "./ImageUpload";
 import { TopBar } from "./TopBar";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -195,10 +196,10 @@ export const ImageEditor = () => {
           </div>
         )}
 
-        {/* Layers Panel placeholder */}
+        {/* Layers Panel */}
         {showLayers && (
-          <div className="w-72 flex-shrink-0 bg-[hsl(var(--editor-panel))] border-l border-border p-4 overflow-y-auto">
-            <p className="text-sm text-muted-foreground">Layers panel</p>
+          <div className="flex-shrink-0">
+            <LayersPanel fabricCanvas={fabricCanvas} />
           </div>
         )}
       </div>
