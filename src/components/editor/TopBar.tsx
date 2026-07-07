@@ -131,10 +131,37 @@ export const TopBar = ({
   const handleExport = (format: "png" | "jpg") => {
     if (!fabricCanvas) return;
 
+    // Export in scene coordinates regardless of current zoom/pan
+    const prevVpt = [...fabricCanvas.viewportTransform];
+    fabricCanvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+
+    // Crop to the background image bounds and upscale back to its
+    // native resolution, so the export isn't a screen-sized screenshot
+    // with dark margins around it.
+    const bgImage = fabricCanvas
+      .getObjects()
+      .find((obj: any) => !obj.selectable && obj.type === "image");
+
+    let crop: Record<string, number> = {};
+    if (bgImage) {
+      const rect = bgImage.getBoundingRect();
+      crop = {
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        multiplier: bgImage.width / bgImage.getScaledWidth(),
+      };
+    }
+
     const dataURL = fabricCanvas.toDataURL({
       format: format === "png" ? "png" : "jpeg",
       quality: 1,
+      multiplier: 1,
+      ...crop,
     });
+
+    fabricCanvas.setViewportTransform(prevVpt);
 
     const link = document.createElement("a");
     link.download = `image-editor-export.${format}`;
