@@ -166,18 +166,19 @@ export const TopBar = ({
     }
   };
 
+  // Zoom is a fraction (1 = 100%), same units as Fabric's getZoom()
   const handleZoomIn = () => {
-    const newZoom = Math.min(zoom + 10, 300);
-    onZoomChange(newZoom);
+    const newZoom = Math.min(zoom + 0.1, 5);
+    onZoomChange(parseFloat(newZoom.toFixed(2)));
   };
 
   const handleZoomOut = () => {
-    const newZoom = Math.max(zoom - 10, 10);
-    onZoomChange(newZoom);
+    const newZoom = Math.max(zoom - 0.1, 0.1);
+    onZoomChange(parseFloat(newZoom.toFixed(2)));
   };
 
   const handleFitToScreen = () => {
-    onZoomChange(100);
+    onZoomChange(1);
   };
 
   const hasImage = !!uploadedImage;
@@ -250,7 +251,7 @@ export const TopBar = ({
           </Tooltip>
 
           <span className="text-xs font-mono text-muted-foreground w-12 text-center tabular-nums select-none">
-            {zoom}%
+            {Math.round(zoom * 100)}%
           </span>
 
           <Tooltip>
