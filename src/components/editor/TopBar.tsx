@@ -22,7 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { removeBackground, loadImage } from "@/utils/backgroundRemoval";
+import { removeBackground } from "@/utils/backgroundRemoval";
 import { FabricImage } from "fabric";
 
 interface TopBarProps {
@@ -91,8 +91,7 @@ export const TopBar = ({
         tempCanvas.toBlob((b) => resolve(b!), "image/png");
       });
 
-      const img = await loadImage(blob);
-      const resultBlob = await removeBackground(img);
+      const resultBlob = await removeBackground(blob);
 
       // Revoke previous blob URL to prevent memory leak
       if (bgResultUrlRef.current) {
