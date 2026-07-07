@@ -3,6 +3,19 @@ import { Canvas as FabricCanvas, FabricImage } from "fabric";
 
 const MAX_HISTORY = 50;
 
+// Properties not serialized by default toObject() but load-bearing for us:
+// selectable marks the background image, lock* back the layer lock feature.
+const EXTRA_PROPS = [
+  "selectable",
+  "evented",
+  "lockMovementX",
+  "lockMovementY",
+  "lockRotation",
+  "lockScalingX",
+  "lockScalingY",
+  "hasControls",
+];
+
 interface UseUndoRedoReturn {
   saveState: () => void;
   undo: () => void;
@@ -22,7 +35,7 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
   const saveState = useCallback(() => {
     if (!canvas || isRestoringRef.current) return;
 
-    const json = JSON.stringify(canvas.toJSON());
+    const json = JSON.stringify(canvas.toObject(EXTRA_PROPS));
 
     // Trim any redo states ahead of current index
     historyRef.current = historyRef.current.slice(0, currentIndexRef.current + 1);
@@ -95,7 +108,14 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
   useEffect(() => {
     if (!canvas) return;
 
-    const handleSave = () => {
+    // Fresh canvas instance (new project / image reload) — drop stale history
+    historyRef.current = [];
+    currentIndexRef.current = -1;
+
+    const handleSave = (e?: { target?: unknown }) => {
+      // The crop selection overlay is UI chrome, not document content
+      const target = e?.target as Record<string, unknown> | undefined;
+      if (target?.__isCropOverlay) return;
       if (!isRestoringRef.current) {
         saveState();
       }
