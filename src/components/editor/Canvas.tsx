@@ -10,7 +10,10 @@ import {
   Triangle,
   Group,
 } from "fabric";
+import type { TMat2D } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
+import { Check, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { Tool } from "@/types/editor";
 
 interface CanvasProps {
@@ -21,6 +24,7 @@ interface CanvasProps {
   onCanvasReady: (canvas: FabricCanvas) => void;
   zoom: number;
   onZoomChange: (zoom: number) => void;
+  onToolChange: (tool: Tool) => void;
 }
 
 export const Canvas = ({
@@ -31,6 +35,7 @@ export const Canvas = ({
   onCanvasReady,
   zoom,
   onZoomChange,
+  onToolChange,
 }: CanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -321,12 +326,111 @@ export const Canvas = ({
     cropRectRef.current = null;
   };
 
+  // ---------- Apply / cancel crop ----------
+  const applyCrop = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const cropRect = cropRectRef.current;
+    if (!canvas || !cropRect) return;
+
+    const region = cropRect.getBoundingRect();
+    removeCropOverlay(canvas);
+    canvas.discardActiveObject();
+
+    // Render the selected region in scene coordinates at the background
+    // image's native resolution, then flatten it into a new background.
+    const prevVpt = [...canvas.viewportTransform] as TMat2D;
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+
+    const bgImage = canvas
+      .getObjects()
+      .find((obj) => !obj.selectable && obj.type === "image");
+    const multiplier = bgImage
+      ? bgImage.width / bgImage.getScaledWidth()
+      : 1;
+
+    const dataURL = canvas.toDataURL({
+      format: "png",
+      quality: 1,
+      multiplier,
+      left: region.left,
+      top: region.top,
+      width: region.width,
+      height: region.height,
+    });
+    canvas.setViewportTransform(prevVpt);
+
+    FabricImage.fromURL(dataURL).then((img) => {
+      canvas.remove(...canvas.getObjects());
+
+      const canvasW = canvas.width!;
+      const canvasH = canvas.height!;
+      const scale = Math.min(
+        (canvasW * 0.85) / img.width!,
+        (canvasH * 0.85) / img.height!
+      );
+      img.scale(scale);
+      img.set({
+        left: canvasW / 2 - (img.width! * scale) / 2,
+        top: canvasH / 2 - (img.height! * scale) / 2,
+      });
+      img.selectable = false;
+      canvas.add(img);
+      canvas.sendObjectToBack(img);
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      onZoomChange(1);
+      canvas.renderAll();
+    });
+
+    onToolChange("select");
+  }, [onToolChange, onZoomChange]);
+
+  const cancelCrop = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (canvas) {
+      removeCropOverlay(canvas);
+      canvas.renderAll();
+    }
+    onToolChange("select");
+  }, [onToolChange]);
+
+  // Enter applies / Escape cancels while cropping
+  useEffect(() => {
+    if (activeTool !== "crop") return;
+
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        applyCrop();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        cancelCrop();
+      }
+    };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [activeTool, applyCrop, cancelCrop]);
+
   return (
     <div
       ref={containerRef}
       className="relative w-full h-full rounded-lg overflow-hidden shadow-2xl border border-border"
     >
       <canvas ref={canvasRef} />
+
+      {/* Crop confirmation controls */}
+      {activeTool === "crop" && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg bg-[hsl(var(--editor-panel))] border border-border shadow-lg px-2 py-1.5">
+          <Button size="sm" className="h-8" onClick={applyCrop}>
+            <Check className="h-4 w-4 mr-1" />
+            Apply crop
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8" onClick={cancelCrop}>
+            <X className="h-4 w-4 mr-1" />
+            Cancel
+          </Button>
+        </div>
+      )}
     </div>
   );
 };

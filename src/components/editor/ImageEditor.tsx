@@ -100,6 +100,7 @@ export const ImageEditor = () => {
               onCanvasReady={setFabricCanvas}
               zoom={zoom}
               onZoomChange={handleZoomChange}
+              onToolChange={handleToolChange}
             />
           )}
         </div>
@@ -178,6 +179,7 @@ export const ImageEditor = () => {
               onCanvasReady={setFabricCanvas}
               zoom={zoom}
               onZoomChange={handleZoomChange}
+              onToolChange={handleToolChange}
             />
           )}
         </div>
