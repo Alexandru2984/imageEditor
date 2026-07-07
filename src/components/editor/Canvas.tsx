@@ -10,6 +10,7 @@ import {
   Triangle,
   Group,
 } from "fabric";
+import { EraserBrush } from "@erase2d/fabric";
 import type { Tool } from "@/types/editor";
 
 interface CanvasProps {
@@ -65,6 +66,14 @@ export const Canvas = ({
 
     fabricCanvasRef.current = canvas;
     onCanvasReady(canvas);
+
+    // Annotations can be erased with the eraser tool; the background
+    // photo (non-selectable) cannot.
+    const markErasable = (e: { target?: unknown }) => {
+      const obj = e.target as Record<string, unknown> | undefined;
+      if (obj) obj.erasable = obj.selectable !== false;
+    };
+    canvas.on("object:added", markErasable);
 
     // Load uploaded image with correct aspect ratio
     if (uploadedImage) {
@@ -159,11 +168,16 @@ export const Canvas = ({
       brush.width = brushWidth;
       canvas.freeDrawingBrush = brush;
     } else if (activeTool === "eraser") {
-      const brush = new PencilBrush(canvas);
-      brush.color = "#000000"; // Color doesn't matter for eraser
-      brush.width = brushWidth;
-      (brush as unknown as Record<string, unknown>).globalCompositeOperation = "destination-out";
-      canvas.freeDrawingBrush = brush;
+      const eraser = new EraserBrush(canvas);
+      eraser.width = brushWidth;
+      eraser.on("end", async (e) => {
+        e.preventDefault();
+        await eraser.commit(e.detail);
+        // Let listeners (undo history) know the document changed
+        canvas.fire("object:modified");
+        canvas.requestRenderAll();
+      });
+      canvas.freeDrawingBrush = eraser;
     }
 
     // Only create shapes when tool changes TO a shape tool (not on color changes)
