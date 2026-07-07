@@ -1,10 +1,69 @@
-import { pipeline, env } from '@huggingface/transformers';
+import { AutoModel, AutoProcessor, RawImage, env } from '@huggingface/transformers';
 
 // Configure transformers.js to always download models
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
 const MAX_IMAGE_DIMENSION = 1024;
+
+// briaai/RMBG-1.4 is a dedicated background-removal (subject matting)
+// model. Its repo lacks standard config files, so both configs are
+// supplied explicitly, per the model card.
+const MODEL_ID = 'briaai/RMBG-1.4';
+const MODEL_CONFIG = { model_type: 'custom' };
+const PROCESSOR_CONFIG = {
+  do_normalize: true,
+  do_pad: false,
+  do_rescale: true,
+  do_resize: true,
+  image_mean: [0.5, 0.5, 0.5],
+  feature_extractor_type: 'ImageFeatureExtractor',
+  image_std: [1, 1, 1],
+  resample: 2,
+  rescale_factor: 0.00392156862745098,
+  size: { width: 1024, height: 1024 },
+};
+
+type Segmenter = {
+  model: Awaited<ReturnType<typeof AutoModel.from_pretrained>>;
+  processor: Awaited<ReturnType<typeof AutoProcessor.from_pretrained>>;
+};
+
+let segmenterPromise: Promise<Segmenter> | null = null;
+
+async function loadSegmenter(
+  device: 'webgpu' | 'wasm',
+  onProgress?: (message: string) => void
+): Promise<Segmenter> {
+  onProgress?.(`Loading ${MODEL_ID} (${device})...`);
+  const model = await AutoModel.from_pretrained(MODEL_ID, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    config: MODEL_CONFIG as any,
+    device,
+  });
+  const processor = await AutoProcessor.from_pretrained(MODEL_ID, {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    config: PROCESSOR_CONFIG as any,
+  });
+  onProgress?.('Model loaded.');
+  return { model, processor };
+}
+
+function getSegmenter(onProgress?: (message: string) => void): Promise<Segmenter> {
+  if (!segmenterPromise) {
+    segmenterPromise = loadSegmenter('webgpu', onProgress).catch((webgpuError) => {
+      console.warn('WebGPU not available, falling back to WASM:', webgpuError);
+      onProgress?.('WebGPU unavailable, falling back to WASM...');
+      return loadSegmenter('wasm', onProgress).catch((wasmError) => {
+        segmenterPromise = null; // allow retrying later
+        throw new Error(
+          `Failed to initialize segmentation model. WebGPU error: ${webgpuError instanceof Error ? webgpuError.message : String(webgpuError)}. WASM error: ${wasmError instanceof Error ? wasmError.message : String(wasmError)}`
+        );
+      });
+    });
+  }
+  return segmenterPromise;
+}
 
 function resizeImageIfNeeded(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D, image: HTMLImageElement) {
   let width = image.naturalWidth;
@@ -31,111 +90,58 @@ function resizeImageIfNeeded(canvas: HTMLCanvasElement, ctx: CanvasRenderingCont
   return false;
 }
 
-async function createSegmenter(onProgress?: (message: string) => void) {
-  // Try WebGPU first, fall back to WASM
-  try {
-    onProgress?.('Attempting to initialize WebGPU pipeline...');
-    const segmenter = await pipeline('image-segmentation', 'Xenova/segformer-b0-finetuned-ade-512-512', {
-      device: 'webgpu',
-    });
-    onProgress?.('WebGPU pipeline initialized successfully.');
-    return segmenter;
-  } catch (webgpuError) {
-    console.warn('WebGPU not available, falling back to WASM:', webgpuError);
-    onProgress?.('WebGPU unavailable, falling back to WASM...');
-    try {
-      const segmenter = await pipeline('image-segmentation', 'Xenova/segformer-b0-finetuned-ade-512-512', {
-        device: 'wasm',
-      });
-      onProgress?.('WASM pipeline initialized successfully.');
-      return segmenter;
-    } catch (wasmError) {
-      throw new Error(
-        `Failed to initialize segmentation pipeline. WebGPU error: ${webgpuError instanceof Error ? webgpuError.message : String(webgpuError)}. WASM error: ${wasmError instanceof Error ? wasmError.message : String(wasmError)}`
-      );
-    }
-  }
-}
-
 export async function removeBackground(imageBlob: Blob, onProgress?: (message: string) => void): Promise<Blob> {
   try {
     onProgress?.('Starting background removal process...');
-    console.log('Starting background removal process...');
 
-    const segmenter = await createSegmenter(onProgress);
+    const segmenter = getSegmenter(onProgress);
 
-    // Load the image from the Blob
+    // Draw the source image on a working canvas (downscaled if huge)
     onProgress?.('Loading image...');
     const image = await loadImage(imageBlob);
-
-    // Convert HTMLImageElement to canvas
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-
     if (!ctx) throw new Error('Could not get canvas 2D context');
-
-    // Resize image if needed and draw it to canvas
-    const wasResized = resizeImageIfNeeded(canvas, ctx, image);
-    console.log(`Image ${wasResized ? 'was' : 'was not'} resized. Final dimensions: ${canvas.width}x${canvas.height}`);
+    resizeImageIfNeeded(canvas, ctx, image);
     onProgress?.(`Image prepared (${canvas.width}x${canvas.height}).`);
 
-    // Get image data as base64
-    const imageData = canvas.toDataURL('image/jpeg', 0.8);
-    console.log('Image converted to base64');
+    const inputBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Failed to encode input image'))),
+        'image/png'
+      );
+    });
+    const rawImage = await RawImage.fromBlob(inputBlob);
 
-    // Process the image with the segmentation model
+    // Run the matting model — output is a soft alpha mask of the subject
     onProgress?.('Processing with segmentation model...');
-    console.log('Processing with segmentation model...');
-    const result = await segmenter(imageData);
+    const { model, processor } = await segmenter;
+    const { pixel_values } = await processor(rawImage);
+    const { output } = await model({ input: pixel_values });
 
-    console.log('Segmentation result:', result);
-
-    if (!result || !Array.isArray(result) || result.length === 0) {
-      throw new Error('Segmentation returned no results. The model may not support this image format.');
+    if (!output) {
+      throw new Error('Model returned no output. The model output was unexpected.');
     }
 
-    if (!result[0].mask) {
-      throw new Error('Segmentation result is missing mask data. The model output was unexpected.');
-    }
+    const mask = await RawImage.fromTensor(
+      output[0].mul(255).to('uint8')
+    ).resize(canvas.width, canvas.height);
 
-    // Create a new canvas for the masked image
+    // Apply the subject mask to the alpha channel
     onProgress?.('Applying mask...');
-    const outputCanvas = document.createElement('canvas');
-    outputCanvas.width = canvas.width;
-    outputCanvas.height = canvas.height;
-    const outputCtx = outputCanvas.getContext('2d');
-
-    if (!outputCtx) throw new Error('Could not get output canvas 2D context');
-
-    // Draw original image
-    outputCtx.drawImage(canvas, 0, 0);
-
-    // Apply the mask
-    const outputImageData = outputCtx.getImageData(
-      0, 0,
-      outputCanvas.width,
-      outputCanvas.height
-    );
-    const data = outputImageData.data;
-
-    // Apply inverted mask to alpha channel
-    for (let i = 0; i < result[0].mask.data.length; i++) {
-      // Invert the mask value (1 - value) to keep the subject instead of the background
-      const alpha = Math.round((1 - result[0].mask.data[i]) * 255);
-      data[i * 4 + 3] = alpha;
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    for (let i = 0; i < mask.data.length; i++) {
+      data[i * 4 + 3] = mask.data[i];
     }
-
-    outputCtx.putImageData(outputImageData, 0, 0);
+    ctx.putImageData(imageData, 0, 0);
     onProgress?.('Mask applied successfully.');
-    console.log('Mask applied successfully');
 
-    // Convert canvas to blob
     return new Promise((resolve, reject) => {
-      outputCanvas.toBlob(
+      canvas.toBlob(
         (blob) => {
           if (blob) {
             onProgress?.('Background removal complete.');
-            console.log('Successfully created final blob');
             resolve(blob);
           } else {
             reject(new Error('Failed to convert output canvas to PNG blob'));
