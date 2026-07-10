@@ -1,4 +1,5 @@
-import type { Canvas as FabricCanvas, FabricObject, TBBox } from "fabric";
+import { FabricImage } from "fabric";
+import type { Canvas as FabricCanvas, TBBox } from "fabric";
 
 export const MIN_ZOOM = 0.1;
 export const MAX_ZOOM = 5;
@@ -10,10 +11,10 @@ export const clampZoom = (zoom: number): number =>
 /** The background photo: the non-selectable image at the back of the stack. */
 export function findBackgroundImage(
   canvas: FabricCanvas
-): FabricObject | undefined {
+): FabricImage | undefined {
   return canvas
     .getObjects()
-    .find((obj) => !obj.selectable && obj.type === "image");
+    .find((obj): obj is FabricImage => obj instanceof FabricImage && !obj.selectable);
 }
 
 function contentBounds(canvas: FabricCanvas): TBBox | null {

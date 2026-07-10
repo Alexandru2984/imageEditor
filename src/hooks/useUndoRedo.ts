@@ -1,20 +1,12 @@
 import { useCallback, useRef, useState, useEffect } from "react";
 import { Canvas as FabricCanvas, FabricImage } from "fabric";
+import {
+  takeSnapshot,
+  parseSnapshot,
+  type CanvasSnapshot,
+} from "@/utils/canvasSnapshot";
 
 const MAX_HISTORY = 50;
-
-// Properties not serialized by default toObject() but load-bearing for us:
-// selectable marks the background image, lock* back the layer lock feature.
-const EXTRA_PROPS = [
-  "selectable",
-  "evented",
-  "lockMovementX",
-  "lockMovementY",
-  "lockRotation",
-  "lockScalingX",
-  "lockScalingY",
-  "hasControls",
-];
 
 interface UseUndoRedoReturn {
   saveState: () => void;
@@ -25,9 +17,10 @@ interface UseUndoRedoReturn {
 }
 
 export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
-  const historyRef = useRef<string[]>([]);
+  const historyRef = useRef<CanvasSnapshot[]>([]);
   const currentIndexRef = useRef<number>(-1);
   const isRestoringRef = useRef(false);
+  const pendingSaveRef = useRef<number | null>(null);
 
   // Force re-render when history changes so canUndo/canRedo update
   const [, setHistoryVersion] = useState(0);
@@ -35,12 +28,10 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
   const saveState = useCallback(() => {
     if (!canvas || isRestoringRef.current) return;
 
-    const json = JSON.stringify(canvas.toObject(EXTRA_PROPS));
-
     // Trim any redo states ahead of current index
     historyRef.current = historyRef.current.slice(0, currentIndexRef.current + 1);
 
-    historyRef.current.push(json);
+    historyRef.current.push(takeSnapshot(canvas));
 
     // Enforce max history
     if (historyRef.current.length > MAX_HISTORY) {
@@ -57,15 +48,34 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
     setHistoryVersion((v) => v + 1);
   }, [canvas]);
 
+  const cancelPendingSave = useCallback(() => {
+    if (pendingSaveRef.current !== null) {
+      window.clearTimeout(pendingSaveRef.current);
+      pendingSaveRef.current = null;
+    }
+  }, []);
+
+  // Coalesce bursts of canvas events into one history entry per tick —
+  // a crop fires N object:removed plus an object:added, but is one user action
+  const scheduleSave = useCallback(() => {
+    if (!canvas || isRestoringRef.current || pendingSaveRef.current !== null) {
+      return;
+    }
+    pendingSaveRef.current = window.setTimeout(() => {
+      pendingSaveRef.current = null;
+      saveState();
+    }, 0);
+  }, [canvas, saveState]);
+
   const restoreState = useCallback(
-    (json: string) => {
+    (snapshot: CanvasSnapshot) => {
       if (!canvas) return;
 
       isRestoringRef.current = true;
 
-      canvas.loadFromJSON(JSON.parse(json)).then(() => {
-        // Preserve background image: find FabricImage objects that are non-selectable
-        // and send them to back
+      canvas.loadFromJSON(parseSnapshot(snapshot)).then(() => {
+        // Preserve background image: find FabricImage objects that are
+        // non-selectable and send them to back
         const objects = canvas.getObjects();
         for (const obj of objects) {
           if (obj instanceof FabricImage && !obj.selectable) {
@@ -74,6 +84,10 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
         }
         canvas.renderAll();
         isRestoringRef.current = false;
+        // Let panels resync UI state (e.g. filter sliders) after a restore
+        (canvas as unknown as { fire: (event: string) => void }).fire(
+          "history:restored"
+        );
         setHistoryVersion((v) => v + 1);
       });
     },
@@ -83,12 +97,13 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
   const undo = useCallback(() => {
     if (currentIndexRef.current <= 0 || isRestoringRef.current) return;
 
+    cancelPendingSave();
     currentIndexRef.current -= 1;
-    const state = historyRef.current[currentIndexRef.current];
-    if (state) {
-      restoreState(state);
+    const snapshot = historyRef.current[currentIndexRef.current];
+    if (snapshot) {
+      restoreState(snapshot);
     }
-  }, [restoreState]);
+  }, [cancelPendingSave, restoreState]);
 
   const redo = useCallback(() => {
     if (
@@ -97,12 +112,13 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
     )
       return;
 
+    cancelPendingSave();
     currentIndexRef.current += 1;
-    const state = historyRef.current[currentIndexRef.current];
-    if (state) {
-      restoreState(state);
+    const snapshot = historyRef.current[currentIndexRef.current];
+    if (snapshot) {
+      restoreState(snapshot);
     }
-  }, [restoreState]);
+  }, [cancelPendingSave, restoreState]);
 
   // Auto-save on canvas events
   useEffect(() => {
@@ -116,9 +132,7 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
       // The crop selection overlay is UI chrome, not document content
       const target = e?.target as Record<string, unknown> | undefined;
       if (target?.__isCropOverlay) return;
-      if (!isRestoringRef.current) {
-        saveState();
-      }
+      scheduleSave();
     };
 
     canvas.on("object:added", handleSave);
@@ -129,11 +143,12 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
     saveState();
 
     return () => {
+      cancelPendingSave();
       canvas.off("object:added", handleSave);
       canvas.off("object:modified", handleSave);
       canvas.off("object:removed", handleSave);
     };
-  }, [canvas, saveState]);
+  }, [canvas, saveState, scheduleSave, cancelPendingSave]);
 
   const canUndo = currentIndexRef.current > 0;
   const canRedo = currentIndexRef.current < historyRef.current.length - 1;

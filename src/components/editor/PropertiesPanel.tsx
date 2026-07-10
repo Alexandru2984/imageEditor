@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import * as fabric from "fabric";
+import { findBackgroundImage } from "@/utils/viewport";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
@@ -50,11 +51,7 @@ export const PropertiesPanel = ({
     (b: number, c: number, s: number) => {
       if (!fabricCanvas) return;
 
-      const objects = fabricCanvas.getObjects();
-      const bgImage = objects.find(
-        (obj: any) => !obj.selectable && obj.type === "image"
-      );
-
+      const bgImage = findBackgroundImage(fabricCanvas);
       if (!bgImage) return;
 
       bgImage.filters = [
@@ -67,6 +64,24 @@ export const PropertiesPanel = ({
     },
     [fabricCanvas]
   );
+
+  // Sliders apply live while dragging; the *Commit handlers below fire
+  // object:modified once at drag end so the change lands in undo history
+  const commitObjectChange = useCallback(() => {
+    if (!fabricCanvas) return;
+    const active = fabricCanvas.getActiveObject();
+    if (active) {
+      fabricCanvas.fire("object:modified", { target: active });
+    }
+  }, [fabricCanvas]);
+
+  const commitFilterChange = useCallback(() => {
+    if (!fabricCanvas) return;
+    const bgImage = findBackgroundImage(fabricCanvas);
+    if (bgImage) {
+      fabricCanvas.fire("object:modified", { target: bgImage });
+    }
+  }, [fabricCanvas]);
 
   const handleBrightnessChange = (value: number[]) => {
     const v = value[0];
@@ -85,6 +100,37 @@ export const PropertiesPanel = ({
     setSaturation(v);
     applyFilters(brightness, contrast, v);
   };
+
+  // After an undo/redo the canvas no longer matches the slider positions —
+  // read the restored background's filters back into local state
+  const syncFiltersFromCanvas = useCallback(() => {
+    if (!fabricCanvas) return;
+    const bgImage = findBackgroundImage(fabricCanvas);
+    const filters = (bgImage?.filters ?? []) as Array<{
+      brightness?: number;
+      contrast?: number;
+      saturation?: number;
+    }>;
+    let b = 0;
+    let c = 0;
+    let s = 0;
+    for (const f of filters) {
+      if (typeof f.brightness === "number") b = Math.round(f.brightness * 100);
+      if (typeof f.contrast === "number") c = Math.round(f.contrast * 100);
+      if (typeof f.saturation === "number") s = Math.round(f.saturation * 100);
+    }
+    setBrightness(b);
+    setContrast(c);
+    setSaturation(s);
+  }, [fabricCanvas]);
+
+  useEffect(() => {
+    if (!fabricCanvas) return;
+    fabricCanvas.on("history:restored", syncFiltersFromCanvas);
+    return () => {
+      fabricCanvas.off("history:restored", syncFiltersFromCanvas);
+    };
+  }, [fabricCanvas, syncFiltersFromCanvas]);
 
   // Read properties from selected object
   const readSelectedObject = useCallback(() => {
@@ -234,7 +280,10 @@ export const PropertiesPanel = ({
             {COLOR_SWATCHES.map((color) => (
               <button
                 key={color}
-                onClick={() => handleColorChange(color)}
+                onClick={() => {
+                  handleColorChange(color);
+                  commitObjectChange();
+                }}
                 className={`w-full aspect-square rounded-md transition-all border ${
                   activeColor === color
                     ? "ring-2 ring-primary ring-offset-1 ring-offset-background scale-105"
@@ -248,6 +297,7 @@ export const PropertiesPanel = ({
             type="color"
             value={activeColor}
             onChange={(e) => handleColorChange(e.target.value)}
+            onBlur={commitObjectChange}
             className="w-full h-8 rounded-md mt-2 cursor-pointer bg-transparent border border-border"
           />
         </div>
@@ -297,6 +347,7 @@ export const PropertiesPanel = ({
                 <Slider
                   value={[objectOpacity]}
                   onValueChange={handleObjectOpacityChange}
+                  onValueCommit={commitObjectChange}
                   min={0}
                   max={100}
                   step={1}
@@ -314,6 +365,7 @@ export const PropertiesPanel = ({
                     type="color"
                     value={selectedProps.fill || "#000000"}
                     onChange={(e) => handleColorChange(e.target.value)}
+                    onBlur={commitObjectChange}
                     className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border"
                   />
                   <span className="text-xs text-muted-foreground font-mono">
@@ -336,6 +388,7 @@ export const PropertiesPanel = ({
                         : selectedProps.stroke
                     }
                     onChange={(e) => handleObjectStrokeChange(e.target.value)}
+                    onBlur={commitObjectChange}
                     className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border"
                   />
                   <span className="text-xs text-muted-foreground font-mono">
@@ -357,6 +410,7 @@ export const PropertiesPanel = ({
                 <Slider
                   value={[selectedProps.strokeWidth]}
                   onValueChange={handleObjectStrokeWidthChange}
+                  onValueCommit={commitObjectChange}
                   min={0}
                   max={20}
                   step={1}
@@ -385,6 +439,7 @@ export const PropertiesPanel = ({
                     <Slider
                       value={[selectedProps.fontSize || 24]}
                       onValueChange={handleFontSizeChange}
+                      onValueCommit={commitObjectChange}
                       min={8}
                       max={200}
                       step={1}
@@ -399,7 +454,10 @@ export const PropertiesPanel = ({
                     </Label>
                     <select
                       value={selectedProps.fontFamily || "Arial"}
-                      onChange={(e) => handleFontFamilyChange(e.target.value)}
+                      onChange={(e) => {
+                        handleFontFamilyChange(e.target.value);
+                        commitObjectChange();
+                      }}
                       className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs"
                     >
                       {fontFamilies.map((font) => (
@@ -437,6 +495,7 @@ export const PropertiesPanel = ({
               <Slider
                 value={[brightness]}
                 onValueChange={handleBrightnessChange}
+                onValueCommit={commitFilterChange}
                 min={-100}
                 max={100}
                 step={1}
@@ -457,6 +516,7 @@ export const PropertiesPanel = ({
               <Slider
                 value={[contrast]}
                 onValueChange={handleContrastChange}
+                onValueCommit={commitFilterChange}
                 min={-100}
                 max={100}
                 step={1}
@@ -477,6 +537,7 @@ export const PropertiesPanel = ({
               <Slider
                 value={[saturation]}
                 onValueChange={handleSaturationChange}
+                onValueCommit={commitFilterChange}
                 min={-100}
                 max={100}
                 step={1}

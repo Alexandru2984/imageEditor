@@ -187,6 +187,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     e.stopPropagation();
     if (!fabricCanvas) return;
     layer.fabricObject.set("visible", !layer.visible);
+    fabricCanvas.fire("object:modified", { target: layer.fabricObject });
     fabricCanvas.renderAll();
     refreshLayers();
   };
@@ -205,6 +206,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       hasControls: isLocked,
       selectable: isLocked,
     });
+    fabricCanvas.fire("object:modified", { target: layer.fabricObject });
     fabricCanvas.renderAll();
     refreshLayers();
   };
@@ -226,6 +228,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     if (index < objects.length - 1) {
       // Move forward in z-order (visually up)
       fabricCanvas.moveObjectTo(layer.fabricObject, index + 1);
+      fabricCanvas.fire("object:modified", { target: layer.fabricObject });
       fabricCanvas.renderAll();
       refreshLayers();
     }
@@ -243,6 +246,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     );
     if (index > bgIndex + 1) {
       fabricCanvas.moveObjectTo(layer.fabricObject, index - 1);
+      fabricCanvas.fire("object:modified", { target: layer.fabricObject });
       fabricCanvas.renderAll();
       refreshLayers();
     }

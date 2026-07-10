@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useCallback } from "react";
 import {
   Download,
   Image as ImageIcon,
@@ -22,7 +22,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
-import { removeBackground } from "@/utils/backgroundRemoval";
+import { blobToDataURL, removeBackground } from "@/utils/backgroundRemoval";
 import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
 import { FabricImage, Point } from "fabric";
 
@@ -56,8 +56,6 @@ export const TopBar = ({
   onToggleLayers,
 }: TopBarProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
-  // Track blob URLs for cleanup
-  const bgResultUrlRef = useRef<string | null>(null);
 
   const handleRemoveBackground = useCallback(async () => {
     if (!fabricCanvas || !uploadedImage) {
@@ -71,8 +69,7 @@ export const TopBar = ({
     );
 
     try {
-      const objects = fabricCanvas.getObjects();
-      const bgImage = objects.find((obj: any) => !obj.selectable);
+      const bgImage = findBackgroundImage(fabricCanvas);
 
       if (!bgImage) {
         throw new Error("Could not find background image");
@@ -94,22 +91,22 @@ export const TopBar = ({
 
       const resultBlob = await removeBackground(blob);
 
-      // Revoke previous blob URL to prevent memory leak
-      if (bgResultUrlRef.current) {
-        URL.revokeObjectURL(bgResultUrlRef.current);
-      }
+      // A data URL (not a revocable blob URL) so undo/redo snapshots that
+      // reference this src keep working indefinitely
+      const resultUrl = await blobToDataURL(resultBlob);
 
-      const resultUrl = URL.createObjectURL(resultBlob);
-      bgResultUrlRef.current = resultUrl;
-
+      // Place the result exactly over the old background so annotations
+      // keep their position (the model may return a downscaled image)
+      const oldRect = bgImage.getBoundingRect();
       const newImg = await FabricImage.fromURL(resultUrl);
-      newImg.scaleToWidth(fabricCanvas.width * 0.8);
-      newImg.scaleToHeight(fabricCanvas.height * 0.8);
+      const scale = Math.min(
+        oldRect.width / newImg.width!,
+        oldRect.height / newImg.height!
+      );
+      newImg.scale(scale);
       newImg.set({
-        left:
-          fabricCanvas.width / 2 - (newImg.width! * newImg.scaleX!) / 2,
-        top:
-          fabricCanvas.height / 2 - (newImg.height! * newImg.scaleY!) / 2,
+        left: oldRect.left + oldRect.width / 2 - (newImg.width! * scale) / 2,
+        top: oldRect.top + oldRect.height / 2 - (newImg.height! * scale) / 2,
       });
       newImg.selectable = false;
 
@@ -139,9 +136,7 @@ export const TopBar = ({
     // Crop to the background image bounds and upscale back to its
     // native resolution, so the export isn't a screen-sized screenshot
     // with dark margins around it.
-    const bgImage = fabricCanvas
-      .getObjects()
-      .find((obj: any) => !obj.selectable && obj.type === "image");
+    const bgImage = findBackgroundImage(fabricCanvas);
 
     let crop: Record<string, number> = {};
     if (bgImage) {
