@@ -23,8 +23,8 @@ import {
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { removeBackground } from "@/utils/backgroundRemoval";
-import { clampZoom, fitToScreen } from "@/utils/viewport";
-import { FabricImage } from "fabric";
+import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
+import { FabricImage, Point } from "fabric";
 
 interface TopBarProps {
   fabricCanvas: any;
@@ -177,18 +177,36 @@ export const TopBar = ({
 
     const activeObject = fabricCanvas.getActiveObject();
     if (activeObject) {
-      const currentAngle = activeObject.angle || 0;
-      activeObject.rotate(currentAngle + 90);
+      activeObject.rotate(((activeObject.angle || 0) + 90) % 360);
+      activeObject.setCoords();
+      fabricCanvas.fire("object:modified", { target: activeObject });
       fabricCanvas.renderAll();
       toast.success("Object rotated!");
     } else {
-      // Rotate all objects including background
+      // Rotate the whole canvas: every object turns 90° and also orbits a
+      // shared pivot, so annotations keep their position on the photo
       const objects = fabricCanvas.getObjects();
+      if (objects.length === 0) return;
+
+      const bgImage = findBackgroundImage(fabricCanvas);
+      const pivot = bgImage
+        ? bgImage.getCenterPoint()
+        : new Point(fabricCanvas.width / 2, fabricCanvas.height / 2);
+
       objects.forEach((obj: any) => {
-        const currentAngle = obj.angle || 0;
-        obj.rotate(currentAngle + 90);
+        const center = obj.getCenterPoint();
+        // 90° clockwise around the pivot: (dx, dy) -> (-dy, dx)
+        const newCenter = new Point(
+          pivot.x - (center.y - pivot.y),
+          pivot.y + (center.x - pivot.x)
+        );
+        obj.rotate(((obj.angle || 0) + 90) % 360);
+        obj.setPositionByOrigin(newCenter, "center", "center");
+        obj.setCoords();
       });
-      fabricCanvas.renderAll();
+
+      fabricCanvas.fire("object:modified");
+      onZoomChange(fitToScreen(fabricCanvas));
       toast.success("Canvas rotated!");
     }
   };

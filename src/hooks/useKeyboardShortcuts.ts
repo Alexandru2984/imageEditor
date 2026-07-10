@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Canvas as FabricCanvas, ActiveSelection } from "fabric";
+import { clampZoom, fitToScreen } from "@/utils/viewport";
 import type { Tool } from "@/types/editor";
 
 interface UseKeyboardShortcutsOptions {
@@ -48,6 +49,12 @@ export function useKeyboardShortcuts({
         const active = canvas.getActiveObject();
         if (active) {
           e.preventDefault();
+          // The crop overlay is UI chrome — cancel the crop instead of
+          // deleting the rect out from under the crop tool
+          if ((active as unknown as Record<string, unknown>).__isCropOverlay) {
+            onToolChange("select");
+            return;
+          }
           if (active instanceof ActiveSelection) {
             active.getObjects().forEach((obj) => canvas.remove(obj));
             canvas.discardActiveObject();
@@ -99,36 +106,57 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      // Ctrl+0 — fit to screen
+      if (isCtrlOrMeta && e.key === "0") {
+        if (!canvas) return;
+        e.preventDefault();
+        onZoomChange(fitToScreen(canvas));
+        return;
+      }
+
       // + / = — zoom in
       if (e.key === "+" || e.key === "=") {
         e.preventDefault();
-        const newZoom = Math.min(zoom + 0.1, 5);
-        onZoomChange(parseFloat(newZoom.toFixed(2)));
+        onZoomChange(clampZoom(zoom + 0.1));
         return;
       }
 
       // - — zoom out
       if (e.key === "-") {
         e.preventDefault();
-        const newZoom = Math.max(zoom - 0.1, 0.1);
-        onZoomChange(parseFloat(newZoom.toFixed(2)));
+        onZoomChange(clampZoom(zoom - 0.1));
         return;
       }
 
       // Tool shortcuts (only without modifiers)
       if (!isCtrlOrMeta && !e.altKey) {
         switch (e.key.toLowerCase()) {
+          case "v":
+            onToolChange("select");
+            break;
           case "b":
             onToolChange("draw");
             break;
-          case "v":
-            onToolChange("select");
+          case "e":
+            onToolChange("eraser");
+            break;
+          case "r":
+            onToolChange("rectangle");
+            break;
+          case "c":
+            onToolChange("circle");
+            break;
+          case "l":
+            onToolChange("line");
+            break;
+          case "a":
+            onToolChange("arrow");
             break;
           case "t":
             onToolChange("text");
             break;
-          case "e":
-            onToolChange("eraser");
+          case "k":
+            onToolChange("crop");
             break;
         }
       }
