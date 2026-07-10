@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { removeBackground } from "@/utils/backgroundRemoval";
+import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { FabricImage } from "fabric";
 
 interface TopBarProps {
@@ -194,17 +195,16 @@ export const TopBar = ({
 
   // Zoom is a fraction (1 = 100%), same units as Fabric's getZoom()
   const handleZoomIn = () => {
-    const newZoom = Math.min(zoom + 0.1, 5);
-    onZoomChange(parseFloat(newZoom.toFixed(2)));
+    onZoomChange(clampZoom(zoom + 0.1));
   };
 
   const handleZoomOut = () => {
-    const newZoom = Math.max(zoom - 0.1, 0.1);
-    onZoomChange(parseFloat(newZoom.toFixed(2)));
+    onZoomChange(clampZoom(zoom - 0.1));
   };
 
   const handleFitToScreen = () => {
-    onZoomChange(1);
+    if (!fabricCanvas) return;
+    onZoomChange(fitToScreen(fabricCanvas));
   };
 
   const hasImage = !!uploadedImage;

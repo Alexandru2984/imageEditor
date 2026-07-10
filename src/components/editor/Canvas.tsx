@@ -7,6 +7,7 @@ import {
   IText,
   FabricImage,
   Line,
+  Point,
   Triangle,
   Group,
 } from "fabric";
@@ -14,6 +15,7 @@ import type { TMat2D } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { clampZoom } from "@/utils/viewport";
 import type { Tool } from "@/types/editor";
 
 interface CanvasProps {
@@ -42,6 +44,7 @@ export const Canvas = ({
   const fabricCanvasRef = useRef<FabricCanvas | null>(null);
   const prevToolRef = useRef<Tool>(activeTool);
   const cropRectRef = useRef<Rect | null>(null);
+  const spaceDownRef = useRef(false);
 
   // ---------- Responsive canvas sizing ----------
   const fitCanvasToContainer = useCallback(() => {
@@ -106,25 +109,152 @@ export const Canvas = ({
       });
     }
 
-    // Zoom with Ctrl+scroll wheel
+    // Ctrl+scroll zooms (anchored under the cursor — zoomToPoint expects
+    // viewport coordinates); plain scroll pans the view.
     const handleWheel = (opt: { e: WheelEvent }) => {
       const e = opt.e;
-      if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       e.stopPropagation();
 
-      const delta = e.deltaY;
-      let newZoom = canvas.getZoom();
-      newZoom *= 0.999 ** delta;
-      newZoom = Math.min(Math.max(newZoom, 0.1), 5);
-      newZoom = parseFloat(newZoom.toFixed(2));
-
-      const point = canvas.getScenePoint(e);
-      canvas.zoomToPoint(point, newZoom);
-      onZoomChange(newZoom);
+      if (e.ctrlKey || e.metaKey) {
+        const newZoom = clampZoom(canvas.getZoom() * 0.999 ** e.deltaY);
+        canvas.zoomToPoint(canvas.getViewportPoint(e), newZoom);
+        onZoomChange(newZoom);
+      } else {
+        canvas.relativePan(new Point(-e.deltaX, -e.deltaY));
+      }
     };
 
     canvas.on("mouse:wheel", handleWheel as unknown as (...args: unknown[]) => void);
+
+    // ---------- Pan (space+drag, middle mouse) & pinch zoom ----------
+    // The mousedown/touchstart listeners run in the capture phase on the
+    // container, so a pan/pinch gesture never reaches Fabric and can't
+    // start a brush stroke or a selection.
+    let isPanning = false;
+    let lastX = 0;
+    let lastY = 0;
+    let pinch: {
+      startDist: number;
+      startZoom: number;
+      lastMidX: number;
+      lastMidY: number;
+    } | null = null;
+
+    const isTypingTarget = (target: EventTarget | null) => {
+      const el = target as HTMLElement | null;
+      return (
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      );
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || spaceDownRef.current) return;
+      if (isTypingTarget(e.target)) return;
+      const active = canvas.getActiveObject();
+      if (active && "isEditing" in active && (active as { isEditing?: boolean }).isEditing) {
+        return;
+      }
+      e.preventDefault();
+      spaceDownRef.current = true;
+      canvas.defaultCursor = "grab";
+      canvas.setCursor("grab");
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== "Space") return;
+      spaceDownRef.current = false;
+      canvas.defaultCursor = "default";
+      if (!isPanning) canvas.setCursor("default");
+    };
+
+    const handleContainerMouseDown = (e: MouseEvent) => {
+      if (!spaceDownRef.current && e.button !== 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      isPanning = true;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      canvas.setCursor("grabbing");
+    };
+
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!isPanning) return;
+      canvas.relativePan(new Point(e.clientX - lastX, e.clientY - lastY));
+      lastX = e.clientX;
+      lastY = e.clientY;
+    };
+
+    const handleWindowMouseUp = () => {
+      if (!isPanning) return;
+      isPanning = false;
+      canvas.setCursor(spaceDownRef.current ? "grab" : "default");
+    };
+
+    const touchDistance = (t: TouchList) =>
+      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const touchMidpoint = (t: TouchList) => ({
+      x: (t[0].clientX + t[1].clientX) / 2,
+      y: (t[0].clientY + t[1].clientY) / 2,
+    });
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 2) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const mid = touchMidpoint(e.touches);
+      pinch = {
+        startDist: touchDistance(e.touches),
+        startZoom: canvas.getZoom(),
+        lastMidX: mid.x,
+        lastMidY: mid.y,
+      };
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = container.getBoundingClientRect();
+      const mid = touchMidpoint(e.touches);
+      const newZoom = clampZoom(
+        pinch.startZoom * (touchDistance(e.touches) / pinch.startDist)
+      );
+      canvas.zoomToPoint(
+        new Point(mid.x - rect.left, mid.y - rect.top),
+        newZoom
+      );
+      canvas.relativePan(
+        new Point(mid.x - pinch.lastMidX, mid.y - pinch.lastMidY)
+      );
+      pinch.lastMidX = mid.x;
+      pinch.lastMidY = mid.y;
+      onZoomChange(newZoom);
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (pinch && e.touches.length < 2) pinch = null;
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("mousemove", handleWindowMouseMove);
+    window.addEventListener("mouseup", handleWindowMouseUp);
+    container.addEventListener("mousedown", handleContainerMouseDown, {
+      capture: true,
+    });
+    container.addEventListener("touchstart", handleTouchStart, {
+      capture: true,
+      passive: false,
+    });
+    container.addEventListener("touchmove", handleTouchMove, {
+      capture: true,
+      passive: false,
+    });
+    container.addEventListener("touchend", handleTouchEnd, { capture: true });
 
     // ResizeObserver for responsive resizing
     const resizeObserver = new ResizeObserver(() => {
@@ -133,6 +263,22 @@ export const Canvas = ({
     resizeObserver.observe(container);
 
     return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("mousemove", handleWindowMouseMove);
+      window.removeEventListener("mouseup", handleWindowMouseUp);
+      container.removeEventListener("mousedown", handleContainerMouseDown, {
+        capture: true,
+      });
+      container.removeEventListener("touchstart", handleTouchStart, {
+        capture: true,
+      });
+      container.removeEventListener("touchmove", handleTouchMove, {
+        capture: true,
+      });
+      container.removeEventListener("touchend", handleTouchEnd, {
+        capture: true,
+      });
       resizeObserver.disconnect();
       canvas.dispose();
     };
