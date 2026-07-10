@@ -21,6 +21,17 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { blobToDataURL, removeBackground } from "@/utils/backgroundRemoval";
 import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
@@ -440,22 +451,40 @@ export const TopBar = ({
 
           <Separator orientation="vertical" className="h-6 mx-1" />
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={isMobile ? "icon" : "sm"}
-                onClick={onNewProject}
-                className={`${isMobile ? "h-9 w-9" : "h-9"} text-muted-foreground hover:text-destructive`}
-              >
-                <FilePlus2 className="h-4 w-4" />
-                {!isMobile && <span className="ml-1">New</span>}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>New Project</p>
-            </TooltipContent>
-          </Tooltip>
+          <AlertDialog>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size={isMobile ? "icon" : "sm"}
+                    className={`${isMobile ? "h-9 w-9" : "h-9"} text-muted-foreground hover:text-destructive`}
+                  >
+                    <FilePlus2 className="h-4 w-4" />
+                    {!isMobile && <span className="ml-1">New</span>}
+                  </Button>
+                </AlertDialogTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>New Project</p>
+              </TooltipContent>
+            </Tooltip>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Start a new project?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  The current image and all edits will be discarded. This
+                  cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={onNewProject}>
+                  Start new
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       )}
 

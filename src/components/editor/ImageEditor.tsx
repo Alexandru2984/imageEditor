@@ -35,6 +35,17 @@ export const ImageEditor = () => {
     }
   }, [isMobile]);
 
+  // Warn before closing the tab while a project is open
+  useEffect(() => {
+    if (!uploadedImage) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [uploadedImage]);
+
   const handleToolChange = useCallback((tool: Tool) => {
     setActiveTool(tool);
   }, []);
