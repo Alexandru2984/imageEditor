@@ -16,6 +16,7 @@ import {
   MoveRight,
   Layers,
 } from "lucide-react";
+import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -25,17 +26,20 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
+// Fabric objects the editor tags with a couple of extra fields
+type EditorObject = FabricObject & { __uid?: number; name?: string };
+
 interface LayerItem {
   id: number;
   name: string;
   type: string;
   visible: boolean;
   locked: boolean;
-  fabricObject: any;
+  fabricObject: EditorObject;
 }
 
 interface LayersPanelProps {
-  fabricCanvas: any;
+  fabricCanvas: FabricCanvas | null;
 }
 
 const getTypeIcon = (type: string) => {
@@ -64,7 +68,7 @@ const getTypeIcon = (type: string) => {
   }
 };
 
-const getLayerName = (obj: any, index: number): string => {
+const getLayerName = (obj: EditorObject, index: number): string => {
   if (obj.name) return obj.name;
 
   const type = obj.type || "object";
@@ -110,7 +114,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     const layerItems: LayerItem[] = [];
     let counter = 1;
 
-    for (const obj of objects) {
+    for (const obj of objects as EditorObject[]) {
       // Skip background images (non-selectable)
       if (!obj.selectable && obj.type === "image") continue;
 
@@ -141,7 +145,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       "selection:created",
       "selection:updated",
       "selection:cleared",
-    ];
+    ] as const;
 
     const handler = () => refreshLayers();
     events.forEach((event) => fabricCanvas.on(event, handler));
@@ -155,7 +159,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   useEffect(() => {
     if (!fabricCanvas) return;
 
-    const onSelectionCreated = (e: any) => {
+    const onSelectionCreated = (e: { selected?: FabricObject[] }) => {
       const obj = e.selected?.[0];
       if (obj) {
         const layer = layers.find((l) => l.fabricObject === obj);
@@ -242,7 +246,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     const index = objects.indexOf(layer.fabricObject);
     // Don't move below the background image
     const bgIndex = objects.findIndex(
-      (obj: any) => !obj.selectable && obj.type === "image"
+      (obj) => !obj.selectable && obj.type === "image"
     );
     if (index > bgIndex + 1) {
       fabricCanvas.moveObjectTo(layer.fabricObject, index - 1);

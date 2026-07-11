@@ -36,9 +36,10 @@ import { toast } from "sonner";
 import { blobToDataURL, removeBackground } from "@/utils/backgroundRemoval";
 import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
 import { FabricImage, Point } from "fabric";
+import type { Canvas as FabricCanvas, FabricObject, TMat2D } from "fabric";
 
 interface TopBarProps {
-  fabricCanvas: any;
+  fabricCanvas: FabricCanvas | null;
   uploadedImage: string | null;
   onNewProject: () => void;
   zoom: number;
@@ -91,9 +92,17 @@ export const TopBar = ({
       const tempCtx = tempCanvas.getContext("2d");
       if (!tempCtx) throw new Error("Could not get canvas context");
 
-      const imgElement = (bgImage as any).getElement();
-      tempCanvas.width = imgElement.naturalWidth;
-      tempCanvas.height = imgElement.naturalHeight;
+      const imgElement = bgImage.getElement() as
+        | HTMLImageElement
+        | HTMLCanvasElement;
+      const naturalWidth =
+        "naturalWidth" in imgElement ? imgElement.naturalWidth : imgElement.width;
+      const naturalHeight =
+        "naturalHeight" in imgElement
+          ? imgElement.naturalHeight
+          : imgElement.height;
+      tempCanvas.width = naturalWidth;
+      tempCanvas.height = naturalHeight;
       tempCtx.drawImage(imgElement, 0, 0);
 
       const blob = await new Promise<Blob>((resolve) => {
@@ -141,7 +150,7 @@ export const TopBar = ({
     if (!fabricCanvas) return;
 
     // Export in scene coordinates regardless of current zoom/pan
-    const prevVpt = [...fabricCanvas.viewportTransform];
+    const prevVpt = [...fabricCanvas.viewportTransform] as TMat2D;
     fabricCanvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
 
     // Crop to the background image bounds and upscale back to its
@@ -199,7 +208,7 @@ export const TopBar = ({
         ? bgImage.getCenterPoint()
         : new Point(fabricCanvas.width / 2, fabricCanvas.height / 2);
 
-      objects.forEach((obj: any) => {
+      objects.forEach((obj: FabricObject) => {
         const center = obj.getCenterPoint();
         // 90° clockwise around the pivot: (dx, dy) -> (-dy, dx)
         const newCenter = new Point(

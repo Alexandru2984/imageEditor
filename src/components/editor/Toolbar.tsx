@@ -14,6 +14,7 @@ import {
   ImagePlus,
 } from "lucide-react";
 import { FabricImage } from "fabric";
+import type { Canvas as FabricCanvas } from "fabric";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -27,7 +28,7 @@ import { toast } from "sonner";
 interface ToolbarProps {
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
-  fabricCanvas: any;
+  fabricCanvas: FabricCanvas | null;
   isMobile: boolean;
 }
 
@@ -112,7 +113,7 @@ export const Toolbar = ({
     if (!fabricCanvas) return;
     const objects = fabricCanvas.getObjects();
     // Keep the background image (first non-selectable object)
-    const bgImage = objects.find((obj: any) => !obj.selectable);
+    const bgImage = objects.find((obj) => !obj.selectable);
     fabricCanvas.clear();
     if (bgImage) {
       fabricCanvas.add(bgImage);

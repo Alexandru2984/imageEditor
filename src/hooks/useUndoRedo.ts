@@ -5,6 +5,7 @@ import {
   parseSnapshot,
   type CanvasSnapshot,
 } from "@/utils/canvasSnapshot";
+import { fireCanvasEvent, HISTORY_RESTORED } from "@/utils/canvasEvents";
 
 const MAX_HISTORY = 50;
 
@@ -97,9 +98,7 @@ export function useUndoRedo(
         canvas.renderAll();
         isRestoringRef.current = false;
         // Let panels resync UI state (e.g. filter sliders) after a restore
-        (canvas as unknown as { fire: (event: string) => void }).fire(
-          "history:restored"
-        );
+        fireCanvasEvent(canvas, HISTORY_RESTORED);
         // The restored state is now the current document — autosave it too
         onSnapshotRef.current?.(snapshot);
         setHistoryVersion((v) => v + 1);

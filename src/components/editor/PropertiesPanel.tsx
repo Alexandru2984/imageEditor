@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import * as fabric from "fabric";
+import type { Canvas as FabricCanvas } from "fabric";
 import { findBackgroundImage } from "@/utils/viewport";
+import {
+  onCanvasEvent,
+  offCanvasEvent,
+  HISTORY_RESTORED,
+} from "@/utils/canvasEvents";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
@@ -12,7 +18,7 @@ interface PropertiesPanelProps {
   onColorChange: (color: string) => void;
   brushWidth: number;
   onBrushWidthChange: (width: number) => void;
-  fabricCanvas: any;
+  fabricCanvas: FabricCanvas | null;
   isMobile: boolean;
 }
 
@@ -30,6 +36,12 @@ interface SelectedObjectProps {
   fontFamily?: string;
   type?: string;
 }
+
+// Text-only props are absent on the base FabricObject type
+type TextlikeObject = fabric.FabricObject & {
+  fontSize?: number;
+  fontFamily?: string;
+};
 
 export const PropertiesPanel = ({
   activeColor,
@@ -126,9 +138,9 @@ export const PropertiesPanel = ({
 
   useEffect(() => {
     if (!fabricCanvas) return;
-    fabricCanvas.on("history:restored", syncFiltersFromCanvas);
+    onCanvasEvent(fabricCanvas, HISTORY_RESTORED, syncFiltersFromCanvas);
     return () => {
-      fabricCanvas.off("history:restored", syncFiltersFromCanvas);
+      offCanvasEvent(fabricCanvas, HISTORY_RESTORED, syncFiltersFromCanvas);
     };
   }, [fabricCanvas, syncFiltersFromCanvas]);
 
@@ -139,7 +151,7 @@ export const PropertiesPanel = ({
       return;
     }
 
-    const active = fabricCanvas.getActiveObject();
+    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
     if (!active) {
       setSelectedProps(null);
       return;
@@ -226,7 +238,7 @@ export const PropertiesPanel = ({
 
   const handleFontSizeChange = (value: number[]) => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
     if (active && active.fontSize !== undefined) {
       active.set("fontSize", value[0]);
       fabricCanvas.renderAll();
@@ -236,7 +248,7 @@ export const PropertiesPanel = ({
 
   const handleFontFamilyChange = (family: string) => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
     if (active && active.fontFamily !== undefined) {
       active.set("fontFamily", family);
       fabricCanvas.renderAll();

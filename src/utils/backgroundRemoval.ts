@@ -1,8 +1,21 @@
-import { AutoModel, AutoProcessor, RawImage, env } from '@huggingface/transformers';
+// transformers.js (with its WASM/ONNX runtime) is multiple megabytes. It is
+// imported dynamically so it stays out of the initial bundle and only loads
+// the first time the user removes a background.
+type TransformersModule = typeof import('@huggingface/transformers');
 
-// Configure transformers.js to always download models
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+let transformersPromise: Promise<TransformersModule> | null = null;
+
+function loadTransformers(): Promise<TransformersModule> {
+  if (!transformersPromise) {
+    transformersPromise = import('@huggingface/transformers').then((mod) => {
+      // Always download models; cache them in the browser
+      mod.env.allowLocalModels = false;
+      mod.env.useBrowserCache = true;
+      return mod;
+    });
+  }
+  return transformersPromise;
+}
 
 const MAX_IMAGE_DIMENSION = 1024;
 
@@ -25,8 +38,10 @@ const PROCESSOR_CONFIG = {
 };
 
 type Segmenter = {
-  model: Awaited<ReturnType<typeof AutoModel.from_pretrained>>;
-  processor: Awaited<ReturnType<typeof AutoProcessor.from_pretrained>>;
+  model: Awaited<ReturnType<TransformersModule['AutoModel']['from_pretrained']>>;
+  processor: Awaited<
+    ReturnType<TransformersModule['AutoProcessor']['from_pretrained']>
+  >;
 };
 
 let segmenterPromise: Promise<Segmenter> | null = null;
@@ -35,6 +50,7 @@ async function loadSegmenter(
   device: 'webgpu' | 'wasm',
   onProgress?: (message: string) => void
 ): Promise<Segmenter> {
+  const { AutoModel, AutoProcessor } = await loadTransformers();
   onProgress?.(`Loading ${MODEL_ID} (${device})...`);
   const model = await AutoModel.from_pretrained(MODEL_ID, {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -95,6 +111,7 @@ export async function removeBackground(imageBlob: Blob, onProgress?: (message: s
     onProgress?.('Starting background removal process...');
 
     const segmenter = getSegmenter(onProgress);
+    const { RawImage } = await loadTransformers();
 
     // Draw the source image on a working canvas (downscaled if huge)
     onProgress?.('Loading image...');

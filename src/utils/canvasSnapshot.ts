@@ -27,36 +27,40 @@ const SRC_PLACEHOLDER = "__snapshot_src_";
 
 type PlainObject = Record<string, unknown>;
 
-function walkObjects(objects: unknown, visit: (obj: PlainObject) => void) {
+export function takeSnapshot(canvas: FabricCanvas): CanvasSnapshot {
+  const data = canvas.toObject(SNAPSHOT_EXTRA_PROPS);
+  const srcs: string[] = [];
+
+  // A JSON.stringify replacer swaps each image `src` for an index placeholder
+  // without mutating the source object. The placeholder carries its own index,
+  // so parseSnapshot can re-inline regardless of traversal order.
+  const json = JSON.stringify(data, (key, value) => {
+    if (key === "src" && typeof value === "string") {
+      srcs.push(value);
+      return `${SRC_PLACEHOLDER}${srcs.length - 1}`;
+    }
+    return value;
+  });
+
+  return { json, srcs };
+}
+
+function reinlineSrcs(objects: unknown, srcs: string[]) {
   if (!Array.isArray(objects)) return;
   for (const entry of objects) {
     if (entry && typeof entry === "object") {
       const obj = entry as PlainObject;
-      visit(obj);
-      walkObjects(obj.objects, visit);
+      if (typeof obj.src === "string" && obj.src.startsWith(SRC_PLACEHOLDER)) {
+        obj.src = srcs[Number(obj.src.slice(SRC_PLACEHOLDER.length))];
+      }
+      reinlineSrcs(obj.objects, srcs);
     }
   }
-}
-
-export function takeSnapshot(canvas: FabricCanvas): CanvasSnapshot {
-  const data = canvas.toObject(SNAPSHOT_EXTRA_PROPS) as PlainObject;
-  const srcs: string[] = [];
-  walkObjects(data.objects, (obj) => {
-    if (typeof obj.src === "string") {
-      srcs.push(obj.src);
-      obj.src = `${SRC_PLACEHOLDER}${srcs.length - 1}`;
-    }
-  });
-  return { json: JSON.stringify(data), srcs };
 }
 
 /** Rebuild the plain object for loadFromJSON, re-inlining extracted srcs. */
 export function parseSnapshot(snapshot: CanvasSnapshot): PlainObject {
   const data = JSON.parse(snapshot.json) as PlainObject;
-  walkObjects(data.objects, (obj) => {
-    if (typeof obj.src === "string" && obj.src.startsWith(SRC_PLACEHOLDER)) {
-      obj.src = snapshot.srcs[Number(obj.src.slice(SRC_PLACEHOLDER.length))];
-    }
-  });
+  reinlineSrcs(data.objects, snapshot.srcs);
   return data;
 }
