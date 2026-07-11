@@ -27,6 +27,10 @@ interface PropertiesPanelProps {
   onColorChange: (color: string) => void;
   brushWidth: number;
   onBrushWidthChange: (width: number) => void;
+  brushHardness: number;
+  onBrushHardnessChange: (hardness: number) => void;
+  brushOpacity: number;
+  onBrushOpacityChange: (opacity: number) => void;
   fabricCanvas: FabricCanvas | null;
   isMobile: boolean;
 }
@@ -69,6 +73,10 @@ export const PropertiesPanel = ({
   onColorChange,
   brushWidth,
   onBrushWidthChange,
+  brushHardness,
+  onBrushHardnessChange,
+  brushOpacity,
+  onBrushOpacityChange,
   fabricCanvas,
   isMobile,
 }: PropertiesPanelProps) => {
@@ -348,24 +356,64 @@ export const PropertiesPanel = ({
 
         <Separator />
 
-        {/* Brush Width */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <Label className="text-xs font-medium text-muted-foreground">
-              Brush Width
-            </Label>
-            <span className="text-xs text-muted-foreground tabular-nums">
-              {brushWidth}px
-            </span>
+        {/* Brush */}
+        <div className="space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                Brush Width
+              </Label>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {brushWidth}px
+              </span>
+            </div>
+            <Slider
+              value={[brushWidth]}
+              onValueChange={(v) => onBrushWidthChange(v[0])}
+              min={1}
+              max={50}
+              step={1}
+              className="w-full"
+            />
           </div>
-          <Slider
-            value={[brushWidth]}
-            onValueChange={(v) => onBrushWidthChange(v[0])}
-            min={1}
-            max={50}
-            step={1}
-            className="w-full"
-          />
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                Hardness
+              </Label>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {brushHardness}%
+              </span>
+            </div>
+            <Slider
+              value={[brushHardness]}
+              onValueChange={(v) => onBrushHardnessChange(v[0])}
+              min={0}
+              max={100}
+              step={1}
+              className="w-full"
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                Brush Opacity
+              </Label>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {brushOpacity}%
+              </span>
+            </div>
+            <Slider
+              value={[brushOpacity]}
+              onValueChange={(v) => onBrushOpacityChange(v[0])}
+              min={10}
+              max={100}
+              step={1}
+              className="w-full"
+            />
+          </div>
         </div>
 
         <Separator />

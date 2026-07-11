@@ -8,6 +8,7 @@ import {
   FabricImage,
   Line,
   Point,
+  Shadow,
   Triangle,
   Group,
 } from "fabric";
@@ -29,6 +30,8 @@ interface CanvasProps {
   activeTool: Tool;
   activeColor: string;
   brushWidth: number;
+  brushHardness: number;
+  brushOpacity: number;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -38,10 +41,20 @@ interface CanvasProps {
   onToolChange: (tool: Tool) => void;
 }
 
+// A soft brush is faked with a same-color shadow whose blur grows as hardness
+// drops (hardness 100 = crisp edge, 0 = very soft).
+function brushShadow(color: string, hardness: number, width: number): Shadow | null {
+  if (hardness >= 100) return null;
+  const blur = ((100 - hardness) / 100) * width;
+  return new Shadow({ color, blur, offsetX: 0, offsetY: 0 });
+}
+
 export const Canvas = ({
   activeTool,
   activeColor,
   brushWidth,
+  brushHardness,
+  brushOpacity,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -55,6 +68,9 @@ export const Canvas = ({
   const prevToolRef = useRef<Tool>(activeTool);
   const cropRectRef = useRef<Rect | null>(null);
   const spaceDownRef = useRef(false);
+  // Latest brush opacity, read by the path:created handler set up once at init
+  const brushOpacityRef = useRef(brushOpacity);
+  brushOpacityRef.current = brushOpacity;
   // Marquee selection: the drawn rect, its animation loop, and whether a
   // committed selection currently exists (drives the floating toolbar)
   const marqueeRef = useRef<Rect | null>(null);
@@ -101,6 +117,16 @@ export const Canvas = ({
       if (obj) obj.erasable = obj.selectable !== false;
     };
     canvas.on("object:added", markErasable);
+
+    // Brush strokes get the current brush opacity (a whole-stroke cap, like
+    // Photoshop's Opacity — set on the path so overlaps within a stroke don't
+    // compound). Fires only for free-drawing paths.
+    const applyStrokeOpacity = (e: { path?: { set: (k: string, v: number) => void } }) => {
+      if (e.path && brushOpacityRef.current < 100) {
+        e.path.set("opacity", brushOpacityRef.current / 100);
+      }
+    };
+    canvas.on("path:created", applyStrokeOpacity as (...args: unknown[]) => void);
 
     if (initialSnapshot) {
       // Restore an autosaved session; refit because the window (and canvas)
@@ -364,6 +390,7 @@ export const Canvas = ({
       const brush = new PencilBrush(canvas);
       brush.color = activeColor;
       brush.width = brushWidth;
+      brush.shadow = brushShadow(activeColor, brushHardness, brushWidth);
       canvas.freeDrawingBrush = brush;
     } else if (activeTool === "eraser") {
       const eraser = new EraserBrush(canvas);
@@ -473,10 +500,15 @@ export const Canvas = ({
     if (canvas.isDrawingMode && canvas.freeDrawingBrush) {
       if (activeTool === "draw") {
         canvas.freeDrawingBrush.color = activeColor;
+        canvas.freeDrawingBrush.shadow = brushShadow(
+          activeColor,
+          brushHardness,
+          brushWidth
+        );
       }
       canvas.freeDrawingBrush.width = brushWidth;
     }
-  }, [activeColor, brushWidth, activeTool]);
+  }, [activeColor, brushWidth, brushHardness, activeTool]);
 
   // ---------- Crop helpers ----------
   const addCropOverlay = (canvas: FabricCanvas) => {

@@ -27,6 +27,8 @@ export const ImageEditor = () => {
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [activeColor, setActiveColor] = useState("#a855f7");
   const [brushWidth, setBrushWidth] = useState(3);
+  const [brushHardness, setBrushHardness] = useState(100);
+  const [brushOpacity, setBrushOpacity] = useState(100);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [fabricCanvas, setFabricCanvas] = useState<FabricCanvas | null>(null);
   // Zoom is a fraction everywhere (1 = 100%), matching Fabric's own getZoom()
@@ -179,6 +181,8 @@ export const ImageEditor = () => {
               activeTool={activeTool}
               activeColor={activeColor}
               brushWidth={brushWidth}
+              brushHardness={brushHardness}
+              brushOpacity={brushOpacity}
               uploadedImage={uploadedImage}
               initialSnapshot={initialSnapshot}
               onCanvasReady={setFabricCanvas}
@@ -211,6 +215,10 @@ export const ImageEditor = () => {
                 onColorChange={setActiveColor}
                 brushWidth={brushWidth}
                 onBrushWidthChange={setBrushWidth}
+                brushHardness={brushHardness}
+                onBrushHardnessChange={setBrushHardness}
+                brushOpacity={brushOpacity}
+                onBrushOpacityChange={setBrushOpacity}
                 fabricCanvas={fabricCanvas}
                 isMobile={isMobile}
               />
@@ -263,6 +271,8 @@ export const ImageEditor = () => {
               activeTool={activeTool}
               activeColor={activeColor}
               brushWidth={brushWidth}
+              brushHardness={brushHardness}
+              brushOpacity={brushOpacity}
               uploadedImage={uploadedImage}
               initialSnapshot={initialSnapshot}
               onCanvasReady={setFabricCanvas}
@@ -281,6 +291,10 @@ export const ImageEditor = () => {
               onColorChange={setActiveColor}
               brushWidth={brushWidth}
               onBrushWidthChange={setBrushWidth}
+              brushHardness={brushHardness}
+              onBrushHardnessChange={setBrushHardness}
+              brushOpacity={brushOpacity}
+              onBrushOpacityChange={setBrushOpacity}
               fabricCanvas={fabricCanvas}
               isMobile={isMobile}
             />
