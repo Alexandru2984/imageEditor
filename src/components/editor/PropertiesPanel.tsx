@@ -1,12 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
-import * as fabric from "fabric";
-import type { Canvas as FabricCanvas } from "fabric";
+import type {
+  Canvas as FabricCanvas,
+  FabricImage,
+  FabricObject,
+} from "fabric";
 import { findBackgroundImage } from "@/utils/viewport";
 import {
   onCanvasEvent,
   offCanvasEvent,
   HISTORY_RESTORED,
 } from "@/utils/canvasEvents";
+import {
+  applyFilterValues,
+  readFilterValues,
+  DEFAULT_FILTERS,
+  type FilterValues,
+} from "@/utils/imageFilters";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
@@ -27,6 +36,16 @@ const COLOR_SWATCHES = [
   "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#ffffff",
 ];
 
+// Blur only makes sense from 0 up; the rest are symmetric around 0
+const FILTER_SLIDERS: { key: keyof FilterValues; label: string; min: number }[] =
+  [
+    { key: "brightness", label: "Brightness", min: -100 },
+    { key: "contrast", label: "Contrast", min: -100 },
+    { key: "saturation", label: "Saturation", min: -100 },
+    { key: "hue", label: "Hue", min: -100 },
+    { key: "blur", label: "Blur", min: 0 },
+  ];
+
 interface SelectedObjectProps {
   fill: string;
   stroke: string;
@@ -38,7 +57,7 @@ interface SelectedObjectProps {
 }
 
 // Text-only props are absent on the base FabricObject type
-type TextlikeObject = fabric.FabricObject & {
+type TextlikeObject = FabricObject & {
   fontSize?: number;
   fontFamily?: string;
 };
@@ -51,30 +70,31 @@ export const PropertiesPanel = ({
   fabricCanvas,
   isMobile,
 }: PropertiesPanelProps) => {
-  const [brightness, setBrightness] = useState(0);
-  const [contrast, setContrast] = useState(0);
-  const [saturation, setSaturation] = useState(0);
+  const [filters, setFilters] = useState<FilterValues>(DEFAULT_FILTERS);
+  const [hasTargetImage, setHasTargetImage] = useState(false);
+  const [targetIsSelection, setTargetIsSelection] = useState(false);
   const [selectedProps, setSelectedProps] =
     useState<SelectedObjectProps | null>(null);
   const [objectOpacity, setObjectOpacity] = useState(100);
 
-  // Apply image filters using Fabric.js v6 API
+  // Filters target the selected image layer if one is selected, else the
+  // background photo. That's the image the filter sliders read from and write to.
+  const getFilterTarget = useCallback((): FabricImage | undefined => {
+    if (!fabricCanvas) return undefined;
+    const active = fabricCanvas.getActiveObject();
+    if (active && active.type === "image") return active as FabricImage;
+    return findBackgroundImage(fabricCanvas);
+  }, [fabricCanvas]);
+
   const applyFilters = useCallback(
-    (b: number, c: number, s: number) => {
+    (values: FilterValues) => {
       if (!fabricCanvas) return;
-
-      const bgImage = findBackgroundImage(fabricCanvas);
-      if (!bgImage) return;
-
-      bgImage.filters = [
-        new fabric.filters.Brightness({ brightness: b / 100 }),
-        new fabric.filters.Contrast({ contrast: c / 100 }),
-        new fabric.filters.Saturation({ saturation: s / 100 }),
-      ];
-      bgImage.applyFilters();
+      const target = getFilterTarget();
+      if (!target) return;
+      applyFilterValues(target, values);
       fabricCanvas.renderAll();
     },
-    [fabricCanvas]
+    [fabricCanvas, getFilterTarget]
   );
 
   // Sliders apply live while dragging; the *Commit handlers below fire
@@ -89,55 +109,34 @@ export const PropertiesPanel = ({
 
   const commitFilterChange = useCallback(() => {
     if (!fabricCanvas) return;
-    const bgImage = findBackgroundImage(fabricCanvas);
-    if (bgImage) {
-      fabricCanvas.fire("object:modified", { target: bgImage });
+    const target = getFilterTarget();
+    if (target) {
+      fabricCanvas.fire("object:modified", { target });
     }
-  }, [fabricCanvas]);
+  }, [fabricCanvas, getFilterTarget]);
 
-  const handleBrightnessChange = (value: number[]) => {
-    const v = value[0];
-    setBrightness(v);
-    applyFilters(v, contrast, saturation);
+  const setFilter = (key: keyof FilterValues) => (value: number[]) => {
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value[0] };
+      applyFilters(next);
+      return next;
+    });
   };
 
-  const handleContrastChange = (value: number[]) => {
-    const v = value[0];
-    setContrast(v);
-    applyFilters(brightness, v, saturation);
-  };
-
-  const handleSaturationChange = (value: number[]) => {
-    const v = value[0];
-    setSaturation(v);
-    applyFilters(brightness, contrast, v);
-  };
-
-  // After an undo/redo the canvas no longer matches the slider positions —
-  // read the restored background's filters back into local state
+  // Read the current filter target's values into the sliders. Runs on selection
+  // change and after undo/redo, so the sliders always reflect what's on screen.
   const syncFiltersFromCanvas = useCallback(() => {
-    if (!fabricCanvas) return;
-    const bgImage = findBackgroundImage(fabricCanvas);
-    const filters = (bgImage?.filters ?? []) as Array<{
-      brightness?: number;
-      contrast?: number;
-      saturation?: number;
-    }>;
-    let b = 0;
-    let c = 0;
-    let s = 0;
-    for (const f of filters) {
-      if (typeof f.brightness === "number") b = Math.round(f.brightness * 100);
-      if (typeof f.contrast === "number") c = Math.round(f.contrast * 100);
-      if (typeof f.saturation === "number") s = Math.round(f.saturation * 100);
-    }
-    setBrightness(b);
-    setContrast(c);
-    setSaturation(s);
-  }, [fabricCanvas]);
+    const target = getFilterTarget();
+    setHasTargetImage(!!target);
+    setTargetIsSelection(
+      !!target && target === fabricCanvas?.getActiveObject()
+    );
+    setFilters(readFilterValues(target?.filters as never));
+  }, [fabricCanvas, getFilterTarget]);
 
   useEffect(() => {
     if (!fabricCanvas) return;
+    syncFiltersFromCanvas();
     onCanvasEvent(fabricCanvas, HISTORY_RESTORED, syncFiltersFromCanvas);
     return () => {
       offCanvasEvent(fabricCanvas, HISTORY_RESTORED, syncFiltersFromCanvas);
@@ -173,9 +172,14 @@ export const PropertiesPanel = ({
   useEffect(() => {
     if (!fabricCanvas) return;
 
-    const onSelect = () => readSelectedObject();
+    const onSelect = () => {
+      readSelectedObject();
+      // Switching selection changes which image the filters target
+      syncFiltersFromCanvas();
+    };
     const onClear = () => {
       setSelectedProps(null);
+      syncFiltersFromCanvas();
     };
 
     fabricCanvas.on("selection:created", onSelect);
@@ -189,7 +193,7 @@ export const PropertiesPanel = ({
       fabricCanvas.off("selection:cleared", onClear);
       fabricCanvas.off("object:modified", onSelect);
     };
-  }, [fabricCanvas, readSelectedObject]);
+  }, [fabricCanvas, readSelectedObject, syncFiltersFromCanvas]);
 
   // Update selected object's fill color
   const handleColorChange = (color: string) => {
@@ -487,77 +491,42 @@ export const PropertiesPanel = ({
           </>
         )}
 
-        {/* Image Filters */}
-        <div>
-          <Label className="text-xs font-semibold mb-3 block">
-            Image Filters
-          </Label>
-
-          <div className="space-y-3">
-            {/* Brightness */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  Brightness
-                </Label>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {brightness}
-                </span>
-              </div>
-              <Slider
-                value={[brightness]}
-                onValueChange={handleBrightnessChange}
-                onValueCommit={commitFilterChange}
-                min={-100}
-                max={100}
-                step={1}
-                className="w-full"
-              />
+        {/* Image Filters — non-destructive, applied to the selected image
+            layer or, with nothing selected, the background photo */}
+        {hasTargetImage && (
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <Label className="text-xs font-semibold">Image Filters</Label>
+              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                {targetIsSelection ? "Selected" : "Background"}
+              </span>
             </div>
 
-            {/* Contrast */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  Contrast
-                </Label>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {contrast}
-                </span>
-              </div>
-              <Slider
-                value={[contrast]}
-                onValueChange={handleContrastChange}
-                onValueCommit={commitFilterChange}
-                min={-100}
-                max={100}
-                step={1}
-                className="w-full"
-              />
-            </div>
-
-            {/* Saturation */}
-            <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  Saturation
-                </Label>
-                <span className="text-xs text-muted-foreground tabular-nums">
-                  {saturation}
-                </span>
-              </div>
-              <Slider
-                value={[saturation]}
-                onValueChange={handleSaturationChange}
-                onValueCommit={commitFilterChange}
-                min={-100}
-                max={100}
-                step={1}
-                className="w-full"
-              />
+            <div className="space-y-3">
+              {FILTER_SLIDERS.map(({ key, label, min }) => (
+                <div key={key}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <Label className="text-xs font-medium text-muted-foreground">
+                      {label}
+                    </Label>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {filters[key]}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[filters[key]]}
+                    onValueChange={setFilter(key)}
+                    onValueCommit={commitFilterChange}
+                    min={min}
+                    max={100}
+                    step={1}
+                    className="w-full"
+                  />
+                </div>
+              ))}
             </div>
           </div>
-        </div>
+        )}
       </div>
     </ScrollArea>
   );
