@@ -64,8 +64,8 @@ export const Toolbar = ({
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !fabricCanvas) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please choose an image file");
+    if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
+      toast.error("Please choose a raster image (PNG, JPG, WebP)");
       return;
     }
 

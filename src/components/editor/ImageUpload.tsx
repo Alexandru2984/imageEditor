@@ -36,6 +36,13 @@ export const ImageUpload = ({
         return;
       }
 
+      // SVG can taint the canvas (breaking export) and is a known XSS foot-gun;
+      // this is a raster editor, so keep it to raster formats.
+      if (file.type === "image/svg+xml") {
+        toast.error("SVG files aren't supported. Please use PNG, JPG, or WebP.");
+        return;
+      }
+
       if (file.size > MAX_FILE_SIZE) {
         toast.warning(
           `File is ${(file.size / (1024 * 1024)).toFixed(1)}MB. Large files may cause performance issues.`,
