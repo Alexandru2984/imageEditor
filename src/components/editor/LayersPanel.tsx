@@ -20,11 +20,18 @@ import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  BLEND_MODES,
+  DEFAULT_BLEND_MODE,
+  objectThumbnail,
+} from "@/utils/blendModes";
 
 // Fabric objects the editor tags with a couple of extra fields
 type EditorObject = FabricObject & { __uid?: number; name?: string };
@@ -35,6 +42,7 @@ interface LayerItem {
   type: string;
   visible: boolean;
   locked: boolean;
+  thumbnail: string;
   fabricObject: EditorObject;
 }
 
@@ -103,6 +111,8 @@ const getLayerName = (obj: EditorObject, index: number): string => {
 export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   const [layers, setLayers] = useState<LayerItem[]>([]);
   const [selectedLayerId, setSelectedLayerId] = useState<number | null>(null);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const refreshLayers = useCallback(() => {
     if (!fabricCanvas) {
@@ -124,6 +134,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
         type: obj.type || "object",
         visible: obj.visible !== false,
         locked: obj.lockMovementX === true && obj.lockMovementY === true,
+        thumbnail: objectThumbnail(obj),
         fabricObject: obj,
       });
       counter++;
@@ -132,6 +143,59 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     // Reverse so topmost layer appears first
     setLayers(layerItems.reverse());
   }, [fabricCanvas]);
+
+  const selectedLayer = layers.find((l) => l.id === selectedLayerId) ?? null;
+
+  // Blend mode + opacity act on the selected layer (Photoshop-style header)
+  const selectedBlend =
+    (selectedLayer?.fabricObject.globalCompositeOperation as string) ||
+    DEFAULT_BLEND_MODE;
+  const selectedOpacity = Math.round(
+    (selectedLayer?.fabricObject.opacity ?? 1) * 100
+  );
+
+  const handleBlendModeChange = (value: string) => {
+    if (!fabricCanvas || !selectedLayer) return;
+    selectedLayer.fabricObject.set(
+      "globalCompositeOperation",
+      value as GlobalCompositeOperation
+    );
+    fabricCanvas.fire("object:modified", { target: selectedLayer.fabricObject });
+    fabricCanvas.renderAll();
+  };
+
+  const handleOpacityChange = (value: number[]) => {
+    if (!fabricCanvas || !selectedLayer) return;
+    selectedLayer.fabricObject.set("opacity", value[0] / 100);
+    fabricCanvas.renderAll();
+    // Reflect the new value without waiting for a full refresh
+    setLayers((prev) => [...prev]);
+  };
+
+  const handleOpacityCommit = () => {
+    if (!fabricCanvas || !selectedLayer) return;
+    fabricCanvas.fire("object:modified", { target: selectedLayer.fabricObject });
+  };
+
+  const startRename = (layer: LayerItem) => {
+    setRenamingId(layer.id);
+    setRenameValue(layer.name);
+  };
+
+  const commitRename = () => {
+    if (!fabricCanvas || renamingId === null) {
+      setRenamingId(null);
+      return;
+    }
+    const layer = layers.find((l) => l.id === renamingId);
+    const name = renameValue.trim();
+    if (layer && name) {
+      layer.fabricObject.name = name;
+      fabricCanvas.fire("object:modified", { target: layer.fabricObject });
+      refreshLayers();
+    }
+    setRenamingId(null);
+  };
 
   useEffect(() => {
     if (!fabricCanvas) return;
@@ -266,6 +330,45 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
         </span>
       </div>
 
+      {/* Blend mode + opacity for the selected layer */}
+      {selectedLayer && (
+        <div className="px-3 py-2.5 border-b border-border space-y-2.5">
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground w-14 shrink-0">
+              Blend
+            </Label>
+            <select
+              value={selectedBlend}
+              onChange={(e) => handleBlendModeChange(e.target.value)}
+              className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs"
+            >
+              {BLEND_MODES.map((mode) => (
+                <option key={mode.value} value={mode.value}>
+                  {mode.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground w-14 shrink-0">
+              Opacity
+            </Label>
+            <Slider
+              value={[selectedOpacity]}
+              onValueChange={handleOpacityChange}
+              onValueCommit={handleOpacityCommit}
+              min={0}
+              max={100}
+              step={1}
+              className="flex-1"
+            />
+            <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">
+              {selectedOpacity}
+            </span>
+          </div>
+        </div>
+      )}
+
       <ScrollArea className="flex-1">
         {layers.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
@@ -296,11 +399,50 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                     ${!layer.visible ? "opacity-50" : ""}
                   `}
                 >
-                  <TypeIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                  {/* Thumbnail with a checkerboard so transparency reads */}
+                  <div
+                    className="h-7 w-7 shrink-0 rounded border border-border bg-[length:8px_8px] bg-[position:0_0,4px_4px] flex items-center justify-center overflow-hidden"
+                    style={{
+                      backgroundImage:
+                        "linear-gradient(45deg,hsl(var(--muted)) 25%,transparent 25%,transparent 75%,hsl(var(--muted)) 75%),linear-gradient(45deg,hsl(var(--muted)) 25%,transparent 25%,transparent 75%,hsl(var(--muted)) 75%)",
+                    }}
+                  >
+                    {layer.thumbnail ? (
+                      <img
+                        src={layer.thumbnail}
+                        alt=""
+                        className="max-h-full max-w-full object-contain"
+                        draggable={false}
+                      />
+                    ) : (
+                      <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                    )}
+                  </div>
 
-                  <span className="text-xs truncate flex-1 min-w-0">
-                    {layer.name}
-                  </span>
+                  {renamingId === layer.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        else if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-xs flex-1 min-w-0 h-6 rounded border border-primary bg-background px-1"
+                    />
+                  ) : (
+                    <span
+                      className="text-xs truncate flex-1 min-w-0"
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startRename(layer);
+                      }}
+                    >
+                      {layer.name}
+                    </span>
+                  )}
 
                   <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
                     <Tooltip>

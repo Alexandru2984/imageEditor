@@ -1,7 +1,8 @@
 import type { Canvas as FabricCanvas } from "fabric";
 
 // Canvas properties beyond toObject() defaults that the editor relies on:
-// `selectable` marks the background photo, the lock* flags back layer locking.
+// `selectable` marks the background photo, the lock* flags back layer locking,
+// `name`/`globalCompositeOperation` back the layers panel (rename + blend mode).
 export const SNAPSHOT_EXTRA_PROPS = [
   "selectable",
   "evented",
@@ -11,6 +12,8 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "lockScalingX",
   "lockScalingY",
   "hasControls",
+  "name",
+  "globalCompositeOperation",
 ];
 
 export interface CanvasSnapshot {
