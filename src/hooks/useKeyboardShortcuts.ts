@@ -155,6 +155,9 @@ export function useKeyboardShortcuts({
           case "t":
             onToolChange("text");
             break;
+          case "m":
+            onToolChange("marquee");
+            break;
           case "k":
             onToolChange("crop");
             break;

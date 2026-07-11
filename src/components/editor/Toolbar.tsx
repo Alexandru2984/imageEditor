@@ -9,6 +9,7 @@ import {
   MoveRight,
   Type,
   Crop,
+  SquareDashed,
   Trash2,
   XCircle,
   ImagePlus,
@@ -47,6 +48,7 @@ const shapeTools: { id: Tool; icon: typeof MousePointer2; label: string }[] = [
 
 const otherTools: { id: Tool; icon: typeof MousePointer2; label: string }[] = [
   { id: "text", icon: Type, label: "Text (T)" },
+  { id: "marquee", icon: SquareDashed, label: "Select region (M)" },
   { id: "crop", icon: Crop, label: "Crop (K)" },
 ];
 

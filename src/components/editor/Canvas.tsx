@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import {
   Canvas as FabricCanvas,
   Circle,
@@ -11,11 +11,11 @@ import {
   Triangle,
   Group,
 } from "fabric";
-import type { TMat2D } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
-import { Check, X } from "lucide-react";
+import { Check, X, Copy, Crop as CropIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
+import { flattenRegion } from "@/utils/flatten";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
 import type { Tool } from "@/types/editor";
 
@@ -49,6 +49,11 @@ export const Canvas = ({
   const prevToolRef = useRef<Tool>(activeTool);
   const cropRectRef = useRef<Rect | null>(null);
   const spaceDownRef = useRef(false);
+  // Marquee selection: the drawn rect, its animation loop, and whether a
+  // committed selection currently exists (drives the floating toolbar)
+  const marqueeRef = useRef<Rect | null>(null);
+  const marqueeAnimRef = useRef<number | null>(null);
+  const [hasMarquee, setHasMarquee] = useState(false);
 
   // ---------- Responsive canvas sizing ----------
   const fitCanvasToContainer = useCallback(() => {
@@ -326,6 +331,15 @@ export const Canvas = ({
       removeCropOverlay(canvas);
     }
 
+    // Marquee mode disables Fabric's own drag-selection (we draw our own rect).
+    if (activeTool === "marquee") {
+      canvas.selection = false;
+      canvas.discardActiveObject();
+    } else if (prevTool === "marquee") {
+      removeMarquee(canvas);
+      canvas.selection = true;
+    }
+
     // Reset drawing mode
     canvas.isDrawingMode = activeTool === "draw" || activeTool === "eraser";
 
@@ -498,28 +512,8 @@ export const Canvas = ({
     removeCropOverlay(canvas);
     canvas.discardActiveObject();
 
-    // Render the selected region in scene coordinates at the background
-    // image's native resolution, then flatten it into a new background.
-    const prevVpt = [...canvas.viewportTransform] as TMat2D;
-    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-
-    const bgImage = canvas
-      .getObjects()
-      .find((obj) => !obj.selectable && obj.type === "image");
-    const multiplier = bgImage
-      ? bgImage.width / bgImage.getScaledWidth()
-      : 1;
-
-    const dataURL = canvas.toDataURL({
-      format: "png",
-      quality: 1,
-      multiplier,
-      left: region.left,
-      top: region.top,
-      width: region.width,
-      height: region.height,
-    });
-    canvas.setViewportTransform(prevVpt);
+    // Flatten the region at the background's native resolution into a new bg.
+    const dataURL = flattenRegion(canvas, region);
 
     FabricImage.fromURL(dataURL).then((img) => {
       canvas.remove(...canvas.getObjects());
@@ -573,6 +567,175 @@ export const Canvas = ({
     return () => window.removeEventListener("keydown", handleKey);
   }, [activeTool, applyCrop, cancelCrop]);
 
+  // ---------- Marquee selection ----------
+  const removeMarquee = (canvas: FabricCanvas) => {
+    if (marqueeAnimRef.current !== null) {
+      cancelAnimationFrame(marqueeAnimRef.current);
+      marqueeAnimRef.current = null;
+    }
+    if (marqueeRef.current) {
+      canvas.remove(marqueeRef.current);
+      marqueeRef.current = null;
+    }
+    setHasMarquee(false);
+  };
+
+  // Animate the dashed stroke so the selection reads as marching ants
+  const animateMarchingAnts = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const rect = marqueeRef.current;
+    if (!canvas || !rect) return;
+    rect.strokeDashOffset = (rect.strokeDashOffset ?? 0) - 0.5;
+    canvas.requestRenderAll();
+    marqueeAnimRef.current = requestAnimationFrame(animateMarchingAnts);
+  }, []);
+
+  // Draw the marquee by dragging (scene coordinates, so it's zoom/pan correct)
+  useEffect(() => {
+    if (activeTool !== "marquee") return;
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+
+    let start: { x: number; y: number } | null = null;
+
+    const onDown = (opt: { e: MouseEvent | TouchEvent }) => {
+      if (spaceDownRef.current) return; // panning
+      removeMarquee(canvas);
+      const p = canvas.getScenePoint(opt.e);
+      start = { x: p.x, y: p.y };
+      const rect = new Rect({
+        left: p.x,
+        top: p.y,
+        width: 0,
+        height: 0,
+        fill: "rgba(168, 85, 247, 0.12)",
+        stroke: "#ffffff",
+        strokeWidth: 1,
+        strokeDashArray: [4, 4],
+        strokeUniform: true,
+        selectable: false,
+        evented: false,
+        objectCaching: false,
+      });
+      (rect as unknown as Record<string, unknown>).__isMarquee = true;
+      marqueeRef.current = rect;
+      canvas.add(rect);
+    };
+
+    const onMove = (opt: { e: MouseEvent | TouchEvent }) => {
+      if (!start || !marqueeRef.current) return;
+      const p = canvas.getScenePoint(opt.e);
+      marqueeRef.current.set({
+        left: Math.min(start.x, p.x),
+        top: Math.min(start.y, p.y),
+        width: Math.abs(p.x - start.x),
+        height: Math.abs(p.y - start.y),
+      });
+      canvas.requestRenderAll();
+    };
+
+    const onUp = () => {
+      if (!start) return;
+      start = null;
+      const rect = marqueeRef.current;
+      // Discard accidental clicks / tiny selections
+      if (!rect || rect.width < 5 || rect.height < 5) {
+        removeMarquee(canvas);
+        return;
+      }
+      setHasMarquee(true);
+      if (marqueeAnimRef.current === null) animateMarchingAnts();
+    };
+
+    canvas.on("mouse:down", onDown);
+    canvas.on("mouse:move", onMove);
+    canvas.on("mouse:up", onUp);
+    return () => {
+      canvas.off("mouse:down", onDown);
+      canvas.off("mouse:move", onMove);
+      canvas.off("mouse:up", onUp);
+      if (marqueeAnimRef.current !== null) {
+        cancelAnimationFrame(marqueeAnimRef.current);
+        marqueeAnimRef.current = null;
+      }
+    };
+  }, [activeTool, animateMarchingAnts]);
+
+  const newLayerFromSelection = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const rect = marqueeRef.current;
+    if (!canvas || !rect) return;
+
+    const region = rect.getBoundingRect();
+    // Hide the overlay so it doesn't tint the flattened pixels
+    rect.visible = false;
+    const dataURL = flattenRegion(canvas, region);
+    rect.visible = true;
+
+    FabricImage.fromURL(dataURL).then((img) => {
+      img.set({ left: region.left, top: region.top });
+      img.scaleToWidth(region.width);
+      removeMarquee(canvas);
+      canvas.add(img);
+      canvas.setActiveObject(img);
+      canvas.renderAll();
+    });
+    onToolChange("select");
+  }, [onToolChange]);
+
+  const cropToSelection = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const rect = marqueeRef.current;
+    if (!canvas || !rect) return;
+
+    const region = rect.getBoundingRect();
+    rect.visible = false;
+    const dataURL = flattenRegion(canvas, region);
+    removeMarquee(canvas);
+
+    FabricImage.fromURL(dataURL).then((img) => {
+      canvas.remove(...canvas.getObjects());
+      const scale = Math.min(
+        (canvas.width! * 0.85) / img.width!,
+        (canvas.height! * 0.85) / img.height!
+      );
+      img.scale(scale);
+      img.set({
+        left: canvas.width! / 2 - (img.width! * scale) / 2,
+        top: canvas.height! / 2 - (img.height! * scale) / 2,
+      });
+      img.selectable = false;
+      canvas.add(img);
+      canvas.sendObjectToBack(img);
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+      onZoomChange(1);
+      canvas.renderAll();
+    });
+    onToolChange("select");
+  }, [onToolChange, onZoomChange]);
+
+  const cancelMarquee = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    if (canvas) {
+      removeMarquee(canvas);
+      canvas.renderAll();
+    }
+    onToolChange("select");
+  }, [onToolChange]);
+
+  // Escape cancels the marquee
+  useEffect(() => {
+    if (activeTool !== "marquee") return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        cancelMarquee();
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [activeTool, cancelMarquee]);
+
   return (
     <div
       ref={containerRef}
@@ -591,6 +754,42 @@ export const Canvas = ({
             <X className="h-4 w-4 mr-1" />
             Cancel
           </Button>
+        </div>
+      )}
+
+      {/* Marquee selection controls */}
+      {activeTool === "marquee" && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg bg-[hsl(var(--editor-panel))] border border-border shadow-lg px-2 py-1.5">
+          {!hasMarquee ? (
+            <span className="text-xs text-muted-foreground px-1 py-1.5">
+              Drag to select a region
+            </span>
+          ) : (
+            <>
+              <Button size="sm" className="h-8" onClick={newLayerFromSelection}>
+                <Copy className="h-4 w-4 mr-1" />
+                New layer
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8"
+                onClick={cropToSelection}
+              >
+                <CropIcon className="h-4 w-4 mr-1" />
+                Crop to this
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8"
+                onClick={cancelMarquee}
+              >
+                <X className="h-4 w-4 mr-1" />
+                Cancel
+              </Button>
+            </>
+          )}
         </div>
       )}
     </div>

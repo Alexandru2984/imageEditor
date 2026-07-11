@@ -142,9 +142,9 @@ export function useUndoRedo(
     currentIndexRef.current = -1;
 
     const handleSave = (e?: { target?: unknown }) => {
-      // The crop selection overlay is UI chrome, not document content
+      // Crop/marquee overlays are UI chrome, not document content
       const target = e?.target as Record<string, unknown> | undefined;
-      if (target?.__isCropOverlay) return;
+      if (target?.__isCropOverlay || target?.__isMarquee) return;
       scheduleSave();
     };
 

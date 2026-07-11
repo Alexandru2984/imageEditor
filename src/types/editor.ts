@@ -7,7 +7,8 @@ export type Tool =
   | "line"
   | "arrow"
   | "text"
-  | "crop";
+  | "crop"
+  | "marquee";
 
 export interface HistoryEntry {
   json: string;
