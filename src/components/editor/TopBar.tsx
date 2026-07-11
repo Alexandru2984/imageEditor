@@ -5,6 +5,7 @@ import {
   RotateCcw,
   RotateCw,
   Scissors,
+  Sparkles,
   Undo2,
   Redo2,
   ZoomIn,
@@ -33,7 +34,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { blobToDataURL, removeBackground } from "@/utils/backgroundRemoval";
+import { extractSubjectDataURL } from "@/utils/cutout";
 import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
 import { FabricImage, Point } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject, TMat2D } from "fabric";
@@ -69,6 +70,15 @@ export const TopBar = ({
 }: TopBarProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // The image AI actions operate on: the selected image layer, else the
+  // background photo.
+  const getSubjectSource = useCallback((): FabricImage | undefined => {
+    if (!fabricCanvas) return undefined;
+    const active = fabricCanvas.getActiveObject();
+    if (active && active.type === "image") return active as FabricImage;
+    return findBackgroundImage(fabricCanvas);
+  }, [fabricCanvas]);
+
   const handleRemoveBackground = useCallback(async () => {
     if (!fabricCanvas || !uploadedImage) {
       toast.error("No image to process!");
@@ -82,38 +92,11 @@ export const TopBar = ({
 
     try {
       const bgImage = findBackgroundImage(fabricCanvas);
-
       if (!bgImage) {
         throw new Error("Could not find background image");
       }
 
-      // Convert canvas image to blob
-      const tempCanvas = document.createElement("canvas");
-      const tempCtx = tempCanvas.getContext("2d");
-      if (!tempCtx) throw new Error("Could not get canvas context");
-
-      const imgElement = bgImage.getElement() as
-        | HTMLImageElement
-        | HTMLCanvasElement;
-      const naturalWidth =
-        "naturalWidth" in imgElement ? imgElement.naturalWidth : imgElement.width;
-      const naturalHeight =
-        "naturalHeight" in imgElement
-          ? imgElement.naturalHeight
-          : imgElement.height;
-      tempCanvas.width = naturalWidth;
-      tempCanvas.height = naturalHeight;
-      tempCtx.drawImage(imgElement, 0, 0);
-
-      const blob = await new Promise<Blob>((resolve) => {
-        tempCanvas.toBlob((b) => resolve(b!), "image/png");
-      });
-
-      const resultBlob = await removeBackground(blob);
-
-      // A data URL (not a revocable blob URL) so undo/redo snapshots that
-      // reference this src keep working indefinitely
-      const resultUrl = await blobToDataURL(resultBlob);
+      const resultUrl = await extractSubjectDataURL(bgImage);
 
       // Place the result exactly over the old background so annotations
       // keep their position (the model may return a downscaled image)
@@ -145,6 +128,55 @@ export const TopBar = ({
       setIsProcessing(false);
     }
   }, [fabricCanvas, uploadedImage]);
+
+  // Non-destructive: cut the subject out onto a new layer, leaving the
+  // original photo untouched — the AI-first way to composite.
+  const handleExtractToLayer = useCallback(async () => {
+    if (!fabricCanvas || !uploadedImage) {
+      toast.error("No image to process!");
+      return;
+    }
+
+    const source = getSubjectSource();
+    if (!source) {
+      toast.error("No image to extract from!");
+      return;
+    }
+
+    setIsProcessing(true);
+    const loadingToast = toast.loading(
+      "Extracting subject... This may take a minute."
+    );
+
+    try {
+      const resultUrl = await extractSubjectDataURL(source);
+      const rect = source.getBoundingRect();
+      const cutout = await FabricImage.fromURL(resultUrl);
+      const scale = Math.min(
+        rect.width / cutout.width!,
+        rect.height / cutout.height!
+      );
+      cutout.scale(scale);
+      cutout.set({
+        left: rect.left + rect.width / 2 - (cutout.width! * scale) / 2,
+        top: rect.top + rect.height / 2 - (cutout.height! * scale) / 2,
+        name: "Cutout",
+      });
+
+      fabricCanvas.add(cutout);
+      fabricCanvas.setActiveObject(cutout);
+      fabricCanvas.renderAll();
+
+      toast.dismiss(loadingToast);
+      toast.success("Subject extracted to a new layer!");
+    } catch (error) {
+      console.error("Subject extraction error:", error);
+      toast.dismiss(loadingToast);
+      toast.error("Failed to extract subject. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [fabricCanvas, uploadedImage, getSubjectSource]);
 
   const handleExport = (format: "png" | "jpg") => {
     if (!fabricCanvas) return;
@@ -369,6 +401,24 @@ export const TopBar = ({
             </TooltipTrigger>
             <TooltipContent>
               <p>Remove Background</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size={isMobile ? "icon" : "sm"}
+                onClick={handleExtractToLayer}
+                disabled={isProcessing}
+                className={isMobile ? "h-9 w-9" : "h-9"}
+              >
+                <Sparkles className="h-4 w-4" />
+                {!isMobile && <span className="ml-1">Extract</span>}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Extract subject to a new layer (AI)</p>
             </TooltipContent>
           </Tooltip>
 
