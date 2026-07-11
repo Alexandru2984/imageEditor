@@ -1,5 +1,16 @@
+import { z } from "zod";
 import type { Canvas as FabricCanvas } from "fabric";
 import { takeSnapshot, type CanvasSnapshot } from "./canvasSnapshot";
+
+// Formal shape of a project file. Zod guards the structure; assertSafeSources
+// (below) enforces the security invariant that every image source is inline.
+const ProjectFileSchema = z.object({
+  version: z.number().optional(),
+  snapshot: z.object({
+    json: z.string(),
+    srcs: z.array(z.string()),
+  }),
+});
 
 // A portable project file: the same snapshot format used for undo/autosave,
 // wrapped with a version tag and written to disk so projects survive beyond
@@ -56,15 +67,11 @@ export async function readProjectFile(file: File): Promise<CanvasSnapshot> {
   if (file.size > MAX_PROJECT_BYTES) {
     throw new Error("Project file is too large");
   }
-  const parsed = JSON.parse(await file.text());
-  const snapshot = parsed?.snapshot;
-  if (
-    !snapshot ||
-    typeof snapshot.json !== "string" ||
-    !Array.isArray(snapshot.srcs)
-  ) {
+  const result = ProjectFileSchema.safeParse(JSON.parse(await file.text()));
+  if (!result.success) {
     throw new Error("Not a valid project file");
   }
-  assertSafeSources(snapshot as CanvasSnapshot);
-  return snapshot as CanvasSnapshot;
+  const snapshot = result.data.snapshot as CanvasSnapshot;
+  assertSafeSources(snapshot);
+  return snapshot;
 }
