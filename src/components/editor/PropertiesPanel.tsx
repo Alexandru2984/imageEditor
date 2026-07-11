@@ -20,7 +20,21 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Paintbrush } from "lucide-react";
+import {
+  Paintbrush,
+  Bold,
+  Italic,
+  Underline,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignStartVertical,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
+} from "lucide-react";
 
 interface PropertiesPanelProps {
   activeColor: string;
@@ -57,6 +71,10 @@ interface SelectedObjectProps {
   opacity: number;
   fontSize?: number;
   fontFamily?: string;
+  fontWeight?: string | number;
+  fontStyle?: string;
+  underline?: boolean;
+  textAlign?: string;
   type?: string;
   hasMask: boolean;
   maskInverted: boolean;
@@ -66,6 +84,10 @@ interface SelectedObjectProps {
 type TextlikeObject = FabricObject & {
   fontSize?: number;
   fontFamily?: string;
+  fontWeight?: string | number;
+  fontStyle?: string;
+  underline?: boolean;
+  textAlign?: string;
 };
 
 export const PropertiesPanel = ({
@@ -174,6 +196,10 @@ export const PropertiesPanel = ({
       opacity: Math.round((active.opacity ?? 1) * 100),
       fontSize: active.fontSize,
       fontFamily: active.fontFamily,
+      fontWeight: active.fontWeight,
+      fontStyle: active.fontStyle,
+      underline: active.underline,
+      textAlign: active.textAlign,
       type: active.type,
       hasMask: !!clip,
       maskInverted: !!clip?.inverted,
@@ -294,6 +320,64 @@ export const PropertiesPanel = ({
       fabricCanvas.renderAll();
       readSelectedObject();
     }
+  };
+
+  const toggleTextStyle = (key: "fontWeight" | "fontStyle" | "underline") => {
+    if (!fabricCanvas) return;
+    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
+    if (!active) return;
+    if (key === "fontWeight") {
+      active.set("fontWeight", active.fontWeight === "bold" ? "normal" : "bold");
+    } else if (key === "fontStyle") {
+      active.set("fontStyle", active.fontStyle === "italic" ? "normal" : "italic");
+    } else {
+      active.set("underline", !active.underline);
+    }
+    fabricCanvas.fire("object:modified", { target: active });
+    fabricCanvas.renderAll();
+    readSelectedObject();
+  };
+
+  const setTextAlign = (align: string) => {
+    if (!fabricCanvas) return;
+    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
+    if (!active) return;
+    active.set("textAlign", align);
+    fabricCanvas.fire("object:modified", { target: active });
+    fabricCanvas.renderAll();
+    readSelectedObject();
+  };
+
+  // Align the selected object within the currently visible canvas region
+  // (scene coordinates, so it stays correct under zoom/pan).
+  const alignObject = (
+    mode: "left" | "centerH" | "right" | "top" | "middle" | "bottom"
+  ) => {
+    if (!fabricCanvas) return;
+    const active = fabricCanvas.getActiveObject();
+    if (!active) return;
+
+    const zoom = fabricCanvas.getZoom();
+    const vpt = fabricCanvas.viewportTransform;
+    const viewLeft = -vpt[4] / zoom;
+    const viewTop = -vpt[5] / zoom;
+    const viewW = fabricCanvas.width / zoom;
+    const viewH = fabricCanvas.height / zoom;
+
+    const br = active.getBoundingRect();
+    let dx = 0;
+    let dy = 0;
+    if (mode === "left") dx = viewLeft - br.left;
+    else if (mode === "centerH") dx = viewLeft + (viewW - br.width) / 2 - br.left;
+    else if (mode === "right") dx = viewLeft + viewW - br.width - br.left;
+    else if (mode === "top") dy = viewTop - br.top;
+    else if (mode === "middle") dy = viewTop + (viewH - br.height) / 2 - br.top;
+    else if (mode === "bottom") dy = viewTop + viewH - br.height - br.top;
+
+    active.set({ left: active.left + dx, top: active.top + dy });
+    active.setCoords();
+    fabricCanvas.fire("object:modified", { target: active });
+    fabricCanvas.renderAll();
   };
 
   const isTextObject =
@@ -537,6 +621,33 @@ export const PropertiesPanel = ({
                 </div>
               )}
 
+              {/* Alignment (within the visible canvas) */}
+              <div className="mb-3">
+                <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                  Align
+                </Label>
+                <div className="flex items-center gap-1">
+                  {(
+                    [
+                      ["left", AlignStartVertical],
+                      ["centerH", AlignCenterVertical],
+                      ["right", AlignEndVertical],
+                      ["top", AlignStartHorizontal],
+                      ["middle", AlignCenterHorizontal],
+                      ["bottom", AlignEndHorizontal],
+                    ] as const
+                  ).map(([mode, Icon]) => (
+                    <button
+                      key={mode}
+                      onClick={() => alignObject(mode)}
+                      className="flex-1 h-8 rounded-md border border-border hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Text Properties */}
               {isTextObject && (
                 <>
@@ -544,6 +655,49 @@ export const PropertiesPanel = ({
                   <Label className="text-xs font-semibold mb-3 block">
                     Text Properties
                   </Label>
+
+                  {/* Style toggles + alignment */}
+                  <div className="flex items-center gap-1 mb-3">
+                    {(
+                      [
+                        ["fontWeight", Bold, selectedProps.fontWeight === "bold"],
+                        ["fontStyle", Italic, selectedProps.fontStyle === "italic"],
+                        ["underline", Underline, !!selectedProps.underline],
+                      ] as const
+                    ).map(([key, Icon, active]) => (
+                      <button
+                        key={key}
+                        onClick={() => toggleTextStyle(key)}
+                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors ${
+                          active
+                            ? "border-primary bg-primary/15 text-foreground"
+                            : "border-border hover:bg-accent text-muted-foreground"
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </button>
+                    ))}
+                    <div className="w-px h-6 bg-border mx-0.5" />
+                    {(
+                      [
+                        ["left", AlignLeft],
+                        ["center", AlignCenter],
+                        ["right", AlignRight],
+                      ] as const
+                    ).map(([align, Icon]) => (
+                      <button
+                        key={align}
+                        onClick={() => setTextAlign(align)}
+                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors ${
+                          selectedProps.textAlign === align
+                            ? "border-primary bg-primary/15 text-foreground"
+                            : "border-border hover:bg-accent text-muted-foreground"
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                      </button>
+                    ))}
+                  </div>
 
                   {/* Font Size */}
                   <div className="mb-3">
