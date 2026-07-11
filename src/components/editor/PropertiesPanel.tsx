@@ -54,6 +54,8 @@ interface SelectedObjectProps {
   fontSize?: number;
   fontFamily?: string;
   type?: string;
+  hasMask: boolean;
+  maskInverted: boolean;
 }
 
 // Text-only props are absent on the base FabricObject type
@@ -156,6 +158,7 @@ export const PropertiesPanel = ({
       return;
     }
 
+    const clip = active.clipPath as { inverted?: boolean } | undefined;
     setSelectedProps({
       fill: (active.fill as string) || "#000000",
       stroke: (active.stroke as string) || "transparent",
@@ -164,9 +167,34 @@ export const PropertiesPanel = ({
       fontSize: active.fontSize,
       fontFamily: active.fontFamily,
       type: active.type,
+      hasMask: !!clip,
+      maskInverted: !!clip?.inverted,
     });
     setObjectOpacity(Math.round((active.opacity ?? 1) * 100));
   }, [fabricCanvas]);
+
+  const toggleMaskInverted = () => {
+    if (!fabricCanvas) return;
+    const active = fabricCanvas.getActiveObject();
+    const clip = active?.clipPath as { inverted?: boolean } | undefined;
+    if (active && clip) {
+      clip.inverted = !clip.inverted;
+      fabricCanvas.fire("object:modified", { target: active });
+      fabricCanvas.renderAll();
+      readSelectedObject();
+    }
+  };
+
+  const releaseMask = () => {
+    if (!fabricCanvas) return;
+    const active = fabricCanvas.getActiveObject();
+    if (active?.clipPath) {
+      active.clipPath = undefined;
+      fabricCanvas.fire("object:modified", { target: active });
+      fabricCanvas.renderAll();
+      readSelectedObject();
+    }
+  };
 
   // Listen for selection events
   useEffect(() => {
@@ -433,6 +461,33 @@ export const PropertiesPanel = ({
                   className="w-full"
                 />
               </div>
+
+              {/* Layer Mask (non-destructive clip) */}
+              {selectedProps.hasMask && (
+                <div className="mb-3">
+                  <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                    Layer Mask
+                  </Label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={toggleMaskInverted}
+                      className={`flex-1 h-8 rounded-md border text-xs transition-colors ${
+                        selectedProps.maskInverted
+                          ? "border-primary bg-primary/15 text-foreground"
+                          : "border-border hover:bg-accent text-muted-foreground"
+                      }`}
+                    >
+                      {selectedProps.maskInverted ? "Inverted" : "Invert"}
+                    </button>
+                    <button
+                      onClick={releaseMask}
+                      className="flex-1 h-8 rounded-md border border-border text-xs text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors"
+                    >
+                      Release
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Text Properties */}
               {isTextObject && (

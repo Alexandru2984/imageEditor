@@ -12,7 +12,13 @@ import {
   Group,
 } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
-import { Check, X, Copy, Crop as CropIcon } from "lucide-react";
+import {
+  Check,
+  X,
+  Copy,
+  Crop as CropIcon,
+  SquareDashedBottom,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { flattenRegion } from "@/utils/flatten";
@@ -54,6 +60,10 @@ export const Canvas = ({
   const marqueeRef = useRef<Rect | null>(null);
   const marqueeAnimRef = useRef<number | null>(null);
   const [hasMarquee, setHasMarquee] = useState(false);
+  // Image layer that was selected when the marquee tool was entered — the
+  // target a "Mask" operation clips to (masking needs both a layer and a region)
+  const preMarqueeTargetRef = useRef<FabricImage | null>(null);
+  const [canMask, setCanMask] = useState(false);
 
   // ---------- Responsive canvas sizing ----------
   const fitCanvasToContainer = useCallback(() => {
@@ -333,6 +343,13 @@ export const Canvas = ({
 
     // Marquee mode disables Fabric's own drag-selection (we draw our own rect).
     if (activeTool === "marquee") {
+      const active = canvas.getActiveObject();
+      const target =
+        active && active.type === "image" && active.selectable
+          ? (active as FabricImage)
+          : null;
+      preMarqueeTargetRef.current = target;
+      setCanMask(!!target);
       canvas.selection = false;
       canvas.discardActiveObject();
     } else if (prevTool === "marquee") {
@@ -714,6 +731,31 @@ export const Canvas = ({
     onToolChange("select");
   }, [onToolChange, onZoomChange]);
 
+  // Clip the previously-selected image layer to the selection (a
+  // non-destructive mask — the pixels are untouched and it can be released).
+  const maskToSelection = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const rect = marqueeRef.current;
+    const target = preMarqueeTargetRef.current;
+    if (!canvas || !rect || !target) return;
+
+    const region = rect.getBoundingRect();
+    const clip = new Rect({
+      left: region.left,
+      top: region.top,
+      width: region.width,
+      height: region.height,
+      absolutePositioned: true,
+    });
+    target.clipPath = clip;
+
+    removeMarquee(canvas);
+    canvas.setActiveObject(target);
+    canvas.fire("object:modified", { target });
+    canvas.renderAll();
+    onToolChange("select");
+  }, [onToolChange]);
+
   const cancelMarquee = useCallback(() => {
     const canvas = fabricCanvasRef.current;
     if (canvas) {
@@ -770,6 +812,17 @@ export const Canvas = ({
                 <Copy className="h-4 w-4 mr-1" />
                 New layer
               </Button>
+              {canMask && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8"
+                  onClick={maskToSelection}
+                >
+                  <SquareDashedBottom className="h-4 w-4 mr-1" />
+                  Mask
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
