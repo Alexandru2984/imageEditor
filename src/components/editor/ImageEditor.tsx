@@ -15,7 +15,9 @@ import {
   clearProject,
   type SavedProject,
 } from "@/utils/projectStore";
+import { downloadProjectFile, readProjectFile } from "@/utils/projectFile";
 import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
+import { toast } from "sonner";
 import type { Tool } from "@/types/editor";
 
 // Re-export Tool so existing consumers (e.g. Toolbar) that import from ./ImageEditor still work
@@ -126,6 +128,26 @@ export const ImageEditor = () => {
     setUploadedImage(savedProject.uploadedImage);
   }, [savedProject]);
 
+  const handleSaveProjectFile = useCallback(() => {
+    if (!fabricCanvas) return;
+    downloadProjectFile(fabricCanvas);
+    toast.success("Project saved to a file");
+  }, [fabricCanvas]);
+
+  const handleOpenProjectFile = useCallback(async (file: File) => {
+    try {
+      const snapshot = await readProjectFile(file);
+      setFabricCanvas(null);
+      setInitialSnapshot(snapshot);
+      // uploadedImage just needs to be truthy to show the editor; reuse the
+      // project's first image so AI actions still have a source
+      setUploadedImage(snapshot.srcs[0] ?? "loaded-project");
+      toast.success("Project opened");
+    } catch {
+      toast.error("Couldn't open that file — is it a project file?");
+    }
+  }, []);
+
   const handleNewProject = useCallback(() => {
     if (autosaveTimerRef.current !== null) {
       window.clearTimeout(autosaveTimerRef.current);
@@ -156,6 +178,7 @@ export const ImageEditor = () => {
           fabricCanvas={fabricCanvas}
           uploadedImage={uploadedImage}
           onNewProject={handleNewProject}
+        onSaveProject={handleSaveProjectFile}
           zoom={zoom}
           onZoomChange={handleZoomChange}
           undo={undo}
@@ -174,6 +197,7 @@ export const ImageEditor = () => {
                 onImageUpload={handleImageUpload}
                 savedProject={savedProject}
                 onRestore={handleRestoreProject}
+                onOpenProject={handleOpenProjectFile}
               />
             </div>
           ) : (
@@ -236,6 +260,7 @@ export const ImageEditor = () => {
         fabricCanvas={fabricCanvas}
         uploadedImage={uploadedImage}
         onNewProject={handleNewProject}
+        onSaveProject={handleSaveProjectFile}
         zoom={zoom}
         onZoomChange={handleZoomChange}
         undo={undo}
@@ -265,6 +290,7 @@ export const ImageEditor = () => {
               onImageUpload={handleImageUpload}
               savedProject={savedProject}
               onRestore={handleRestoreProject}
+              onOpenProject={handleOpenProjectFile}
             />
           ) : (
             <FabricCanvasComponent

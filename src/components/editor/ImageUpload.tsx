@@ -1,5 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Upload, Image as ImageIcon, AlertTriangle, History } from "lucide-react";
+import {
+  Upload,
+  Image as ImageIcon,
+  AlertTriangle,
+  History,
+  FolderOpen,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { SavedProject } from "@/utils/projectStore";
@@ -8,6 +14,7 @@ interface ImageUploadProps {
   onImageUpload: (dataUrl: string) => void;
   savedProject?: SavedProject | null;
   onRestore?: () => void;
+  onOpenProject?: (file: File) => void;
 }
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
@@ -16,9 +23,11 @@ export const ImageUpload = ({
   onImageUpload,
   savedProject,
   onRestore,
+  onOpenProject,
 }: ImageUploadProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(
     (file: File) => {
@@ -184,6 +193,29 @@ export const ImageUpload = ({
           </span>
         </div>
       </div>
+
+      {onOpenProject && (
+        <>
+          <button
+            onClick={() => projectInputRef.current?.click()}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            Open a saved project file
+          </button>
+          <input
+            ref={projectInputRef}
+            type="file"
+            accept=".json,application/json"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) onOpenProject(file);
+            }}
+            className="hidden"
+          />
+        </>
+      )}
     </div>
   );
 };

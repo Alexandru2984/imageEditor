@@ -106,6 +106,28 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      // Arrow keys — nudge the selected object (Shift = 10px steps)
+      if (
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown"
+      ) {
+        if (!canvas) return;
+        const active = canvas.getActiveObject();
+        if (!active) return;
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        if (e.key === "ArrowLeft") active.left -= step;
+        else if (e.key === "ArrowRight") active.left += step;
+        else if (e.key === "ArrowUp") active.top -= step;
+        else active.top += step;
+        active.setCoords();
+        canvas.fire("object:modified", { target: active });
+        canvas.renderAll();
+        return;
+      }
+
       // Ctrl+0 — fit to screen
       if (isCtrlOrMeta && e.key === "0") {
         if (!canvas) return;

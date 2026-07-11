@@ -14,6 +14,7 @@ import {
   PanelRight,
   Layers,
   FilePlus2,
+  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -43,6 +44,7 @@ interface TopBarProps {
   fabricCanvas: FabricCanvas | null;
   uploadedImage: string | null;
   onNewProject: () => void;
+  onSaveProject: () => void;
   zoom: number;
   onZoomChange: (zoom: number) => void;
   undo: () => void;
@@ -58,6 +60,7 @@ export const TopBar = ({
   fabricCanvas,
   uploadedImage,
   onNewProject,
+  onSaveProject,
   zoom,
   onZoomChange,
   undo,
@@ -471,6 +474,22 @@ export const TopBar = ({
             </TooltipTrigger>
             <TooltipContent>
               <p>Export JPG</p>
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSaveProject}
+                className="h-9 w-9"
+              >
+                <Save className="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>Save project file (re-editable)</p>
             </TooltipContent>
           </Tooltip>
 
