@@ -20,3 +20,8 @@ Thumbs.db
 
 # debug
 npm-debug.log*
+
+# testing
+/test-results/
+/playwright-report/
+/.playwright/

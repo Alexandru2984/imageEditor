@@ -482,6 +482,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Save project"
                 onClick={onSaveProject}
                 className="h-9 w-9"
               >

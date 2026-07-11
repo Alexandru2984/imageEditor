@@ -182,6 +182,7 @@ export const ImageUpload = ({
         type="file"
         accept="image/*"
         onChange={handleFileChange}
+        data-testid="image-input"
         className="hidden"
       />
 
