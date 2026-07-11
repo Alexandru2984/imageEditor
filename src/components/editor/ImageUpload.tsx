@@ -1,15 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Upload, Image as ImageIcon, AlertTriangle } from "lucide-react";
+import { Upload, Image as ImageIcon, AlertTriangle, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import type { SavedProject } from "@/utils/projectStore";
 
 interface ImageUploadProps {
   onImageUpload: (dataUrl: string) => void;
+  savedProject?: SavedProject | null;
+  onRestore?: () => void;
 }
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
-export const ImageUpload = ({ onImageUpload }: ImageUploadProps) => {
+export const ImageUpload = ({
+  onImageUpload,
+  savedProject,
+  onRestore,
+}: ImageUploadProps) => {
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -98,22 +105,40 @@ export const ImageUpload = ({ onImageUpload }: ImageUploadProps) => {
   }, [processFile]);
 
   return (
-    <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      onClick={() => fileInputRef.current?.click()}
-      className={`
-        flex flex-col items-center justify-center p-12 rounded-xl max-w-2xl
-        cursor-pointer transition-all duration-200 select-none
-        border-2 border-dashed
-        ${
-          isDragging
-            ? "border-primary bg-primary/10 scale-[1.02]"
-            : "border-border bg-[hsl(var(--editor-panel))] hover:border-muted-foreground hover:bg-accent/50"
-        }
-      `}
-    >
+    <div className="flex flex-col items-center gap-4 max-w-2xl">
+      {savedProject && onRestore && (
+        <div className="w-full flex items-center justify-between gap-3 rounded-xl border border-border bg-[hsl(var(--editor-panel))] px-4 py-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <History className="h-5 w-5 text-primary shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Continue last project</p>
+              <p className="text-xs text-muted-foreground truncate">
+                Autosaved {new Date(savedProject.savedAt).toLocaleString()}
+              </p>
+            </div>
+          </div>
+          <Button size="sm" onClick={onRestore} className="shrink-0">
+            Continue
+          </Button>
+        </div>
+      )}
+
+      <div
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        onClick={() => fileInputRef.current?.click()}
+        className={`
+          flex flex-col items-center justify-center p-12 rounded-xl w-full
+          cursor-pointer transition-all duration-200 select-none
+          border-2 border-dashed
+          ${
+            isDragging
+              ? "border-primary bg-primary/10 scale-[1.02]"
+              : "border-border bg-[hsl(var(--editor-panel))] hover:border-muted-foreground hover:bg-accent/50"
+          }
+        `}
+      >
       <div
         className={`transition-transform duration-200 ${isDragging ? "scale-110" : ""}`}
       >
@@ -151,12 +176,13 @@ export const ImageUpload = ({ onImageUpload }: ImageUploadProps) => {
         className="hidden"
       />
 
-      <div className="flex items-center gap-4 mt-6 text-xs text-muted-foreground">
-        <span>Supports: JPG, PNG, GIF, WebP</span>
-        <span className="flex items-center gap-1">
-          <AlertTriangle className="h-3 w-3" />
-          Max recommended: 20MB
-        </span>
+        <div className="flex items-center gap-4 mt-6 text-xs text-muted-foreground">
+          <span>Supports: JPG, PNG, GIF, WebP</span>
+          <span className="flex items-center gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            Max recommended: 20MB
+          </span>
+        </div>
       </div>
     </div>
   );

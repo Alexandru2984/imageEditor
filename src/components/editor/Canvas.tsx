@@ -15,7 +15,8 @@ import type { TMat2D } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
 import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { clampZoom } from "@/utils/viewport";
+import { clampZoom, fitToScreen } from "@/utils/viewport";
+import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
 import type { Tool } from "@/types/editor";
 
 interface CanvasProps {
@@ -23,6 +24,8 @@ interface CanvasProps {
   activeColor: string;
   brushWidth: number;
   uploadedImage: string | null;
+  /** Autosaved state to restore instead of loading uploadedImage fresh */
+  initialSnapshot?: CanvasSnapshot | null;
   onCanvasReady: (canvas: FabricCanvas) => void;
   zoom: number;
   onZoomChange: (zoom: number) => void;
@@ -34,6 +37,7 @@ export const Canvas = ({
   activeColor,
   brushWidth,
   uploadedImage,
+  initialSnapshot,
   onCanvasReady,
   zoom,
   onZoomChange,
@@ -83,8 +87,20 @@ export const Canvas = ({
     };
     canvas.on("object:added", markErasable);
 
-    // Load uploaded image with correct aspect ratio
-    if (uploadedImage) {
+    if (initialSnapshot) {
+      // Restore an autosaved session; refit because the window (and canvas)
+      // may be a different size than when the project was saved
+      canvas.loadFromJSON(parseSnapshot(initialSnapshot)).then(() => {
+        for (const obj of canvas.getObjects()) {
+          if (obj instanceof FabricImage && !obj.selectable) {
+            canvas.sendObjectToBack(obj);
+          }
+        }
+        onZoomChange(fitToScreen(canvas));
+        canvas.renderAll();
+      });
+    } else if (uploadedImage) {
+      // Load uploaded image with correct aspect ratio
       FabricImage.fromURL(uploadedImage).then((img) => {
         const canvasW = canvas.width!;
         const canvasH = canvas.height!;

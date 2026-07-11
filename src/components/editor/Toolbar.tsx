@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   MousePointer2,
   Pencil,
@@ -10,7 +11,9 @@ import {
   Crop,
   Trash2,
   XCircle,
+  ImagePlus,
 } from "lucide-react";
+import { FabricImage } from "fabric";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -52,6 +55,46 @@ export const Toolbar = ({
   fabricCanvas,
   isMobile,
 }: ToolbarProps) => {
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAddImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !fabricCanvas) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image file");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const img = await FabricImage.fromURL(reader.result as string);
+
+      // At most half the visible area, centered in the current viewport
+      const viewZoom = fabricCanvas.getZoom() || 1;
+      const scale = Math.min(
+        (fabricCanvas.width / viewZoom) * 0.5 / img.width!,
+        (fabricCanvas.height / viewZoom) * 0.5 / img.height!,
+        1
+      );
+      img.scale(scale);
+
+      const center = fabricCanvas.getVpCenter();
+      img.set({
+        left: center.x - (img.width! * scale) / 2,
+        top: center.y - (img.height! * scale) / 2,
+      });
+
+      fabricCanvas.add(img);
+      fabricCanvas.setActiveObject(img);
+      fabricCanvas.renderAll();
+      onToolChange("select");
+      toast.success("Image added!");
+    };
+    reader.onerror = () => toast.error("Failed to read the file");
+    reader.readAsDataURL(file);
+  };
+
   const handleDelete = () => {
     if (!fabricCanvas) return;
     const activeObject = fabricCanvas.getActiveObject();
@@ -111,6 +154,33 @@ export const Toolbar = ({
     );
   };
 
+  const addImageButton = (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => imageInputRef.current?.click()}
+            className="w-10 h-10 text-muted-foreground hover:text-foreground"
+          >
+            <ImagePlus className="h-[18px] w-[18px]" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side={isMobile ? "top" : "right"}>
+          <p>Add Image</p>
+        </TooltipContent>
+      </Tooltip>
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleAddImageFile}
+        className="hidden"
+      />
+    </>
+  );
+
   // Mobile: horizontal bottom bar
   if (isMobile) {
     return (
@@ -120,6 +190,7 @@ export const Toolbar = ({
         {shapeTools.map(renderToolButton)}
         <Separator orientation="vertical" className="h-8 mx-1" />
         {otherTools.map(renderToolButton)}
+        {addImageButton}
         <Separator orientation="vertical" className="h-8 mx-1" />
         <Tooltip>
           <TooltipTrigger asChild>
@@ -167,6 +238,7 @@ export const Toolbar = ({
       <Separator className="my-1.5 w-8" />
 
       {otherTools.map(renderToolButton)}
+      {addImageButton}
 
       <div className="flex-1" />
 

@@ -16,11 +16,21 @@ interface UseUndoRedoReturn {
   canRedo: boolean;
 }
 
-export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
+export function useUndoRedo(
+  canvas: FabricCanvas | null,
+  onSnapshot?: (snapshot: CanvasSnapshot) => void
+): UseUndoRedoReturn {
   const historyRef = useRef<CanvasSnapshot[]>([]);
   const currentIndexRef = useRef<number>(-1);
   const isRestoringRef = useRef(false);
   const pendingSaveRef = useRef<number | null>(null);
+
+  // Kept in a ref so a changing callback identity doesn't resubscribe
+  // the canvas listeners below
+  const onSnapshotRef = useRef(onSnapshot);
+  useEffect(() => {
+    onSnapshotRef.current = onSnapshot;
+  }, [onSnapshot]);
 
   // Force re-render when history changes so canUndo/canRedo update
   const [, setHistoryVersion] = useState(0);
@@ -31,7 +41,9 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
     // Trim any redo states ahead of current index
     historyRef.current = historyRef.current.slice(0, currentIndexRef.current + 1);
 
-    historyRef.current.push(takeSnapshot(canvas));
+    const snapshot = takeSnapshot(canvas);
+    historyRef.current.push(snapshot);
+    onSnapshotRef.current?.(snapshot);
 
     // Enforce max history
     if (historyRef.current.length > MAX_HISTORY) {
@@ -88,6 +100,8 @@ export function useUndoRedo(canvas: FabricCanvas | null): UseUndoRedoReturn {
         (canvas as unknown as { fire: (event: string) => void }).fire(
           "history:restored"
         );
+        // The restored state is now the current document — autosave it too
+        onSnapshotRef.current?.(snapshot);
         setHistoryVersion((v) => v + 1);
       });
     },

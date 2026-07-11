@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Canvas as FabricCanvas } from "fabric";
 import { Canvas as FabricCanvasComponent } from "./Canvas";
 import { Toolbar } from "./Toolbar";
@@ -9,10 +9,19 @@ import { TopBar } from "./TopBar";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import {
+  saveProject,
+  loadProject,
+  clearProject,
+  type SavedProject,
+} from "@/utils/projectStore";
+import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import type { Tool } from "@/types/editor";
 
 // Re-export Tool so existing consumers (e.g. Toolbar) that import from ./ImageEditor still work
 export type { Tool } from "@/types/editor";
+
+const AUTOSAVE_DELAY_MS = 800;
 
 export const ImageEditor = () => {
   const [activeTool, setActiveTool] = useState<Tool>("select");
@@ -25,8 +34,49 @@ export const ImageEditor = () => {
   const [showProperties, setShowProperties] = useState(true);
   const [showLayers, setShowLayers] = useState(false);
 
+  // Autosaved session found in IndexedDB, offered on the upload screen
+  const [savedProject, setSavedProject] = useState<SavedProject | null>(null);
+  // When restoring, the canvas loads this snapshot instead of a fresh image
+  const [initialSnapshot, setInitialSnapshot] = useState<CanvasSnapshot | null>(
+    null
+  );
+
   const isMobile = useIsMobile();
-  const { undo, redo, canUndo, canRedo } = useUndoRedo(fabricCanvas);
+
+  const uploadedImageRef = useRef<string | null>(null);
+  uploadedImageRef.current = uploadedImage;
+  const autosaveTimerRef = useRef<number | null>(null);
+
+  const handleSnapshot = useCallback((snapshot: CanvasSnapshot) => {
+    const image = uploadedImageRef.current;
+    if (!image) return;
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      saveProject({ snapshot, uploadedImage: image, savedAt: Date.now() }).catch(
+        (error) => console.warn("Autosave failed:", error)
+      );
+    }, AUTOSAVE_DELAY_MS);
+  }, []);
+
+  const { undo, redo, canUndo, canRedo } = useUndoRedo(
+    fabricCanvas,
+    handleSnapshot
+  );
+
+  // Offer to continue the last session
+  useEffect(() => {
+    loadProject()
+      .then((project) => setSavedProject(project ?? null))
+      .catch(() => setSavedProject(null));
+    return () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, []);
 
   // On mobile the properties panel is a fullscreen overlay — start closed
   useEffect(() => {
@@ -63,7 +113,25 @@ export const ImageEditor = () => {
     onToolChange: handleToolChange,
   });
 
+  const handleImageUpload = useCallback((dataUrl: string) => {
+    setInitialSnapshot(null);
+    setUploadedImage(dataUrl);
+  }, []);
+
+  const handleRestoreProject = useCallback(() => {
+    if (!savedProject) return;
+    setInitialSnapshot(savedProject.snapshot);
+    setUploadedImage(savedProject.uploadedImage);
+  }, [savedProject]);
+
   const handleNewProject = useCallback(() => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    clearProject().catch(() => {});
+    setSavedProject(null);
+    setInitialSnapshot(null);
     setUploadedImage(null);
     setFabricCanvas(null);
     setActiveTool("select");
@@ -100,7 +168,11 @@ export const ImageEditor = () => {
         <div className="flex-1 overflow-hidden p-2">
           {!uploadedImage ? (
             <div className="flex items-center justify-center h-full">
-              <ImageUpload onImageUpload={setUploadedImage} />
+              <ImageUpload
+                onImageUpload={handleImageUpload}
+                savedProject={savedProject}
+                onRestore={handleRestoreProject}
+              />
             </div>
           ) : (
             <FabricCanvasComponent
@@ -108,6 +180,7 @@ export const ImageEditor = () => {
               activeColor={activeColor}
               brushWidth={brushWidth}
               uploadedImage={uploadedImage}
+              initialSnapshot={initialSnapshot}
               onCanvasReady={setFabricCanvas}
               zoom={zoom}
               onZoomChange={handleZoomChange}
@@ -180,13 +253,18 @@ export const ImageEditor = () => {
         {/* Canvas area */}
         <div className="flex-1 flex items-center justify-center p-4 overflow-hidden">
           {!uploadedImage ? (
-            <ImageUpload onImageUpload={setUploadedImage} />
+            <ImageUpload
+              onImageUpload={handleImageUpload}
+              savedProject={savedProject}
+              onRestore={handleRestoreProject}
+            />
           ) : (
             <FabricCanvasComponent
               activeTool={activeTool}
               activeColor={activeColor}
               brushWidth={brushWidth}
               uploadedImage={uploadedImage}
+              initialSnapshot={initialSnapshot}
               onCanvasReady={setFabricCanvas}
               zoom={zoom}
               onZoomChange={handleZoomChange}
