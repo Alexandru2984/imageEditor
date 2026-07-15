@@ -24,7 +24,17 @@ import { Button } from "@/components/ui/button";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { flattenRegion } from "@/utils/flatten";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
+import {
+  ensureLayerId,
+  isBackgroundObject,
+  isEditorChrome,
+  isObjectLocked,
+  markBackgroundObject,
+  normalizeEditorObjects,
+  type EditorFabricObject,
+} from "@/utils/editorObjects";
 import type { Tool } from "@/types/editor";
+import type { FabricObject } from "fabric";
 
 interface CanvasProps {
   activeTool: Tool;
@@ -123,11 +133,15 @@ export const Canvas = ({
       }
     };
 
-    // Annotations can be erased with the eraser tool; the background
-    // photo (non-selectable) cannot.
+    // Assign stable layer identity as objects enter the document. Background
+    // and locked layers are protected from the eraser independently of whether
+    // they can be selected.
     const markErasable = (e: { target?: unknown }) => {
-      const obj = e.target as Record<string, unknown> | undefined;
-      if (obj) obj.erasable = obj.selectable !== false;
+      const object = e.target as FabricObject | undefined;
+      if (!object || isEditorChrome(object)) return;
+      ensureLayerId(object);
+      (object as EditorFabricObject).erasable =
+        !isBackgroundObject(object) && !isObjectLocked(object);
     };
     canvas.on("object:added", markErasable);
 
@@ -150,11 +164,8 @@ export const Canvas = ({
         })
         .then(() => {
           if (disposed) return;
-          for (const obj of canvas.getObjects()) {
-            if (obj instanceof FabricImage && !obj.selectable) {
-              canvas.sendObjectToBack(obj);
-            }
-          }
+          const background = normalizeEditorObjects(canvas);
+          if (background) canvas.sendObjectToBack(background);
           onZoomChange(fitToScreen(canvas));
           canvas.renderAll();
           signalReady();
@@ -184,7 +195,7 @@ export const Canvas = ({
             left: canvasW / 2 - (imgW * scale) / 2,
             top: canvasH / 2 - (imgH * scale) / 2,
           });
-          img.selectable = false;
+          markBackgroundObject(img);
           canvas.add(img);
           canvas.sendObjectToBack(img);
           canvas.renderAll();
@@ -413,7 +424,10 @@ export const Canvas = ({
     if (activeTool === "marquee") {
       const active = canvas.getActiveObject();
       const target =
-        active && active.type === "image" && active.selectable
+        active &&
+        active.type === "image" &&
+        !isBackgroundObject(active) &&
+        !isObjectLocked(active)
           ? (active as FabricImage)
           : null;
       preMarqueeTargetRef.current = target;
@@ -623,7 +637,7 @@ export const Canvas = ({
         left: canvasW / 2 - (img.width! * scale) / 2,
         top: canvasH / 2 - (img.height! * scale) / 2,
       });
-      img.selectable = false;
+      markBackgroundObject(img);
       canvas.add(img);
       canvas.sendObjectToBack(img);
       canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
@@ -798,7 +812,7 @@ export const Canvas = ({
         left: canvas.width! / 2 - (img.width! * scale) / 2,
         top: canvas.height! / 2 - (img.height! * scale) / 2,
       });
-      img.selectable = false;
+      markBackgroundObject(img);
       canvas.add(img);
       canvas.sendObjectToBack(img);
       canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);

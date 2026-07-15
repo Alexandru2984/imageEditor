@@ -16,9 +16,10 @@ export interface HistoryEntry {
 }
 
 export interface LayerInfo {
-  id: number;
+  id: string;
   name: string;
   type: string;
   visible: boolean;
   locked: boolean;
+  isBackground: boolean;
 }

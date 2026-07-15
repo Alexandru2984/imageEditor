@@ -37,6 +37,10 @@ import {
 import { toast } from "sonner";
 import { extractSubjectDataURL } from "@/utils/cutout";
 import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
+import {
+  isProtectedObject,
+  markBackgroundObject,
+} from "@/utils/editorObjects";
 import { FabricImage, Point } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject, TMat2D } from "fabric";
 
@@ -114,7 +118,7 @@ export const TopBar = ({
         left: oldRect.left + oldRect.width / 2 - (newImg.width! * scale) / 2,
         top: oldRect.top + oldRect.height / 2 - (newImg.height! * scale) / 2,
       });
-      newImg.selectable = false;
+      markBackgroundObject(newImg);
 
       fabricCanvas.remove(bgImage);
       fabricCanvas.add(newImg);
@@ -227,6 +231,10 @@ export const TopBar = ({
 
     const activeObject = fabricCanvas.getActiveObject();
     if (activeObject) {
+      if (isProtectedObject(activeObject)) {
+        toast.error("Unlock the layer before rotating it");
+        return;
+      }
       activeObject.rotate(((activeObject.angle || 0) + 90) % 360);
       activeObject.setCoords();
       fabricCanvas.fire("object:modified", { target: activeObject });
@@ -501,6 +509,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Toggle properties"
                 onClick={onToggleProperties}
                 className="h-9 w-9"
               >
@@ -517,6 +526,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Toggle layers"
                 onClick={onToggleLayers}
                 className="h-9 w-9"
               >

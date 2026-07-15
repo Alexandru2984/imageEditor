@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState, useEffect } from "react";
-import { Canvas as FabricCanvas, FabricImage } from "fabric";
+import { Canvas as FabricCanvas } from "fabric";
 import {
   takeSnapshot,
   parseSnapshot,
   type CanvasSnapshot,
 } from "@/utils/canvasSnapshot";
 import { fireCanvasEvent, HISTORY_RESTORED } from "@/utils/canvasEvents";
+import { normalizeEditorObjects } from "@/utils/editorObjects";
 
 const MAX_HISTORY = 50;
 
@@ -87,14 +88,8 @@ export function useUndoRedo(
       isRestoringRef.current = true;
 
       canvas.loadFromJSON(parseSnapshot(snapshot)).then(() => {
-        // Preserve background image: find FabricImage objects that are
-        // non-selectable and send them to back
-        const objects = canvas.getObjects();
-        for (const obj of objects) {
-          if (obj instanceof FabricImage && !obj.selectable) {
-            canvas.sendObjectToBack(obj);
-          }
-        }
+        const background = normalizeEditorObjects(canvas);
+        if (background) canvas.sendObjectToBack(background);
         canvas.renderAll();
         isRestoringRef.current = false;
         // Let panels resync UI state (e.g. filter sliders) after a restore

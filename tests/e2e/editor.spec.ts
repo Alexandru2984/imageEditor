@@ -122,6 +122,56 @@ test("adding a shape selects it, and undo removes it", async ({ page }) => {
   await expect(page.getByText("Object Properties")).toHaveCount(0);
 });
 
+test("locked image layers stay visible, protected, and persist", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Add image layer" }).click();
+  await (await fileChooserPromise).setFiles({
+    name: "overlay.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_BASE64, "base64"),
+  });
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+
+  await expect(
+    page.locator("[data-layer-id]").filter({ hasText: "Background" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Unlock Background" })
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Lock Image 1" }).click();
+  await expect(
+    page.getByRole("button", { name: "Unlock Image 1" })
+  ).toBeVisible();
+
+  // Locking used to mark image layers as background and made them disappear.
+  // It must now also protect the selected layer from keyboard deletion.
+  await page.keyboard.press("Delete");
+  await expect(page.getByText("Image 1", { exact: true })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save project" }).click();
+  const savedPath = await (await downloadPromise).path();
+  expect(savedPath).toBeTruthy();
+
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Start new" }).click();
+  await page.getByTestId("project-input").setInputFiles(savedPath!);
+  await expect(
+    page.getByRole("button", { name: "Unlock Image 1" })
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Unlock Image 1" }).click();
+  await page.getByText("Image 1", { exact: true }).click();
+  await page.keyboard.press("Delete");
+  await expect(page.getByText("Image 1", { exact: true })).toHaveCount(0);
+  await expect(
+    page.locator("[data-layer-id]").filter({ hasText: "Background" })
+  ).toBeVisible();
+});
+
 test("keyboard shortcut selects the marquee tool", async ({ page }) => {
   await uploadImage(page);
   // Focus a neutral, non-input element so the shortcut isn't swallowed

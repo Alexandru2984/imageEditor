@@ -1,9 +1,13 @@
 import type { Canvas as FabricCanvas } from "fabric";
 
-// Canvas properties beyond toObject() defaults that the editor relies on:
-// `selectable` marks the background photo, the lock* flags back layer locking,
-// `name`/`globalCompositeOperation` back the layers panel (rename + blend mode).
+// Canvas properties beyond toObject() defaults that the editor relies on.
+// Explicit metadata avoids inferring "background" from selectable=false, which
+// previously made locked image layers disappear after save/restore.
 export const SNAPSHOT_EXTRA_PROPS = [
+  "__isBackground",
+  "__layerId",
+  "__locked",
+  "erasable",
   "selectable",
   "evented",
   "lockMovementX",

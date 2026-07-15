@@ -26,6 +26,11 @@ import {
 import { Tool } from "@/types/editor";
 import { toast } from "sonner";
 import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
+import {
+  isEditorChrome,
+  isProtectedObject,
+  removeSelectedObjects,
+} from "@/utils/editorObjects";
 
 interface ToolbarProps {
   activeTool: Tool;
@@ -101,10 +106,9 @@ export const Toolbar = ({
     if (!fabricCanvas) return;
     const activeObject = fabricCanvas.getActiveObject();
     if (activeObject) {
-      fabricCanvas.remove(activeObject);
-      fabricCanvas.discardActiveObject();
-      fabricCanvas.renderAll();
-      toast.success("Object deleted!");
+      const removed = removeSelectedObjects(fabricCanvas);
+      if (removed > 0) toast.success("Object deleted!");
+      else toast.error("Unlock the layer before deleting it");
     } else {
       toast.error("No object selected");
     }
@@ -112,16 +116,15 @@ export const Toolbar = ({
 
   const handleClear = () => {
     if (!fabricCanvas) return;
-    const objects = fabricCanvas.getObjects();
-    // Keep the background image (first non-selectable object)
-    const bgImage = objects.find((obj) => !obj.selectable);
-    fabricCanvas.clear();
-    if (bgImage) {
-      fabricCanvas.add(bgImage);
-      fabricCanvas.sendObjectToBack(bgImage);
-    }
+    const removable = fabricCanvas
+      .getObjects()
+      .filter(
+        (object) => !isEditorChrome(object) && !isProtectedObject(object)
+      );
+    if (removable.length > 0) fabricCanvas.remove(...removable);
+    fabricCanvas.discardActiveObject();
     fabricCanvas.backgroundColor = "#1a1a1a";
-    fabricCanvas.renderAll();
+    fabricCanvas.requestRenderAll();
     toast.success("Canvas cleared!");
   };
 
@@ -164,6 +167,7 @@ export const Toolbar = ({
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Add image layer"
             onClick={() => imageInputRef.current?.click()}
             className="w-10 h-10 text-muted-foreground hover:text-foreground"
           >
@@ -200,6 +204,7 @@ export const Toolbar = ({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Delete selected layer"
               onClick={handleDelete}
               className="w-10 h-10 text-muted-foreground hover:text-destructive"
             >
@@ -215,6 +220,7 @@ export const Toolbar = ({
             <Button
               variant="ghost"
               size="icon"
+              aria-label="Clear unlocked layers"
               onClick={handleClear}
               className="w-10 h-10 text-muted-foreground hover:text-destructive"
             >
@@ -252,6 +258,7 @@ export const Toolbar = ({
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Delete selected layer"
             onClick={handleDelete}
             className="w-10 h-10 text-muted-foreground hover:text-destructive"
           >
@@ -268,6 +275,7 @@ export const Toolbar = ({
           <Button
             variant="ghost"
             size="icon"
+            aria-label="Clear unlocked layers"
             onClick={handleClear}
             className="w-10 h-10 text-muted-foreground hover:text-destructive"
           >

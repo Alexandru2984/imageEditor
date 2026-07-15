@@ -32,16 +32,27 @@ import {
   DEFAULT_BLEND_MODE,
   objectThumbnail,
 } from "@/utils/blendModes";
+import {
+  ensureLayerId,
+  findBackgroundImage,
+  isBackgroundObject,
+  isEditorChrome,
+  isObjectLocked,
+  isProtectedObject,
+  normalizeEditorObjects,
+  setObjectLocked,
+  type EditorFabricObject,
+} from "@/utils/editorObjects";
 
-// Fabric objects the editor tags with a couple of extra fields
-type EditorObject = FabricObject & { __uid?: number; name?: string };
+type EditorObject = EditorFabricObject;
 
 interface LayerItem {
-  id: number;
+  id: string;
   name: string;
   type: string;
   visible: boolean;
   locked: boolean;
+  isBackground: boolean;
   thumbnail: string;
   fabricObject: EditorObject;
 }
@@ -110,8 +121,8 @@ const getLayerName = (obj: EditorObject, index: number): string => {
 
 export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   const [layers, setLayers] = useState<LayerItem[]>([]);
-  const [selectedLayerId, setSelectedLayerId] = useState<number | null>(null);
-  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
   const refreshLayers = useCallback(() => {
@@ -120,24 +131,31 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       return;
     }
 
+    normalizeEditorObjects(fabricCanvas);
     const objects = fabricCanvas.getObjects();
     const layerItems: LayerItem[] = [];
+    const usedIds = new Set<string>();
     let counter = 1;
 
     for (const obj of objects as EditorObject[]) {
-      // Skip background images (non-selectable)
-      if (!obj.selectable && obj.type === "image") continue;
+      if (isEditorChrome(obj)) continue;
+      const isBackground = isBackgroundObject(obj);
+      const name =
+        obj.name?.trim() ||
+        (isBackground ? "Background" : getLayerName(obj, counter));
+      obj.name = name;
 
       layerItems.push({
-        id: obj.__uid || counter,
-        name: getLayerName(obj, counter),
+        id: ensureLayerId(obj, usedIds),
+        name,
         type: obj.type || "object",
         visible: obj.visible !== false,
-        locked: obj.lockMovementX === true && obj.lockMovementY === true,
+        locked: isBackground || isObjectLocked(obj),
+        isBackground,
         thumbnail: objectThumbnail(obj),
         fabricObject: obj,
       });
-      counter++;
+      if (!isBackground) counter += 1;
     }
 
     // Reverse so topmost layer appears first
@@ -155,7 +173,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   );
 
   const handleBlendModeChange = (value: string) => {
-    if (!fabricCanvas || !selectedLayer) return;
+    if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
     selectedLayer.fabricObject.set(
       "globalCompositeOperation",
       value as GlobalCompositeOperation
@@ -165,7 +183,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   };
 
   const handleOpacityChange = (value: number[]) => {
-    if (!fabricCanvas || !selectedLayer) return;
+    if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
     const opacity = value[0];
     if (opacity === undefined) return;
     selectedLayer.fabricObject.set("opacity", opacity / 100);
@@ -175,7 +193,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   };
 
   const handleOpacityCommit = () => {
-    if (!fabricCanvas || !selectedLayer) return;
+    if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
     fabricCanvas.fire("object:modified", { target: selectedLayer.fabricObject });
   };
 
@@ -264,18 +282,10 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
   const handleToggleLock = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas) return;
+    if (!fabricCanvas || layer.isBackground) return;
 
     const isLocked = layer.locked;
-    layer.fabricObject.set({
-      lockMovementX: !isLocked,
-      lockMovementY: !isLocked,
-      lockRotation: !isLocked,
-      lockScalingX: !isLocked,
-      lockScalingY: !isLocked,
-      hasControls: isLocked,
-      selectable: isLocked,
-    });
+    setObjectLocked(layer.fabricObject, !isLocked);
     fabricCanvas.fire("object:modified", { target: layer.fabricObject });
     fabricCanvas.renderAll();
     refreshLayers();
@@ -283,7 +293,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
   const handleDelete = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas) return;
+    if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
     fabricCanvas.remove(layer.fabricObject);
     fabricCanvas.renderAll();
     refreshLayers();
@@ -291,7 +301,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
   const handleMoveUp = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas) return;
+    if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
 
     const objects = fabricCanvas.getObjects();
     const index = objects.indexOf(layer.fabricObject);
@@ -306,14 +316,13 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
   const handleMoveDown = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas) return;
+    if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
 
     const objects = fabricCanvas.getObjects();
     const index = objects.indexOf(layer.fabricObject);
     // Don't move below the background image
-    const bgIndex = objects.findIndex(
-      (obj) => !obj.selectable && obj.type === "image"
-    );
+    const background = findBackgroundImage(fabricCanvas);
+    const bgIndex = background ? objects.indexOf(background) : -1;
     if (index > bgIndex + 1) {
       fabricCanvas.moveObjectTo(layer.fabricObject, index - 1);
       fabricCanvas.fire("object:modified", { target: layer.fabricObject });
@@ -341,8 +350,9 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
             </Label>
             <select
               value={selectedBlend}
+              disabled={selectedLayer.locked}
               onChange={(e) => handleBlendModeChange(e.target.value)}
-              className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs"
+              className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
             >
               {BLEND_MODES.map((mode) => (
                 <option key={mode.value} value={mode.value}>
@@ -357,6 +367,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
             </Label>
             <Slider
               value={[selectedOpacity]}
+              disabled={selectedLayer.locked}
               onValueChange={handleOpacityChange}
               onValueCommit={handleOpacityCommit}
               min={0}
@@ -388,7 +399,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
               return (
                 <div
-                  key={`${layer.id}-${layer.name}`}
+                  key={layer.id}
+                  data-layer-id={layer.id}
                   onClick={() => handleSelectLayer(layer)}
                   className={`
                     group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
@@ -452,6 +464,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label={`Move ${layer.name} up`}
+                          disabled={layer.locked}
                           className="h-6 w-6"
                           onClick={(e) => handleMoveUp(layer, e)}
                         >
@@ -468,6 +482,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label={`Move ${layer.name} down`}
+                          disabled={layer.locked}
                           className="h-6 w-6"
                           onClick={(e) => handleMoveDown(layer, e)}
                         >
@@ -484,6 +500,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                         <Button
                           variant="ghost"
                           size="icon"
+                          aria-label={`Delete ${layer.name}`}
+                          disabled={layer.locked}
                           className="h-6 w-6 hover:text-destructive"
                           onClick={(e) => handleDelete(layer, e)}
                         >
@@ -501,6 +519,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                       <Button
                         variant="ghost"
                         size="icon"
+                        aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
                         className="h-6 w-6 shrink-0"
                         onClick={(e) => handleToggleVisibility(layer, e)}
                       >
@@ -521,6 +540,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                       <Button
                         variant="ghost"
                         size="icon"
+                        aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`}
+                        disabled={layer.isBackground}
                         className="h-6 w-6 shrink-0"
                         onClick={(e) => handleToggleLock(layer, e)}
                       >

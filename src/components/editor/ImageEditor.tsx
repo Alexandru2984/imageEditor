@@ -182,11 +182,13 @@ export const ImageEditor = () => {
 
   const handleToggleProperties = useCallback(() => {
     setShowProperties((prev) => !prev);
-  }, []);
+    if (isMobile) setShowLayers(false);
+  }, [isMobile]);
 
   const handleToggleLayers = useCallback(() => {
     setShowLayers((prev) => !prev);
-  }, []);
+    if (isMobile) setShowProperties(false);
+  }, [isMobile]);
 
   if (isMobile) {
     // ---------- MOBILE LAYOUT ----------
@@ -196,7 +198,7 @@ export const ImageEditor = () => {
           fabricCanvas={fabricCanvas}
           uploadedImage={uploadedImage}
           onNewProject={handleNewProject}
-        onSaveProject={handleSaveProjectFile}
+          onSaveProject={handleSaveProjectFile}
           zoom={zoom}
           onZoomChange={handleZoomChange}
           undo={undo}
@@ -265,6 +267,21 @@ export const ImageEditor = () => {
                 fabricCanvas={fabricCanvas}
                 isMobile={isMobile}
               />
+            </div>
+          </div>
+        )}
+
+        {/* LayersPanel as a matching overlay on mobile */}
+        {showLayers && (
+          <div
+            className="fixed inset-0 z-50 bg-black/50"
+            onClick={handleToggleLayers}
+          >
+            <div
+              className="absolute right-0 top-0 h-full w-72"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <LayersPanel fabricCanvas={fabricCanvas} />
             </div>
           </div>
         )}

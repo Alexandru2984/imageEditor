@@ -1,6 +1,11 @@
 import { useEffect } from "react";
 import { Canvas as FabricCanvas, ActiveSelection } from "fabric";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
+import {
+  isEditorChrome,
+  isProtectedObject,
+  removeSelectedObjects,
+} from "@/utils/editorObjects";
 import type { Tool } from "@/types/editor";
 
 interface UseKeyboardShortcutsOptions {
@@ -55,13 +60,7 @@ export function useKeyboardShortcuts({
             onToolChange("select");
             return;
           }
-          if (active instanceof ActiveSelection) {
-            active.getObjects().forEach((obj) => canvas.remove(obj));
-            canvas.discardActiveObject();
-          } else {
-            canvas.remove(active);
-          }
-          canvas.renderAll();
+          removeSelectedObjects(canvas);
         }
         return;
       }
@@ -89,7 +88,10 @@ export function useKeyboardShortcuts({
         e.preventDefault();
         const objects = canvas
           .getObjects()
-          .filter((obj) => obj.selectable !== false);
+          .filter(
+            (object) =>
+              !isEditorChrome(object) && !isProtectedObject(object)
+          );
         if (objects.length > 0) {
           const selection = new ActiveSelection(objects, { canvas });
           canvas.setActiveObject(selection);
@@ -117,6 +119,7 @@ export function useKeyboardShortcuts({
         const active = canvas.getActiveObject();
         if (!active) return;
         e.preventDefault();
+        if (isProtectedObject(active)) return;
         const step = e.shiftKey ? 10 : 1;
         if (e.key === "ArrowLeft") active.left -= step;
         else if (e.key === "ArrowRight") active.left += step;
