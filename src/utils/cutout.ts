@@ -1,6 +1,8 @@
 import type { FabricImage } from "fabric";
 import { removeBackground, blobToDataURL } from "./backgroundRemoval";
 
+const MAX_SEGMENTATION_DIMENSION = 1024;
+
 /**
  * Run subject matting (RMBG) on a Fabric image and return a PNG data URL of the
  * subject on a transparent background. A data URL (not a revocable blob URL) so
@@ -11,12 +13,19 @@ export async function extractSubjectDataURL(image: FabricImage): Promise<string>
   const width = "naturalWidth" in el ? el.naturalWidth : el.width;
   const height = "naturalHeight" in el ? el.naturalHeight : el.height;
 
+  if (!width || !height) throw new Error("Image dimensions are invalid");
+  const scale = Math.min(1, MAX_SEGMENTATION_DIMENSION / width, MAX_SEGMENTATION_DIMENSION / height);
+  const outputWidth = Math.max(1, Math.round(width * scale));
+  const outputHeight = Math.max(1, Math.round(height * scale));
+
+  // The model consumes at most 1024px per side. Downscale directly into that
+  // working size instead of allocating a second full-resolution RGBA canvas.
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get canvas context");
-  ctx.drawImage(el, 0, 0);
+  ctx.drawImage(el, 0, 0, outputWidth, outputHeight);
 
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(

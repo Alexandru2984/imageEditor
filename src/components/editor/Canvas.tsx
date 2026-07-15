@@ -39,6 +39,7 @@ interface CanvasProps {
   zoom: number;
   onZoomChange: (zoom: number) => void;
   onToolChange: (tool: Tool) => void;
+  onLoadError: (error: unknown) => void;
 }
 
 // A soft brush is faked with a same-color shadow whose blur grows as hardness
@@ -61,6 +62,7 @@ export const Canvas = ({
   zoom,
   onZoomChange,
   onToolChange,
+  onLoadError,
 }: CanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -108,7 +110,18 @@ export const Canvas = ({
     });
 
     fabricCanvasRef.current = canvas;
-    onCanvasReady(canvas);
+    let disposed = false;
+    let ready = false;
+    const loadController = new AbortController();
+    const reportLoadError = (error: unknown) => {
+      if (!disposed) onLoadError(error);
+    };
+    const signalReady = () => {
+      if (!disposed && !ready) {
+        ready = true;
+        onCanvasReady(canvas);
+      }
+    };
 
     // Annotations can be erased with the eraser tool; the background
     // photo (non-selectable) cannot.
@@ -131,39 +144,53 @@ export const Canvas = ({
     if (initialSnapshot) {
       // Restore an autosaved session; refit because the window (and canvas)
       // may be a different size than when the project was saved
-      canvas.loadFromJSON(parseSnapshot(initialSnapshot)).then(() => {
-        for (const obj of canvas.getObjects()) {
-          if (obj instanceof FabricImage && !obj.selectable) {
-            canvas.sendObjectToBack(obj);
+      canvas
+        .loadFromJSON(parseSnapshot(initialSnapshot), undefined, {
+          signal: loadController.signal,
+        })
+        .then(() => {
+          if (disposed) return;
+          for (const obj of canvas.getObjects()) {
+            if (obj instanceof FabricImage && !obj.selectable) {
+              canvas.sendObjectToBack(obj);
+            }
           }
-        }
-        onZoomChange(fitToScreen(canvas));
-        canvas.renderAll();
-      });
+          onZoomChange(fitToScreen(canvas));
+          canvas.renderAll();
+          signalReady();
+        })
+        .catch(reportLoadError);
     } else if (uploadedImage) {
       // Load uploaded image with correct aspect ratio
-      FabricImage.fromURL(uploadedImage).then((img) => {
-        const canvasW = canvas.width!;
-        const canvasH = canvas.height!;
-        const imgW = img.width!;
-        const imgH = img.height!;
+      FabricImage.fromURL(uploadedImage, { signal: loadController.signal })
+        .then((img) => {
+          if (disposed) {
+            img.dispose();
+            return;
+          }
+          const canvasW = canvas.width!;
+          const canvasH = canvas.height!;
+          const imgW = img.width!;
+          const imgH = img.height!;
 
-        // Fix: Calculate correct uniform scale to preserve aspect ratio
-        const scale = Math.min(
-          (canvasW * 0.85) / imgW,
-          (canvasH * 0.85) / imgH
-        );
-        img.scale(scale);
+          // Fix: Calculate correct uniform scale to preserve aspect ratio
+          const scale = Math.min(
+            (canvasW * 0.85) / imgW,
+            (canvasH * 0.85) / imgH
+          );
+          img.scale(scale);
 
-        img.set({
-          left: canvasW / 2 - (imgW * scale) / 2,
-          top: canvasH / 2 - (imgH * scale) / 2,
-        });
-        img.selectable = false;
-        canvas.add(img);
-        canvas.sendObjectToBack(img);
-        canvas.renderAll();
-      });
+          img.set({
+            left: canvasW / 2 - (imgW * scale) / 2,
+            top: canvasH / 2 - (imgH * scale) / 2,
+          });
+          img.selectable = false;
+          canvas.add(img);
+          canvas.sendObjectToBack(img);
+          canvas.renderAll();
+          signalReady();
+        })
+        .catch(reportLoadError);
     }
 
     // Ctrl+scroll zooms (anchored under the cursor — zoomToPoint expects
@@ -320,6 +347,8 @@ export const Canvas = ({
     resizeObserver.observe(container);
 
     return () => {
+      disposed = true;
+      loadController.abort();
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("mousemove", handleWindowMouseMove);
@@ -339,6 +368,7 @@ export const Canvas = ({
       resizeObserver.disconnect();
       canvas.dispose();
     };
+    // The canvas is intentionally recreated only when its document source changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedImage]);
 

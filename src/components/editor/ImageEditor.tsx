@@ -108,6 +108,14 @@ export const ImageEditor = () => {
     setZoom(newZoom);
   }, []);
 
+  const handleCanvasLoadError = useCallback((error: unknown) => {
+    console.error("Failed to load canvas document:", error);
+    toast.error("The image or project could not be decoded safely");
+    setFabricCanvas(null);
+    setInitialSnapshot(null);
+    setUploadedImage(null);
+  }, []);
+
   useKeyboardShortcuts({
     canvas: fabricCanvas,
     undo,
@@ -130,8 +138,14 @@ export const ImageEditor = () => {
 
   const handleSaveProjectFile = useCallback(() => {
     if (!fabricCanvas) return;
-    downloadProjectFile(fabricCanvas);
-    toast.success("Project saved to a file");
+    try {
+      downloadProjectFile(fabricCanvas);
+      toast.success("Project saved to a file");
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Couldn't save this project"
+      );
+    }
   }, [fabricCanvas]);
 
   const handleOpenProjectFile = useCallback(async (file: File) => {
@@ -143,8 +157,12 @@ export const ImageEditor = () => {
       // project's first image so AI actions still have a source
       setUploadedImage(snapshot.srcs[0] ?? "loaded-project");
       toast.success("Project opened");
-    } catch {
-      toast.error("Couldn't open that file — is it a project file?");
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Couldn't open that file — is it a project file?"
+      );
     }
   }, []);
 
@@ -213,6 +231,7 @@ export const ImageEditor = () => {
               zoom={zoom}
               onZoomChange={handleZoomChange}
               onToolChange={handleToolChange}
+              onLoadError={handleCanvasLoadError}
             />
           )}
         </div>
@@ -305,6 +324,7 @@ export const ImageEditor = () => {
               zoom={zoom}
               onZoomChange={handleZoomChange}
               onToolChange={handleToolChange}
+              onLoadError={handleCanvasLoadError}
             />
           )}
         </div>

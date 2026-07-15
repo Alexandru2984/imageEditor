@@ -9,6 +9,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import type { SavedProject } from "@/utils/projectStore";
+import {
+  MAX_IMAGE_FILE_BYTES,
+  RASTER_FILE_ACCEPT,
+  readSafeRasterImage,
+} from "@/utils/imageFile";
 
 interface ImageUploadProps {
   onImageUpload: (dataUrl: string) => void;
@@ -16,8 +21,6 @@ interface ImageUploadProps {
   onRestore?: () => void;
   onOpenProject?: (file: File) => void;
 }
-
-const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20MB
 
 export const ImageUpload = ({
   onImageUpload,
@@ -30,36 +33,18 @@ export const ImageUpload = ({
   const projectInputRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(
-    (file: File) => {
-      if (!file.type.startsWith("image/")) {
-        toast.error("Please upload an image file (JPG, PNG, GIF, WebP)");
-        return;
-      }
-
-      // SVG can taint the canvas (breaking export) and is a known XSS foot-gun;
-      // this is a raster editor, so keep it to raster formats.
-      if (file.type === "image/svg+xml") {
-        toast.error("SVG files aren't supported. Please use PNG, JPG, or WebP.");
-        return;
-      }
-
-      if (file.size > MAX_FILE_SIZE) {
-        toast.warning(
-          `File is ${(file.size / (1024 * 1024)).toFixed(1)}MB. Large files may cause performance issues.`,
-          { duration: 5000 }
-        );
-      }
-
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const dataUrl = event.target?.result as string;
+    async (file: File) => {
+      try {
+        const { dataUrl } = await readSafeRasterImage(file);
         onImageUpload(dataUrl);
         toast.success("Image uploaded successfully!");
-      };
-      reader.onerror = () => {
-        toast.error("Failed to read the file. Please try again.");
-      };
-      reader.readAsDataURL(file);
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to read the image. Please try again."
+        );
+      }
     },
     [onImageUpload]
   );
@@ -187,7 +172,7 @@ export const ImageUpload = ({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept={RASTER_FILE_ACCEPT}
         onChange={handleFileChange}
         data-testid="image-input"
         className="hidden"
@@ -197,7 +182,7 @@ export const ImageUpload = ({
           <span>Supports: JPG, PNG, GIF, WebP</span>
           <span className="flex items-center gap-1">
             <AlertTriangle className="h-3 w-3" />
-            Max recommended: 20MB
+            Max: {Math.round(MAX_IMAGE_FILE_BYTES / (1024 * 1024))}MB / 50MP
           </span>
         </div>
       </div>
@@ -215,6 +200,7 @@ export const ImageUpload = ({
             ref={projectInputRef}
             type="file"
             accept=".json,application/json"
+            data-testid="project-input"
             onChange={(e) => {
               const file = e.target.files?.[0];
               e.target.value = "";

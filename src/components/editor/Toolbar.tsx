@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Tool } from "@/types/editor";
 import { toast } from "sonner";
+import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
 
 interface ToolbarProps {
   activeTool: Tool;
@@ -60,18 +61,14 @@ export const Toolbar = ({
 }: ToolbarProps) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
 
-  const handleAddImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAddImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !fabricCanvas) return;
-    if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
-      toast.error("Please choose a raster image (PNG, JPG, WebP)");
-      return;
-    }
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const img = await FabricImage.fromURL(reader.result as string);
+    try {
+      const { dataUrl } = await readSafeRasterImage(file);
+      const img = await FabricImage.fromURL(dataUrl);
 
       // At most half the visible area, centered in the current viewport
       const viewZoom = fabricCanvas.getZoom() || 1;
@@ -93,9 +90,11 @@ export const Toolbar = ({
       fabricCanvas.renderAll();
       onToolChange("select");
       toast.success("Image added!");
-    };
-    reader.onerror = () => toast.error("Failed to read the file");
-    reader.readAsDataURL(file);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to add the image"
+      );
+    }
   };
 
   const handleDelete = () => {
@@ -178,7 +177,7 @@ export const Toolbar = ({
       <input
         ref={imageInputRef}
         type="file"
-        accept="image/*"
+        accept={RASTER_FILE_ACCEPT}
         onChange={handleAddImageFile}
         className="hidden"
       />

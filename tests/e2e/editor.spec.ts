@@ -29,6 +29,73 @@ test("uploading an image opens the editor", async ({ page }) => {
   await expect(page.locator("canvas").first()).toBeVisible();
 });
 
+test("rejects a spoofed image MIME type before decoding", async ({ page }) => {
+  await page.getByTestId("image-input").setInputFiles({
+    name: "not-really-a-png.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'></svg>"),
+  });
+
+  await expect(page.getByText("Upload an Image")).toBeVisible();
+  await expect(page.getByText(/Unsupported or invalid image/)).toBeVisible();
+});
+
+test("recovers when a signed image is still undecodable", async ({ page }) => {
+  const corruptPng = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(
+    corruptPng
+  );
+  Buffer.from("IHDR").copy(corruptPng, 12);
+  corruptPng.writeUInt32BE(4, 16);
+  corruptPng.writeUInt32BE(4, 20);
+
+  await page.getByTestId("image-input").setInputFiles({
+    name: "corrupt.png",
+    mimeType: "image/png",
+    buffer: corruptPng,
+  });
+
+  await expect(page.getByText("Upload an Image")).toBeVisible();
+  await expect(page.getByText(/could not be decoded safely/)).toBeVisible();
+});
+
+test("rejects project patterns that could fetch an external resource", async ({
+  page,
+}) => {
+  let externalRequestSeen = false;
+  page.on("request", (request) => {
+    if (request.url().startsWith("https://evil.example/")) {
+      externalRequestSeen = true;
+    }
+  });
+  const snapshot = {
+    json: JSON.stringify({
+      objects: [
+        {
+          type: "Rect",
+          width: 10,
+          height: 10,
+          fill: {
+            type: "pattern",
+            source: "https://evil.example/pixel.png",
+          },
+        },
+      ],
+    }),
+    srcs: [],
+  };
+
+  await page.getByTestId("project-input").setInputFiles({
+    name: "hostile.imgedit.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ version: 1, snapshot })),
+  });
+
+  await expect(page.getByText("Upload an Image")).toBeVisible();
+  await expect(page.getByText(/unsupported object type/i)).toBeVisible();
+  expect(externalRequestSeen).toBe(false);
+});
+
 test("adding a shape selects it, and undo removes it", async ({ page }) => {
   await uploadImage(page);
 
@@ -59,8 +126,16 @@ test("exports a PNG", async ({ page }) => {
 
 test("saves a re-editable project file", async ({ page }) => {
   await uploadImage(page);
+  await page.getByRole("button", { name: "Arrow (A)" }).click();
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Save project" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.imgedit\.json$/);
+
+  const savedPath = await download.path();
+  expect(savedPath).toBeTruthy();
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Start new" }).click();
+  await page.getByTestId("project-input").setInputFiles(savedPath!);
+  await expect(page.getByText("Remove BG")).toBeVisible();
 });

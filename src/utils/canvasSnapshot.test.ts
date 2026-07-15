@@ -38,13 +38,26 @@ describe("takeSnapshot / parseSnapshot", () => {
     expect(snapshot.json.length).toBeLessThan(200);
   });
 
-  it("deduplicates nothing but lets callers share srcs by reference", () => {
+  it("lets snapshots share source strings by reference", () => {
     // Two snapshots of the same image should reference an equal src string,
     // so the history array holds pointers, not copies
     const data = { objects: [{ type: "image", src: BIG_SRC }] };
     const a = takeSnapshot(fakeCanvas(data));
     const b = takeSnapshot(fakeCanvas(data));
     expect(a.srcs[0]).toBe(b.srcs[0]);
+  });
+
+  it("deduplicates repeated image sources within one snapshot", () => {
+    const data = {
+      objects: [
+        { type: "image", src: BIG_SRC },
+        { type: "image", src: BIG_SRC },
+      ],
+    };
+    const snapshot = takeSnapshot(fakeCanvas(data));
+    expect(snapshot.srcs).toEqual([BIG_SRC]);
+    expect(snapshot.json).toContain("__snapshot_src_0");
+    expect(parseSnapshot(snapshot)).toEqual(data);
   });
 
   it("handles multiple images and preserves their order", () => {
