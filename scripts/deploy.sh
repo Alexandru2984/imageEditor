@@ -8,8 +8,19 @@ umask 022
 readonly HOST="imageeditor.micutu.com"
 readonly DOCROOT="/var/www/$HOST"
 readonly ASSET_RETENTION_DAYS="${ASSET_RETENTION_DAYS:-35}"
+readonly RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 cd "$(dirname "$0")/.."
+
+if [[ ! -d "$RUNTIME_DIR" || ! -w "$RUNTIME_DIR" ]]; then
+  echo "A private writable runtime directory is required for the deploy lock" >&2
+  exit 1
+fi
+exec 9>"$RUNTIME_DIR/imageeditor-deploy.lock"
+if ! flock -n 9; then
+  echo "Another image editor deploy is already running" >&2
+  exit 1
+fi
 
 if [[ ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]]; then
   echo "ASSET_RETENTION_DAYS must be a non-negative integer" >&2
@@ -28,6 +39,7 @@ echo "==> Auditing, linting, testing, typechecking and building"
 npm run audit
 npm run audit:signatures
 npm run check
+npm run test:e2e
 
 if [[ ! -f dist/index.html || ! -d dist/assets ]]; then
   echo "Build output is incomplete" >&2
@@ -56,14 +68,22 @@ rollback() {
 trap rollback EXIT
 
 echo "==> Copying new assets before publishing the new index"
-sudo install -d -o www-data -g www-data -m 0755 "$DOCROOT"
-sudo rsync -a --chown=www-data:www-data --exclude=/index.html dist/ "$DOCROOT/"
+sudo install -d -o root -g root -m 0755 "$DOCROOT"
+sudo rsync -a --chown=root:root --chmod=D755,F644 \
+  --exclude=/index.html dist/ "$DOCROOT/"
+
+# Nginx only needs read access. Normalize retained assets too, so a compromised
+# worker cannot persist by replacing executable site content.
+sudo chown -R root:root "$DOCROOT"
+sudo find "$DOCROOT" -type d -exec chmod 0755 {} +
+sudo find "$DOCROOT" -type f -exec chmod 0644 {} +
 
 if sudo test -f "$DOCROOT/index.html"; then
-  sudo cp -a "$DOCROOT/index.html" "$PREVIOUS_INDEX"
+  sudo install -o root -g root -m 0644 \
+    "$DOCROOT/index.html" "$PREVIOUS_INDEX"
   had_previous_index=true
 fi
-sudo install -o www-data -g www-data -m 0644 dist/index.html "$NEXT_INDEX"
+sudo install -o root -g root -m 0644 dist/index.html "$NEXT_INDEX"
 sudo mv -fT "$NEXT_INDEX" "$DOCROOT/index.html"
 published=true
 

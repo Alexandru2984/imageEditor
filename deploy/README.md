@@ -18,12 +18,14 @@ Deploy a clean, committed revision with:
 ./scripts/deploy.sh
 ```
 
-The deploy script performs a locked install with lifecycle scripts disabled,
-verifies registry signatures, runs the vulnerability and quality gates, copies
-hashed assets before atomically publishing `index.html`, verifies the localhost
-origin, and rolls the index back if that smoke test fails. It keeps old hashed
-assets for 35 days by default, slightly longer than their 30-day browser cache
-lifetime. Override retention only when necessary, for example
+The deploy script takes an exclusive per-user lock, performs a locked install
+with lifecycle scripts disabled, verifies registry signatures, runs the
+vulnerability, unit, build, and browser E2E gates, then copies hashed assets
+before atomically publishing `index.html`. Site files are root-owned and
+read-only to the Nginx worker. The script verifies the localhost origin and
+rolls the index back if that smoke test fails. It keeps old hashed assets for 35
+days by default, slightly longer than their 30-day browser cache lifetime.
+Override retention only when necessary, for example
 `ASSET_RETENTION_DAYS=60 ./scripts/deploy.sh`.
 
 Cloudflare features that rewrite HTML or inject scripts (including Browser
