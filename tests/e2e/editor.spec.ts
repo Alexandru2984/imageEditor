@@ -309,9 +309,26 @@ test("keyboard shortcut selects the marquee tool", async ({ page }) => {
 test("exports a PNG", async ({ page }) => {
   await uploadImage(page);
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "PNG", exact: true }).click();
+  await page.getByRole("button", { name: "Export PNG" }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.png$/);
+});
+
+test("applies and undoes a crop without corrupting the canvas", async ({
+  page,
+}) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  await uploadImage(page);
+
+  await page.getByRole("button", { name: "Crop (K)" }).click();
+  await page.getByRole("button", { name: "Apply crop" }).click();
+  await expect(page.getByRole("button", { name: "Apply crop" })).toHaveCount(0);
+  await expect(page.locator("canvas").first()).toBeVisible();
+
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("canvas").first()).toBeVisible();
+  expect(pageErrors).toEqual([]);
 });
 
 test("runs the pinned background-removal model end to end", async ({ page }) => {

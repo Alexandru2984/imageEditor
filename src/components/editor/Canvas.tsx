@@ -21,6 +21,7 @@ import {
   SquareDashedBottom,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { flattenRegion } from "@/utils/flatten";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
@@ -60,6 +61,15 @@ function brushShadow(color: string, hardness: number, width: number): Shadow | n
   return new Shadow({ color, blur, offsetX: 0, offsetY: 0 });
 }
 
+const abortError = (): Error => {
+  const error = new Error("Canvas operation was cancelled");
+  error.name = "AbortError";
+  return error;
+};
+
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
 export const Canvas = ({
   activeTool,
   activeColor,
@@ -78,6 +88,10 @@ export const Canvas = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricCanvasRef = useRef<FabricCanvas | null>(null);
   const prevToolRef = useRef<Tool>(activeTool);
+  const generatedImageControllerRef = useRef<AbortController | null>(null);
+  const documentRevisionRef = useRef(0);
+  const rasterBusyRef = useRef(false);
+  const [isRasterizing, setIsRasterizing] = useState(false);
   const cropRectRef = useRef<Rect | null>(null);
   const spaceDownRef = useRef(false);
   // Latest brush opacity, read by the path:created handler set up once at init
@@ -92,6 +106,29 @@ export const Canvas = ({
   // target a "Mask" operation clips to (masking needs both a layer and a region)
   const preMarqueeTargetRef = useRef<FabricImage | null>(null);
   const [canMask, setCanMask] = useState(false);
+
+  const loadGeneratedImage = useCallback(async (dataUrl: string) => {
+    generatedImageControllerRef.current?.abort();
+    const controller = new AbortController();
+    generatedImageControllerRef.current = controller;
+    try {
+      const image = await FabricImage.fromURL(dataUrl, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) {
+        image.dispose();
+        throw abortError();
+      }
+      return image;
+    } catch (error) {
+      if (controller.signal.aborted) throw abortError();
+      throw error;
+    } finally {
+      if (generatedImageControllerRef.current === controller) {
+        generatedImageControllerRef.current = null;
+      }
+    }
+  }, []);
 
   // ---------- Responsive canvas sizing ----------
   const fitCanvasToContainer = useCallback(() => {
@@ -144,6 +181,14 @@ export const Canvas = ({
         !isBackgroundObject(object) && !isObjectLocked(object);
     };
     canvas.on("object:added", markErasable);
+
+    const trackDocumentChange = (e: { target?: unknown }) => {
+      const object = e.target as FabricObject | undefined;
+      if (!object || !isEditorChrome(object)) documentRevisionRef.current += 1;
+    };
+    canvas.on("object:added", trackDocumentChange);
+    canvas.on("object:removed", trackDocumentChange);
+    canvas.on("object:modified", trackDocumentChange);
 
     // Brush strokes get the current brush opacity (a whole-stroke cap, like
     // Photoshop's Opacity — set on the path so overlaps within a stroke don't
@@ -372,6 +417,9 @@ export const Canvas = ({
     return () => {
       disposed = true;
       loadController.abort();
+      generatedImageControllerRef.current?.abort();
+      generatedImageControllerRef.current = null;
+      rasterBusyRef.current = false;
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
       window.removeEventListener("mousemove", handleWindowMouseMove);
@@ -389,6 +437,7 @@ export const Canvas = ({
         capture: true,
       });
       resizeObserver.disconnect();
+      if (fabricCanvasRef.current === canvas) fabricCanvasRef.current = null;
       canvas.dispose();
     };
     // The canvas is intentionally recreated only when its document source changes.
@@ -611,19 +660,40 @@ export const Canvas = ({
   };
 
   // ---------- Apply / cancel crop ----------
-  const applyCrop = useCallback(() => {
+  const applyCrop = useCallback(async () => {
     const canvas = fabricCanvasRef.current;
     const cropRect = cropRectRef.current;
-    if (!canvas || !cropRect) return;
+    if (!canvas || !cropRect || rasterBusyRef.current) return;
+
+    rasterBusyRef.current = true;
+    setIsRasterizing(true);
+    const revision = documentRevisionRef.current;
 
     const region = cropRect.getBoundingRect();
-    removeCropOverlay(canvas);
-    canvas.discardActiveObject();
+    try {
+      // Hide editor chrome during flattening, restoring it even if rendering
+      // fails so the user can adjust/retry the crop.
+      cropRect.visible = false;
+      let flattened: ReturnType<typeof flattenRegion>;
+      try {
+        flattened = flattenRegion(canvas, region);
+      } finally {
+        cropRect.visible = true;
+        canvas.requestRenderAll();
+      }
 
-    // Flatten the region at the background's native resolution into a new bg.
-    const dataURL = flattenRegion(canvas, region);
+      const img = await loadGeneratedImage(flattened.dataUrl);
+      if (
+        fabricCanvasRef.current !== canvas ||
+        documentRevisionRef.current !== revision ||
+        prevToolRef.current !== "crop"
+      ) {
+        img.dispose();
+        return;
+      }
 
-    FabricImage.fromURL(dataURL).then((img) => {
+      removeCropOverlay(canvas);
+      canvas.discardActiveObject();
       canvas.remove(...canvas.getObjects());
 
       const canvasW = canvas.width!;
@@ -643,12 +713,25 @@ export const Canvas = ({
       canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
       onZoomChange(1);
       canvas.renderAll();
-    });
-
-    onToolChange("select");
-  }, [onToolChange, onZoomChange]);
+      onToolChange("select");
+      if (flattened.limited) {
+        toast.warning(
+          `Crop was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
+        );
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.error("Crop failed:", error);
+        toast.error(error instanceof Error ? error.message : "Crop failed");
+      }
+    } finally {
+      rasterBusyRef.current = false;
+      setIsRasterizing(false);
+    }
+  }, [loadGeneratedImage, onToolChange, onZoomChange]);
 
   const cancelCrop = useCallback(() => {
+    generatedImageControllerRef.current?.abort();
     const canvas = fabricCanvasRef.current;
     if (canvas) {
       removeCropOverlay(canvas);
@@ -769,39 +852,91 @@ export const Canvas = ({
     };
   }, [activeTool, animateMarchingAnts]);
 
-  const newLayerFromSelection = useCallback(() => {
+  const newLayerFromSelection = useCallback(async () => {
     const canvas = fabricCanvasRef.current;
     const rect = marqueeRef.current;
-    if (!canvas || !rect) return;
+    if (!canvas || !rect || rasterBusyRef.current) return;
+
+    rasterBusyRef.current = true;
+    setIsRasterizing(true);
+    const revision = documentRevisionRef.current;
 
     const region = rect.getBoundingRect();
-    // Hide the overlay so it doesn't tint the flattened pixels
-    rect.visible = false;
-    const dataURL = flattenRegion(canvas, region);
-    rect.visible = true;
+    try {
+      // Hide the overlay so it does not tint the flattened pixels.
+      rect.visible = false;
+      let flattened: ReturnType<typeof flattenRegion>;
+      try {
+        flattened = flattenRegion(canvas, region);
+      } finally {
+        rect.visible = true;
+        canvas.requestRenderAll();
+      }
 
-    FabricImage.fromURL(dataURL).then((img) => {
+      const img = await loadGeneratedImage(flattened.dataUrl);
+      if (
+        fabricCanvasRef.current !== canvas ||
+        documentRevisionRef.current !== revision ||
+        prevToolRef.current !== "marquee"
+      ) {
+        img.dispose();
+        return;
+      }
       img.set({ left: region.left, top: region.top });
       img.scaleToWidth(region.width);
       removeMarquee(canvas);
       canvas.add(img);
       canvas.setActiveObject(img);
       canvas.renderAll();
-    });
-    onToolChange("select");
-  }, [onToolChange]);
+      onToolChange("select");
+      if (flattened.limited) {
+        toast.warning(
+          `Selection was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
+        );
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.error("Selection copy failed:", error);
+        toast.error(
+          error instanceof Error ? error.message : "Could not create the layer"
+        );
+      }
+    } finally {
+      rasterBusyRef.current = false;
+      setIsRasterizing(false);
+    }
+  }, [loadGeneratedImage, onToolChange]);
 
-  const cropToSelection = useCallback(() => {
+  const cropToSelection = useCallback(async () => {
     const canvas = fabricCanvasRef.current;
     const rect = marqueeRef.current;
-    if (!canvas || !rect) return;
+    if (!canvas || !rect || rasterBusyRef.current) return;
+
+    rasterBusyRef.current = true;
+    setIsRasterizing(true);
+    const revision = documentRevisionRef.current;
 
     const region = rect.getBoundingRect();
-    rect.visible = false;
-    const dataURL = flattenRegion(canvas, region);
-    removeMarquee(canvas);
+    try {
+      rect.visible = false;
+      let flattened: ReturnType<typeof flattenRegion>;
+      try {
+        flattened = flattenRegion(canvas, region);
+      } finally {
+        rect.visible = true;
+        canvas.requestRenderAll();
+      }
 
-    FabricImage.fromURL(dataURL).then((img) => {
+      const img = await loadGeneratedImage(flattened.dataUrl);
+      if (
+        fabricCanvasRef.current !== canvas ||
+        documentRevisionRef.current !== revision ||
+        prevToolRef.current !== "marquee"
+      ) {
+        img.dispose();
+        return;
+      }
+      removeMarquee(canvas);
       canvas.remove(...canvas.getObjects());
       const scale = Math.min(
         (canvas.width! * 0.85) / img.width!,
@@ -818,9 +953,22 @@ export const Canvas = ({
       canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
       onZoomChange(1);
       canvas.renderAll();
-    });
-    onToolChange("select");
-  }, [onToolChange, onZoomChange]);
+      onToolChange("select");
+      if (flattened.limited) {
+        toast.warning(
+          `Crop was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
+        );
+      }
+    } catch (error) {
+      if (!isAbortError(error)) {
+        console.error("Selection crop failed:", error);
+        toast.error(error instanceof Error ? error.message : "Crop failed");
+      }
+    } finally {
+      rasterBusyRef.current = false;
+      setIsRasterizing(false);
+    }
+  }, [loadGeneratedImage, onToolChange, onZoomChange]);
 
   // Clip the previously-selected image layer to the selection (a
   // non-destructive mask — the pixels are untouched and it can be released).
@@ -828,7 +976,7 @@ export const Canvas = ({
     const canvas = fabricCanvasRef.current;
     const rect = marqueeRef.current;
     const target = preMarqueeTargetRef.current;
-    if (!canvas || !rect || !target) return;
+    if (!canvas || !rect || !target || rasterBusyRef.current) return;
 
     const region = rect.getBoundingRect();
     const clip = new Rect({
@@ -848,6 +996,7 @@ export const Canvas = ({
   }, [onToolChange]);
 
   const cancelMarquee = useCallback(() => {
+    generatedImageControllerRef.current?.abort();
     const canvas = fabricCanvasRef.current;
     if (canvas) {
       removeMarquee(canvas);
@@ -876,10 +1025,25 @@ export const Canvas = ({
     >
       <canvas ref={canvasRef} />
 
+      {isRasterizing && (
+        <div
+          className="absolute inset-0 z-[5] cursor-wait bg-transparent"
+          aria-hidden="true"
+        />
+      )}
+      <span className="sr-only" role="status" aria-live="polite">
+        {isRasterizing ? "Rendering image operation" : ""}
+      </span>
+
       {/* Crop confirmation controls */}
       {activeTool === "crop" && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg bg-[hsl(var(--editor-panel))] border border-border shadow-lg px-2 py-1.5">
-          <Button size="sm" className="h-8" onClick={applyCrop}>
+          <Button
+            size="sm"
+            className="h-8"
+            onClick={() => void applyCrop()}
+            disabled={isRasterizing}
+          >
             <Check className="h-4 w-4 mr-1" />
             Apply crop
           </Button>
@@ -899,7 +1063,12 @@ export const Canvas = ({
             </span>
           ) : (
             <>
-              <Button size="sm" className="h-8" onClick={newLayerFromSelection}>
+              <Button
+                size="sm"
+                className="h-8"
+                onClick={() => void newLayerFromSelection()}
+                disabled={isRasterizing}
+              >
                 <Copy className="h-4 w-4 mr-1" />
                 New layer
               </Button>
@@ -909,6 +1078,7 @@ export const Canvas = ({
                   variant="ghost"
                   className="h-8"
                   onClick={maskToSelection}
+                  disabled={isRasterizing}
                 >
                   <SquareDashedBottom className="h-4 w-4 mr-1" />
                   Mask
@@ -918,7 +1088,8 @@ export const Canvas = ({
                 size="sm"
                 variant="ghost"
                 className="h-8"
-                onClick={cropToSelection}
+                onClick={() => void cropToSelection()}
+                disabled={isRasterizing}
               >
                 <CropIcon className="h-4 w-4 mr-1" />
                 Crop to this

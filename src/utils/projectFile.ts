@@ -5,6 +5,7 @@ import {
   MAX_EMBEDDED_IMAGE_BYTES,
   inspectRasterDataUrl,
 } from "./imageFile";
+import { downloadBlob } from "./download";
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -245,12 +246,7 @@ export function downloadProjectFile(canvas: FabricCanvas): void {
   if (blob.size > MAX_PROJECT_BYTES) {
     throw new Error("Project is too large to save safely");
   }
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `project-${Date.now()}.imgedit.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadBlob(blob, `project-${Date.now()}.imgedit.json`);
 }
 
 export async function readProjectFile(file: File): Promise<CanvasSnapshot> {

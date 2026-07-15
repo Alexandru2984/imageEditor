@@ -41,8 +41,10 @@ import {
   isProtectedObject,
   markBackgroundObject,
 } from "@/utils/editorObjects";
+import { renderRegionBlob } from "@/utils/flatten";
+import { downloadBlob } from "@/utils/download";
 import { FabricImage, Point } from "fabric";
-import type { Canvas as FabricCanvas, FabricObject, TMat2D } from "fabric";
+import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 
 interface TopBarProps {
   fabricCanvas: FabricCanvas | null;
@@ -86,6 +88,7 @@ export const TopBar = ({
   onToggleLayers,
 }: TopBarProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [processingMessage, setProcessingMessage] = useState<string | null>(
     null
   );
@@ -250,45 +253,50 @@ export const TopBar = ({
     }
   }, [fabricCanvas, uploadedImage, getSubjectSource]);
 
-  const handleExport = (format: "png" | "jpg") => {
-    if (!fabricCanvas) return;
+  const handleExport = async (format: "png" | "jpg") => {
+    if (!fabricCanvas || isExporting) return;
+    setIsExporting(true);
 
-    // Export in scene coordinates regardless of current zoom/pan
-    const prevVpt = [...fabricCanvas.viewportTransform] as TMat2D;
-    fabricCanvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+    try {
+      // Crop to the background bounds and request its native resolution so the
+      // export is not a viewport screenshot with editor margins.
+      const background = findBackgroundImage(fabricCanvas);
+      const region = background
+        ? background.getBoundingRect()
+        : {
+            left: 0,
+            top: 0,
+            width: fabricCanvas.width,
+            height: fabricCanvas.height,
+          };
+      const displayedWidth = background?.getScaledWidth() ?? 1;
+      const requestedMultiplier = background
+        ? background.width / displayedWidth
+        : 1;
+      const { blob, plan } = await renderRegionBlob(
+        fabricCanvas,
+        region,
+        requestedMultiplier,
+        format === "png" ? "png" : "jpeg",
+        format === "png" ? 1 : 0.92
+      );
 
-    // Crop to the background image bounds and upscale back to its
-    // native resolution, so the export isn't a screen-sized screenshot
-    // with dark margins around it.
-    const bgImage = findBackgroundImage(fabricCanvas);
-
-    let crop: Record<string, number> = {};
-    if (bgImage) {
-      const rect = bgImage.getBoundingRect();
-      crop = {
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-        multiplier: bgImage.width / bgImage.getScaledWidth(),
-      };
+      downloadBlob(blob, `image-editor-export.${format}`);
+      toast.success(
+        plan.limited
+          ? `Exported ${plan.outputWidth}×${plan.outputHeight} ${format.toUpperCase()} (browser safety limit).`
+          : `Exported as ${format.toUpperCase()}!`
+      );
+    } catch (error) {
+      console.error("Image export failed:", error);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "The image could not be exported"
+      );
+    } finally {
+      setIsExporting(false);
     }
-
-    const dataURL = fabricCanvas.toDataURL({
-      format: format === "png" ? "png" : "jpeg",
-      quality: 1,
-      multiplier: 1,
-      ...crop,
-    });
-
-    fabricCanvas.setViewportTransform(prevVpt);
-
-    const link = document.createElement("a");
-    link.download = `image-editor-export.${format}`;
-    link.href = dataURL;
-    link.click();
-
-    toast.success(`Exported as ${format.toUpperCase()}!`);
   };
 
   const handleRotate = () => {
@@ -531,7 +539,9 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size={isMobile ? "icon" : "sm"}
-                onClick={() => handleExport("png")}
+                aria-label="Export PNG"
+                onClick={() => void handleExport("png")}
+                disabled={isProcessing || isExporting}
                 className={isMobile ? "h-9 w-9" : "h-9"}
               >
                 <Download className="h-4 w-4" />
@@ -548,7 +558,9 @@ export const TopBar = ({
               <Button
                 variant="default"
                 size={isMobile ? "icon" : "sm"}
-                onClick={() => handleExport("jpg")}
+                aria-label="Export JPG"
+                onClick={() => void handleExport("jpg")}
+                disabled={isProcessing || isExporting}
                 className={isMobile ? "h-9 w-9" : "h-9"}
               >
                 <Download className="h-4 w-4" />

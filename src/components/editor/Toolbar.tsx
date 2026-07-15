@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import {
   MousePointer2,
   Pencil,
@@ -65,15 +65,38 @@ export const Toolbar = ({
   isMobile,
 }: ToolbarProps) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageLoadControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      imageLoadControllerRef.current?.abort();
+      imageLoadControllerRef.current = null;
+    },
+    [fabricCanvas]
+  );
 
   const handleAddImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !fabricCanvas) return;
 
+    imageLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    imageLoadControllerRef.current = controller;
     try {
       const { dataUrl } = await readSafeRasterImage(file);
-      const img = await FabricImage.fromURL(dataUrl);
+      if (controller.signal.aborted) return;
+      const img = await FabricImage.fromURL(dataUrl, {
+        signal: controller.signal,
+      });
+      if (
+        controller.signal.aborted ||
+        fabricCanvas.disposed ||
+        fabricCanvas.destroyed
+      ) {
+        img.dispose();
+        return;
+      }
 
       // At most half the visible area, centered in the current viewport
       const viewZoom = fabricCanvas.getZoom() || 1;
@@ -96,9 +119,15 @@ export const Toolbar = ({
       onToolChange("select");
       toast.success("Image added!");
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to add the image"
-      );
+      if (!controller.signal.aborted) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to add the image"
+        );
+      }
+    } finally {
+      if (imageLoadControllerRef.current === controller) {
+        imageLoadControllerRef.current = null;
+      }
     }
   };
 
