@@ -84,6 +84,23 @@ test("shows the upload screen on first load", async ({ page }) => {
   await expect(page.getByText("Upload an Image")).toBeVisible();
 });
 
+test("renders unknown routes without logging user-controlled paths", async ({
+  page,
+}) => {
+  const consoleErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+
+  await page.goto("/missing-%3Cscript%3E");
+  await expect(page.getByRole("heading", { name: "404" })).toBeVisible();
+  await page.getByRole("link", { name: "Return to Home" }).click();
+  await expect(page.getByText("Upload an Image")).toBeVisible();
+  expect(consoleErrors.filter((message) => message.includes("404 Error"))).toEqual(
+    []
+  );
+});
+
 test("serves the production bundle with the hardened browser policy", async ({
   page,
   request,

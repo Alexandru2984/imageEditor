@@ -6,17 +6,17 @@ interface ErrorBoundaryProps {
 }
 
 interface ErrorBoundaryState {
-  error: Error | null;
+  hasError: boolean;
 }
 
 export class ErrorBoundary extends Component<
   ErrorBoundaryProps,
   ErrorBoundaryState
 > {
-  state: ErrorBoundaryState = { error: null };
+  state: ErrorBoundaryState = { hasError: false };
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { error };
+  static getDerivedStateFromError(): ErrorBoundaryState {
+    return { hasError: true };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -24,12 +24,16 @@ export class ErrorBoundary extends Component<
   }
 
   render() {
-    if (this.state.error) {
+    if (this.state.hasError) {
       return (
-        <div className="flex flex-col items-center justify-center h-screen gap-4 bg-background text-foreground p-6">
+        <div
+          role="alert"
+          className="flex flex-col items-center justify-center h-screen gap-4 bg-background text-foreground p-6"
+        >
           <h1 className="text-xl font-bold">Something went wrong</h1>
           <p className="text-sm text-muted-foreground max-w-md text-center break-words">
-            {this.state.error.message}
+            The editor hit an unexpected error. Your local recovery data was
+            left untouched; reload to try restoring the session.
           </p>
           <Button onClick={() => window.location.reload()}>Reload editor</Button>
         </div>
