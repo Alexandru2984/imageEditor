@@ -65,6 +65,128 @@ describe("readProjectFile", () => {
     await expect(readProjectFile(file)).resolves.toEqual(snapshot);
   });
 
+  it("accepts the editor's bounded image filter stack", async () => {
+    const snapshot = {
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "Image",
+            filters: [
+              { type: "Brightness", brightness: 0.5 },
+              { type: "Contrast", contrast: -1 },
+              { type: "Saturation", saturation: 1 },
+              { type: "Blur", blur: 0.25 },
+              { type: "HueRotation", rotation: -0.5 },
+            ],
+          },
+        ],
+      }),
+      srcs: [],
+    };
+
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).resolves.toEqual(snapshot);
+  });
+
+  it("rejects filter values that could overload Fabric's render pipeline", async () => {
+    const snapshot = {
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "Image",
+            filters: [{ type: "Blur", blur: 1_000_000 }],
+          },
+        ],
+      }),
+      srcs: [],
+    };
+
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).rejects.toThrow(/unsafe blur filter value/);
+  });
+
+  it("rejects injected filter implementation properties", async () => {
+    const snapshot = {
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "Image",
+            filters: [
+              {
+                type: "Brightness",
+                brightness: 0,
+                fragmentSource: "attacker-controlled shader",
+              },
+            ],
+          },
+        ],
+      }),
+      srcs: [],
+    };
+
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).rejects.toThrow(/unsupported brightness filter property/);
+  });
+
+  it("limits the number of filters applied to a single image", async () => {
+    const snapshot = {
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "Image",
+            filters: Array.from({ length: 17 }, () => ({
+              type: "Brightness",
+              brightness: 0,
+            })),
+          },
+        ],
+      }),
+      srcs: [],
+    };
+
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).rejects.toThrow(/too many image filters/);
+  });
+
+  it("rejects unsafe object dimensions and numeric strings", async () => {
+    const oversized = {
+      json: JSON.stringify({
+        objects: [{ type: "Rect", width: 100_001, height: 10 }],
+      }),
+      srcs: [],
+    };
+    const coerced = {
+      json: JSON.stringify({
+        objects: [{ type: "Rect", width: 10, height: 10, opacity: "Infinity" }],
+      }),
+      srcs: [],
+    };
+
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: oversized })))
+    ).rejects.toThrow(/unsafe width value/);
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: coerced })))
+    ).rejects.toThrow(/unsafe opacity value/);
+  });
+
+  it("rejects text layers large enough to monopolize font measurement", async () => {
+    const snapshot = {
+      json: JSON.stringify({
+        objects: [{ type: "IText", text: "x".repeat(20_001) }],
+      }),
+      srcs: [],
+    };
+
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).rejects.toThrow(/unsafe text value/);
+  });
+
   it("rejects an extracted src pointing at an external URL", async () => {
     const snapshot = {
       json: '{"objects":[{"type":"image","src":"__snapshot_src_0"}]}',

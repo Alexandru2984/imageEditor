@@ -175,6 +175,31 @@ test("rejects project patterns that could fetch an external resource", async ({
   expect(externalRequestSeen).toBe(false);
 });
 
+test("rejects hostile filter parameters before Fabric renders them", async ({
+  page,
+}) => {
+  const snapshot = {
+    json: JSON.stringify({
+      objects: [
+        {
+          type: "Image",
+          filters: [{ type: "Blur", blur: 1_000_000 }],
+        },
+      ],
+    }),
+    srcs: [],
+  };
+
+  await page.getByTestId("project-input").setInputFiles({
+    name: "hostile-filter.imgedit.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ version: 1, snapshot })),
+  });
+
+  await expect(page.getByText("Upload an Image")).toBeVisible();
+  await expect(page.getByText(/unsafe blur filter value/i)).toBeVisible();
+});
+
 test("quarantines an unsafe IndexedDB autosave before Fabric loads it", async ({
   page,
 }) => {

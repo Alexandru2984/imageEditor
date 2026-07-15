@@ -14,12 +14,18 @@ const MAX_PROJECT_BYTES = 96 * 1024 * 1024;
 const MAX_SNAPSHOT_JSON_CHARS = 8 * 1024 * 1024;
 const MAX_IMAGE_SOURCES = 256;
 const MAX_TOTAL_IMAGE_BYTES = 72 * 1024 * 1024;
-const MAX_TYPED_OBJECTS = 5_000;
+const MAX_TYPED_OBJECTS = 2_000;
 const MAX_NODES = 100_000;
 const MAX_DEPTH = 64;
 const MAX_ARRAY_ENTRIES = 50_000;
-const MAX_STRING_CHARS = 1_000_000;
-const MAX_ABSOLUTE_NUMBER = 1_000_000_000;
+const MAX_FILTERS_PER_IMAGE = 16;
+const MAX_STROKE_DASH_ENTRIES = 256;
+const MAX_STRING_CHARS = 100_000;
+const MAX_TEXT_CHARS = 20_000;
+const MAX_ABSOLUTE_NUMBER = 10_000_000;
+const MAX_OBJECT_DIMENSION = 100_000;
+const MAX_OBJECT_SCALE = 10_000;
+const MAX_BLUR = 4_096;
 
 const DANGEROUS_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const ALLOWED_SERIALIZED_TYPES = new Set([
@@ -46,12 +52,91 @@ const ALLOWED_SERIALIZED_TYPES = new Set([
   "fixed",
   "fit-content",
   "clip-path",
-  "brightness",
-  "contrast",
-  "saturation",
-  "blur",
-  "huerotation",
 ]);
+
+const FILTER_PARAMETERS = new Map<string, string>([
+  ["brightness", "brightness"],
+  ["contrast", "contrast"],
+  ["saturation", "saturation"],
+  ["blur", "blur"],
+  ["huerotation", "rotation"],
+]);
+
+const NUMERIC_PROPERTY_LIMITS = new Map<
+  string,
+  { min: number; max: number }
+>([
+  ["opacity", { min: 0, max: 1 }],
+  ["width", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["height", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["radius", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["rx", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["ry", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["strokeWidth", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["strokeMiterLimit", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["fontSize", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["lineHeight", { min: 0, max: 1_000 }],
+  ["charSpacing", { min: -100_000, max: 100_000 }],
+  ["deltaY", { min: -MAX_OBJECT_DIMENSION, max: MAX_OBJECT_DIMENSION }],
+  ["scaleX", { min: -MAX_OBJECT_SCALE, max: MAX_OBJECT_SCALE }],
+  ["scaleY", { min: -MAX_OBJECT_SCALE, max: MAX_OBJECT_SCALE }],
+  ["cropX", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["cropY", { min: 0, max: MAX_OBJECT_DIMENSION }],
+  ["blur", { min: 0, max: MAX_BLUR }],
+]);
+
+const STRING_PROPERTY_LIMITS = new Map<string, number>([
+  ["text", MAX_TEXT_CHARS],
+  ["name", 256],
+  ["fontFamily", 256],
+  ["fontStyle", 64],
+  ["textAlign", 64],
+  ["globalCompositeOperation", 64],
+]);
+
+function assertSafeNumericProperty(key: string, value: unknown): void {
+  const limits = NUMERIC_PROPERTY_LIMITS.get(key);
+  if (!limits) return;
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < limits.min ||
+    value > limits.max
+  ) {
+    throw new Error(`Project contains an unsafe ${key} value`);
+  }
+}
+
+function assertSafeStringProperty(key: string, value: unknown): void {
+  const maxLength = STRING_PROPERTY_LIMITS.get(key);
+  if (!maxLength) return;
+  if (typeof value !== "string" || value.length > maxLength) {
+    throw new Error(`Project contains an unsafe ${key} value`);
+  }
+}
+
+function assertSafeFilter(object: Record<string, unknown>): void {
+  const type = typeof object.type === "string" ? object.type.toLowerCase() : "";
+  const parameter = FILTER_PARAMETERS.get(type);
+  if (!parameter) throw new Error(`Project contains unsupported filter type: ${type}`);
+
+  for (const key of Object.keys(object)) {
+    if (key !== "type" && key !== parameter) {
+      throw new Error(`Project contains an unsupported ${type} filter property`);
+    }
+  }
+
+  const value = object[parameter];
+  if (
+    value !== undefined &&
+    (typeof value !== "number" || !Number.isFinite(value) || value < -1 || value > 1)
+  ) {
+    throw new Error(`Project contains an unsafe ${type} filter value`);
+  }
+  if (type === "blur" && typeof value === "number" && value < 0) {
+    throw new Error("Project contains an unsafe blur filter value");
+  }
+}
 
 // Formal shape of a project file. Zod guards the structure; assertSafeSources
 // (below) enforces the security invariant that every image source is inline.
@@ -138,14 +223,18 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
     throw new Error("Project snapshot does not contain a canvas object list");
   }
 
-  const pending: Array<{ value: unknown; depth: number }> = [
-    { value: document, depth: 0 },
+  const pending: Array<{
+    value: unknown;
+    depth: number;
+    kind: "canvas" | "filter";
+  }> = [
+    { value: document, depth: 0, kind: "canvas" },
   ];
   let nodeCount = 0;
   let typedObjectCount = 0;
 
   while (pending.length > 0) {
-    const { value, depth } = pending.pop()!;
+    const { value, depth, kind } = pending.pop()!;
     nodeCount += 1;
     if (nodeCount > MAX_NODES) throw new Error("Project is too complex");
     if (depth > MAX_DEPTH) throw new Error("Project nesting is too deep");
@@ -169,7 +258,7 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
         throw new Error("Project contains an oversized collection");
       }
       for (let index = value.length - 1; index >= 0; index -= 1) {
-        pending.push({ value: value[index], depth: depth + 1 });
+        pending.push({ value: value[index], depth: depth + 1, kind });
       }
       continue;
     }
@@ -180,9 +269,14 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
       if (typedObjectCount > MAX_TYPED_OBJECTS) {
         throw new Error("Project contains too many canvas objects");
       }
-      if (!ALLOWED_SERIALIZED_TYPES.has(object.type.toLowerCase())) {
+      const normalizedType = object.type.toLowerCase();
+      if (kind === "filter") {
+        assertSafeFilter(object);
+      } else if (!ALLOWED_SERIALIZED_TYPES.has(normalizedType)) {
         throw new Error(`Project contains unsupported object type: ${object.type}`);
       }
+    } else if (kind === "filter") {
+      throw new Error("Project contains an invalid serialized filter entry");
     }
 
     for (const key of Object.keys(object)) {
@@ -190,9 +284,15 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
         throw new Error("Project contains an unsafe property name");
       }
       const child = object[key];
+      assertSafeNumericProperty(key, child);
+      assertSafeStringProperty(key, child);
+
       if (key === "objects" || key === "filters") {
         if (!Array.isArray(child)) {
           throw new Error(`Project contains an invalid ${key} collection`);
+        }
+        if (key === "filters" && child.length > MAX_FILTERS_PER_IMAGE) {
+          throw new Error("Project contains too many image filters");
         }
         for (const entry of child) {
           if (
@@ -203,6 +303,42 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
           ) {
             throw new Error(`Project contains an invalid serialized ${key} entry`);
           }
+          pending.push({
+            value: entry,
+            depth: depth + 1,
+            kind: key === "filters" ? "filter" : "canvas",
+          });
+        }
+        continue;
+      }
+      if (key === "strokeDashArray" && child !== null) {
+        if (
+          !Array.isArray(child) ||
+          child.length > MAX_STROKE_DASH_ENTRIES ||
+          child.some(
+            (entry) =>
+              typeof entry !== "number" ||
+              !Number.isFinite(entry) ||
+              entry < 0 ||
+              entry > MAX_OBJECT_DIMENSION
+          )
+        ) {
+          throw new Error("Project contains an unsafe stroke dash pattern");
+        }
+      }
+      if (key === "transformMatrix" || key === "viewportTransform") {
+        if (
+          child !== null &&
+          (!Array.isArray(child) ||
+            child.length !== 6 ||
+            child.some(
+              (entry) =>
+                typeof entry !== "number" ||
+                !Number.isFinite(entry) ||
+                Math.abs(entry) > MAX_ABSOLUTE_NUMBER
+            ))
+        ) {
+          throw new Error(`Project contains an unsafe ${key}`);
         }
       }
       if (key === "src") {
@@ -225,7 +361,7 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
         validateInlineImage(child);
         continue;
       }
-      pending.push({ value: child, depth: depth + 1 });
+      pending.push({ value: child, depth: depth + 1, kind });
     }
   }
 }
