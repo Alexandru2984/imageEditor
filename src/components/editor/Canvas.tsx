@@ -278,20 +278,30 @@ export const Canvas = ({
       canvas.setCursor(spaceDownRef.current ? "grab" : "default");
     };
 
-    const touchDistance = (t: TouchList) =>
-      Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    const touchMidpoint = (t: TouchList) => ({
-      x: (t[0].clientX + t[1].clientX) / 2,
-      y: (t[0].clientY + t[1].clientY) / 2,
+    const getTouchPair = (touches: TouchList): [Touch, Touch] | null => {
+      const first = touches.item(0);
+      const second = touches.item(1);
+      return first && second ? [first, second] : null;
+    };
+    const touchDistance = ([first, second]: [Touch, Touch]) =>
+      Math.hypot(
+        first.clientX - second.clientX,
+        first.clientY - second.clientY
+      );
+    const touchMidpoint = ([first, second]: [Touch, Touch]) => ({
+      x: (first.clientX + second.clientX) / 2,
+      y: (first.clientY + second.clientY) / 2,
     });
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length !== 2) return;
       e.preventDefault();
       e.stopPropagation();
-      const mid = touchMidpoint(e.touches);
+      const touches = getTouchPair(e.touches);
+      if (!touches) return;
+      const mid = touchMidpoint(touches);
       pinch = {
-        startDist: touchDistance(e.touches),
+        startDist: touchDistance(touches),
         startZoom: canvas.getZoom(),
         lastMidX: mid.x,
         lastMidY: mid.y,
@@ -302,10 +312,12 @@ export const Canvas = ({
       if (!pinch || e.touches.length !== 2) return;
       e.preventDefault();
       e.stopPropagation();
+      const touches = getTouchPair(e.touches);
+      if (!touches) return;
       const rect = container.getBoundingClientRect();
-      const mid = touchMidpoint(e.touches);
+      const mid = touchMidpoint(touches);
       const newZoom = clampZoom(
-        pinch.startZoom * (touchDistance(e.touches) / pinch.startDist)
+        pinch.startZoom * (touchDistance(touches) / pinch.startDist)
       );
       canvas.zoomToPoint(
         new Point(mid.x - rect.left, mid.y - rect.top),
@@ -520,7 +532,10 @@ export const Canvas = ({
     }
 
     canvas.renderAll();
-  }, [activeTool]); // Only depend on activeTool — use refs for color/brushWidth
+    // Shape creation is edge-triggered by the selected tool. Color/brush
+    // changes are handled by the dedicated effect below and must not add shapes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool]);
 
   // ---------- Update brush color/width without creating shapes ----------
   useEffect(() => {

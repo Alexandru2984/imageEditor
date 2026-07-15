@@ -148,8 +148,10 @@ export const PropertiesPanel = ({
   }, [fabricCanvas, getFilterTarget]);
 
   const setFilter = (key: keyof FilterValues) => (value: number[]) => {
+    const filterValue = value[0];
+    if (filterValue === undefined) return;
     setFilters((prev) => {
-      const next = { ...prev, [key]: value[0] };
+      const next = { ...prev, [key]: filterValue };
       applyFilters(next);
       return next;
     });
@@ -272,6 +274,7 @@ export const PropertiesPanel = ({
 
   const handleObjectOpacityChange = (value: number[]) => {
     const v = value[0];
+    if (v === undefined) return;
     setObjectOpacity(v);
 
     if (!fabricCanvas) return;
@@ -294,9 +297,11 @@ export const PropertiesPanel = ({
 
   const handleObjectStrokeWidthChange = (value: number[]) => {
     if (!fabricCanvas) return;
+    const strokeWidth = value[0];
+    if (strokeWidth === undefined) return;
     const active = fabricCanvas.getActiveObject();
     if (active) {
-      active.set("strokeWidth", value[0]);
+      active.set("strokeWidth", strokeWidth);
       fabricCanvas.renderAll();
       readSelectedObject();
     }
@@ -304,9 +309,11 @@ export const PropertiesPanel = ({
 
   const handleFontSizeChange = (value: number[]) => {
     if (!fabricCanvas) return;
+    const fontSize = value[0];
+    if (fontSize === undefined) return;
     const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
     if (active && active.fontSize !== undefined) {
-      active.set("fontSize", value[0]);
+      active.set("fontSize", fontSize);
       fabricCanvas.renderAll();
       readSelectedObject();
     }
@@ -453,7 +460,7 @@ export const PropertiesPanel = ({
             </div>
             <Slider
               value={[brushWidth]}
-              onValueChange={(v) => onBrushWidthChange(v[0])}
+              onValueChange={(v) => onBrushWidthChange(v[0] ?? brushWidth)}
               min={1}
               max={50}
               step={1}
@@ -472,7 +479,9 @@ export const PropertiesPanel = ({
             </div>
             <Slider
               value={[brushHardness]}
-              onValueChange={(v) => onBrushHardnessChange(v[0])}
+              onValueChange={(v) =>
+                onBrushHardnessChange(v[0] ?? brushHardness)
+              }
               min={0}
               max={100}
               step={1}
@@ -491,7 +500,9 @@ export const PropertiesPanel = ({
             </div>
             <Slider
               value={[brushOpacity]}
-              onValueChange={(v) => onBrushOpacityChange(v[0])}
+              onValueChange={(v) =>
+                onBrushOpacityChange(v[0] ?? brushOpacity)
+              }
               min={10}
               max={100}
               step={1}

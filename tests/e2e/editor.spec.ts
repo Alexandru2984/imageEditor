@@ -139,3 +139,40 @@ test("saves a re-editable project file", async ({ page }) => {
   await page.getByTestId("project-input").setInputFiles(savedPath!);
   await expect(page.getByText("Remove BG")).toBeVisible();
 });
+
+test("drawing and erasing remain compatible with saved projects", async ({
+  page,
+}) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  await uploadImage(page);
+
+  const canvas = page.locator(".upper-canvas");
+  const box = await canvas.boundingBox();
+  expect(box).not.toBeNull();
+  const centerX = box!.x + box!.width / 2;
+  const centerY = box!.y + box!.height / 2;
+
+  await page.getByRole("button", { name: "Draw (B)" }).click();
+  await page.mouse.move(centerX - 60, centerY);
+  await page.mouse.down();
+  await page.mouse.move(centerX + 60, centerY, { steps: 8 });
+  await page.mouse.up();
+
+  await page.getByRole("button", { name: "Eraser (E)" }).click();
+  await page.mouse.move(centerX, centerY - 30);
+  await page.mouse.down();
+  await page.mouse.move(centerX, centerY + 30, { steps: 6 });
+  await page.mouse.up();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save project" }).click();
+  const savedPath = await (await downloadPromise).path();
+  expect(savedPath).toBeTruthy();
+
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Start new" }).click();
+  await page.getByTestId("project-input").setInputFiles(savedPath!);
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});

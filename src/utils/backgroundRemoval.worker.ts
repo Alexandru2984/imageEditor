@@ -121,8 +121,13 @@ async function removeBackground(imageBlob: Blob): Promise<Blob> {
   progress("Applying mask...");
   const imageData = context.getImageData(0, 0, width, height);
   const data = imageData.data;
+  if (mask.data.length !== width * height) {
+    throw new Error("Segmentation mask dimensions do not match the image");
+  }
   for (let i = 0; i < mask.data.length; i++) {
-    data[i * 4 + 3] = mask.data[i];
+    const alpha = mask.data[i];
+    if (alpha === undefined) throw new Error("Segmentation mask is incomplete");
+    data[i * 4 + 3] = alpha;
   }
   context.putImageData(imageData, 0, 0);
   progress("Mask applied successfully.");

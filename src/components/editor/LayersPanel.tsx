@@ -166,7 +166,9 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
   const handleOpacityChange = (value: number[]) => {
     if (!fabricCanvas || !selectedLayer) return;
-    selectedLayer.fabricObject.set("opacity", value[0] / 100);
+    const opacity = value[0];
+    if (opacity === undefined) return;
+    selectedLayer.fabricObject.set("opacity", opacity / 100);
     fabricCanvas.renderAll();
     // Reflect the new value without waiting for a full refresh
     setLayers((prev) => [...prev]);
