@@ -295,6 +295,33 @@ test("new project cannot be overwritten by a pending autosave", async ({
   await expect.poll(() => getAutosaveJson(page)).toBeNull();
 });
 
+test("a newer clear in another tab blocks a stale pending autosave", async ({
+  page,
+  context,
+}) => {
+  const secondPage = await context.newPage();
+  await secondPage.goto("/");
+  await uploadImage(page);
+  await uploadImage(secondPage);
+
+  // Let both initial snapshots settle so the only pending write below is the
+  // deliberately stale edit from the first tab.
+  await expect.poll(() => getAutosaveJson(page)).not.toBeNull();
+  await page.waitForTimeout(900);
+
+  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await page.waitForTimeout(50);
+  await secondPage.getByRole("button", { name: "New", exact: true }).click();
+  await secondPage.getByRole("button", { name: "Start new" }).click();
+
+  await expect(secondPage.getByText("Upload an Image")).toBeVisible();
+  await expect.poll(() => getAutosaveJson(secondPage)).toBeNull();
+  await page.waitForTimeout(1_000);
+  await expect.poll(() => getAutosaveJson(page)).toBeNull();
+  await expect(page.getByText(/newer autosave exists in another tab/i)).toBeVisible();
+  await secondPage.close();
+});
+
 test("locked image layers stay visible, protected, and persist", async ({
   page,
 }) => {

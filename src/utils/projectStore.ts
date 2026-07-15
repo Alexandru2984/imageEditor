@@ -7,10 +7,20 @@ import {
 const DB_NAME = "image-editor";
 const STORE_NAME = "projects";
 const AUTOSAVE_KEY = "autosave";
+const MAX_FUTURE_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 
 export interface SavedProject {
   snapshot: CanvasSnapshot;
   savedAt: number;
+}
+
+interface ClearedAutosave {
+  clearedAt: number;
+}
+
+interface AutosaveRevision {
+  timestamp: number;
+  kind: "save" | "clear";
 }
 
 export class InvalidAutosaveError extends Error {
@@ -18,6 +28,38 @@ export class InvalidAutosaveError extends Error {
 }
 
 let writeQueue: Promise<void> = Promise.resolve();
+
+const isValidTimestamp = (value: unknown, now = Date.now()): value is number =>
+  Number.isSafeInteger(value) &&
+  (value as number) >= 0 &&
+  (value as number) <= now + MAX_FUTURE_CLOCK_SKEW_MS;
+
+function storedRevision(value: unknown): AutosaveRevision | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length === 1 &&
+    isValidTimestamp(record.clearedAt)
+  ) {
+    return { timestamp: record.clearedAt, kind: "clear" };
+  }
+  if (isValidTimestamp(record.savedAt)) {
+    return { timestamp: record.savedAt, kind: "save" };
+  }
+  return null;
+}
+
+function shouldReplaceRevision(
+  existing: AutosaveRevision | null,
+  incoming: AutosaveRevision
+): boolean {
+  if (!existing || incoming.timestamp > existing.timestamp) return true;
+  return (
+    incoming.timestamp === existing.timestamp &&
+    incoming.kind === "clear" &&
+    existing.kind === "save"
+  );
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -99,17 +141,67 @@ function enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
   return result;
 }
 
-export const saveProject = (project: SavedProject): Promise<IDBValidKey> => {
+/**
+ * IndexedDB serializes read/write transactions across tabs. Comparing the
+ * revision and writing in the same transaction prevents a delayed older save
+ * from resurrecting a document after a newer save or clear in another tab.
+ */
+async function writeLatestRecord(
+  record: SavedProject | ClearedAutosave,
+  revision: AutosaveRevision
+): Promise<boolean> {
+  const db = await openDB();
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const readRequest = store.get(AUTOSAVE_KEY);
+      let wrote = false;
+      let requestError: DOMException | null = null;
+
+      readRequest.onsuccess = () => {
+        if (!shouldReplaceRevision(storedRevision(readRequest.result), revision)) {
+          return;
+        }
+        const putRequest = store.put(record, AUTOSAVE_KEY);
+        putRequest.onsuccess = () => {
+          wrote = true;
+        };
+        putRequest.onerror = () => {
+          requestError = putRequest.error;
+        };
+      };
+      readRequest.onerror = () => {
+        requestError = readRequest.error;
+      };
+      tx.oncomplete = () => resolve(wrote);
+      tx.onabort = () =>
+        reject(
+          tx.error ?? requestError ?? new Error("Autosave transaction aborted")
+        );
+      tx.onerror = () => {
+        // `abort` supplies the final error and prevents double rejection.
+      };
+    });
+  } finally {
+    db.close();
+  }
+}
+
+export const saveProject = (project: SavedProject): Promise<boolean> => {
   try {
     assertProjectSnapshotStorageLimits(project.snapshot);
-    if (!Number.isSafeInteger(project.savedAt) || project.savedAt < 0) {
+    if (!isValidTimestamp(project.savedAt)) {
       throw new Error("Autosave timestamp is invalid");
     }
   } catch (error) {
     return Promise.reject(error);
   }
   return enqueueWrite(() =>
-    withStore("readwrite", (store) => store.put(project, AUTOSAVE_KEY))
+    writeLatestRecord(project, {
+      timestamp: project.savedAt,
+      kind: "save",
+    })
   );
 };
 
@@ -123,9 +215,12 @@ export const loadProject = async (): Promise<SavedProject | undefined> => {
   }
   const record = stored as Record<string, unknown>;
   if (
-    !Number.isSafeInteger(record.savedAt) ||
-    (record.savedAt as number) < 0
+    Object.keys(record).length === 1 &&
+    isValidTimestamp(record.clearedAt)
   ) {
+    return undefined;
+  }
+  if (!isValidTimestamp(record.savedAt)) {
     throw new InvalidAutosaveError("Autosave timestamp is invalid");
   }
   try {
@@ -140,7 +235,12 @@ export const loadProject = async (): Promise<SavedProject | undefined> => {
   }
 };
 
-export const clearProject = (): Promise<undefined> =>
-  enqueueWrite(() =>
-    withStore("readwrite", (store) => store.delete(AUTOSAVE_KEY))
+export const clearProject = (): Promise<undefined> => {
+  const clearedAt = Date.now();
+  return enqueueWrite(() =>
+    writeLatestRecord(
+      { clearedAt },
+      { timestamp: clearedAt, kind: "clear" }
+    ).then(() => undefined)
   );
+};

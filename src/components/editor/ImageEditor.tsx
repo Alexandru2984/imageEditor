@@ -50,9 +50,14 @@ export const ImageEditor = () => {
   const isMobile = useIsMobile();
 
   const autosaveTimerRef = useRef<number | null>(null);
-  const latestSnapshotRef = useRef<CanvasSnapshot | null>(null);
+  const latestSnapshotRef = useRef<{
+    snapshot: CanvasSnapshot;
+    changedAt: number;
+  } | null>(null);
+  const lastSnapshotTimestampRef = useRef(0);
   const autosaveGenerationRef = useRef(0);
   const autosaveFailureShownRef = useRef(false);
+  const autosaveConflictShownRef = useRef(false);
   const documentLoadControllerRef = useRef<AbortController | null>(null);
 
   const cancelDocumentLoad = useCallback(() => {
@@ -88,21 +93,34 @@ export const ImageEditor = () => {
       window.clearTimeout(autosaveTimerRef.current);
       autosaveTimerRef.current = null;
     }
-    const snapshot = latestSnapshotRef.current;
-    if (!snapshot) return;
+    const pending = latestSnapshotRef.current;
+    if (!pending) return;
 
     const generation = autosaveGenerationRef.current;
-    const project: SavedProject = { snapshot, savedAt: Date.now() };
+    const project: SavedProject = {
+      snapshot: pending.snapshot,
+      savedAt: pending.changedAt,
+    };
     // Start in a microtask so a synchronous size-limit failure follows the
     // same error path as an IndexedDB transaction failure.
     void Promise.resolve()
       .then(() => saveProject(project))
-      .then(() => {
+      .then((written) => {
         if (generation !== autosaveGenerationRef.current) return;
-        if (latestSnapshotRef.current === snapshot) {
+        if (latestSnapshotRef.current === pending) {
           latestSnapshotRef.current = null;
         }
+        if (!written) {
+          if (!autosaveConflictShownRef.current) {
+            autosaveConflictShownRef.current = true;
+            toast.warning(
+              "A newer autosave exists in another tab. Your next edit will become the latest version."
+            );
+          }
+          return;
+        }
         autosaveFailureShownRef.current = false;
+        autosaveConflictShownRef.current = false;
         setSavedProject(project);
       })
       .catch((error) => {
@@ -118,7 +136,12 @@ export const ImageEditor = () => {
   }, []);
 
   const handleSnapshot = useCallback((snapshot: CanvasSnapshot) => {
-    latestSnapshotRef.current = snapshot;
+    const changedAt = Math.max(
+      Date.now(),
+      lastSnapshotTimestampRef.current + 1
+    );
+    lastSnapshotTimestampRef.current = changedAt;
+    latestSnapshotRef.current = { snapshot, changedAt };
     if (autosaveTimerRef.current !== null) {
       window.clearTimeout(autosaveTimerRef.current);
     }
