@@ -10,7 +10,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: [["list"]],
+  reporter: process.env.CI
+    ? [["list"], ["html", { open: "never" }]]
+    : [["list"]],
   use: {
     baseURL: "http://127.0.0.1:5199",
     trace: "on-first-retry",
@@ -23,9 +25,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    // A fixed, rarely-used port with strictPort so the dev server never drifts
-    // to another port (this machine has many services on 8080+).
-    command: "npm run dev -- --host 127.0.0.1 --port 5199 --strictPort",
+    // Exercise the optimized production bundle under the same browser policy
+    // as Nginx. A fixed port prevents silently attaching to another service.
+    command:
+      "npm run build && npm run preview -- --host 127.0.0.1 --port 5199 --strictPort",
     url: "http://127.0.0.1:5199",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

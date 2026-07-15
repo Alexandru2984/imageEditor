@@ -12,6 +12,10 @@ const MAX_IMAGE_DIMENSION = 1024;
 // briaai/RMBG-1.4 lacks standard config files, so both configs are supplied
 // explicitly, per the model card.
 const MODEL_ID = "briaai/RMBG-1.4";
+// Pin every fetched model artifact to an immutable Hub commit. Updating the
+// model is an explicit, reviewable code change instead of an untrusted change
+// arriving from the repository's mutable `main` branch at runtime.
+const MODEL_REVISION = "2ceba5a5efaec153162aedea169f76caf9b46cf8";
 const MODEL_CONFIG = { model_type: "custom" };
 const PROCESSOR_CONFIG = {
   do_normalize: true,
@@ -47,10 +51,12 @@ async function loadSegmenter(device: "webgpu" | "wasm"): Promise<Segmenter> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     config: MODEL_CONFIG as any,
     device,
+    revision: MODEL_REVISION,
   });
   const processor = await AutoProcessor.from_pretrained(MODEL_ID, {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     config: PROCESSOR_CONFIG as any,
+    revision: MODEL_REVISION,
   });
   progress("Model loaded.");
   return { model, processor };

@@ -22,6 +22,20 @@ test("shows the upload screen on first load", async ({ page }) => {
   await expect(page.getByText("Upload an Image")).toBeVisible();
 });
 
+test("serves the production bundle with the hardened browser policy", async ({
+  request,
+}) => {
+  const response = await request.get("/");
+  expect(response.ok()).toBe(true);
+  const headers = response.headers();
+  expect(headers["x-frame-options"]).toBe("DENY");
+  expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
+  expect(headers["content-security-policy"]).toContain("object-src 'none'");
+  expect(headers["content-security-policy"]).not.toMatch(
+    /script-src[^;]*'unsafe-inline'/
+  );
+});
+
 test("uploading an image opens the editor", async ({ page }) => {
   await uploadImage(page);
   await expect(page.getByText("Upload an Image")).toHaveCount(0);
