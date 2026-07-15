@@ -386,6 +386,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Undo"
                 onClick={undo}
                 disabled={!canUndo}
                 className="h-9 w-9"
@@ -403,6 +404,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Redo"
                 onClick={redo}
                 disabled={!canRedo}
                 className="h-9 w-9"
@@ -422,6 +424,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Zoom out"
                 onClick={handleZoomOut}
                 className="h-9 w-9"
               >
@@ -433,7 +436,10 @@ export const TopBar = ({
             </TooltipContent>
           </Tooltip>
 
-          <span className="text-xs font-mono text-muted-foreground w-12 text-center tabular-nums select-none">
+          <span
+            aria-label="Zoom level"
+            className="text-xs font-mono text-muted-foreground w-12 text-center tabular-nums select-none"
+          >
             {Math.round(zoom * 100)}%
           </span>
 
@@ -442,6 +448,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Zoom in"
                 onClick={handleZoomIn}
                 className="h-9 w-9"
               >
@@ -458,6 +465,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Fit image to screen"
                 onClick={handleFitToScreen}
                 className="h-9 w-9"
               >
@@ -521,6 +529,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size="icon"
+                aria-label="Rotate selection or canvas"
                 onClick={handleRotate}
                 className="h-9 w-9"
               >
@@ -634,6 +643,7 @@ export const TopBar = ({
                   <Button
                     variant="ghost"
                     size={isMobile ? "icon" : "sm"}
+                    aria-label="New"
                     className={`${isMobile ? "h-9 w-9" : "h-9"} text-muted-foreground hover:text-destructive`}
                   >
                     <FilePlus2 className="h-4 w-4" />

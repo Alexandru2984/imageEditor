@@ -131,10 +131,19 @@ export const ImageUpload = ({
       )}
 
       <div
+        role="button"
+        tabIndex={0}
+        aria-label="Upload an image"
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
         className={`
           flex flex-col items-center justify-center p-12 rounded-xl w-full
           cursor-pointer transition-all duration-200 select-none
@@ -146,43 +155,39 @@ export const ImageUpload = ({
           }
         `}
       >
-      <div
-        className={`transition-transform duration-200 ${isDragging ? "scale-110" : ""}`}
-      >
-        {isDragging ? (
-          <Upload className="w-20 h-20 text-primary mb-6 animate-bounce" />
-        ) : (
-          <ImageIcon className="w-20 h-20 text-muted-foreground mb-6" />
-        )}
-      </div>
+        <div
+          className={`transition-transform duration-200 ${isDragging ? "scale-110" : ""}`}
+        >
+          {isDragging ? (
+            <Upload className="w-20 h-20 text-primary mb-6 animate-bounce" />
+          ) : (
+            <ImageIcon className="w-20 h-20 text-muted-foreground mb-6" />
+          )}
+        </div>
 
-      <h2 className="text-2xl font-bold mb-2">
-        {isDragging ? "Drop your image here" : "Upload an Image"}
-      </h2>
+        <h2 className="text-2xl font-bold mb-2">
+          {isDragging ? "Drop your image here" : "Upload an Image"}
+        </h2>
 
-      <p className="text-muted-foreground mb-6 text-center max-w-sm">
-        {isDragging
-          ? "Release to upload your image"
-          : "Drag & drop, click to browse, or paste from clipboard"}
-      </p>
+        <p className="text-muted-foreground mb-6 text-center max-w-sm">
+          {isDragging
+            ? "Release to upload your image"
+            : "Drag & drop, click to browse, or paste from clipboard"}
+        </p>
 
-      <Button
-        size="lg"
-        className="pointer-events-none"
-        tabIndex={-1}
-      >
-        <Upload className="mr-2 h-5 w-5" />
-        Choose Image
-      </Button>
+        <span className="inline-flex h-11 items-center justify-center rounded-md bg-primary px-8 text-sm font-medium text-primary-foreground shadow transition-colors">
+          <Upload className="mr-2 h-5 w-5" />
+          Choose Image
+        </span>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={RASTER_FILE_ACCEPT}
-        onChange={handleFileChange}
-        data-testid="image-input"
-        className="hidden"
-      />
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={RASTER_FILE_ACCEPT}
+          onChange={handleFileChange}
+          data-testid="image-input"
+          className="hidden"
+        />
 
         <div className="flex items-center gap-4 mt-6 text-xs text-muted-foreground">
           <span>Supports: JPG, PNG, GIF, WebP</span>

@@ -1038,7 +1038,7 @@ export const Canvas = ({
       ref={containerRef}
       className="relative w-full h-full rounded-lg overflow-hidden shadow-2xl border border-border"
     >
-      <canvas ref={canvasRef} />
+      <canvas ref={canvasRef} role="img" aria-label="Image editing canvas" />
 
       {isRasterizing && (
         <div

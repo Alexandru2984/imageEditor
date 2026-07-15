@@ -589,6 +589,7 @@ export const PropertiesPanel = ({
                 key={color}
                 type="button"
                 aria-label={`Use color ${color}`}
+                aria-pressed={activeColor === color}
                 onClick={() => {
                   handleColorChange(color);
                   commitObjectChange();
@@ -799,6 +800,7 @@ export const PropertiesPanel = ({
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
+                      aria-pressed={selectedProps.maskInverted}
                       disabled={selectedProps.readOnly}
                       onClick={toggleMaskInverted}
                       className={`flex-1 h-8 rounded-md border text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -871,7 +873,14 @@ export const PropertiesPanel = ({
                       <button
                         key={key}
                         type="button"
-                        aria-label={`Toggle ${key}`}
+                        aria-label={
+                          key === "fontWeight"
+                            ? "Bold"
+                            : key === "fontStyle"
+                              ? "Italic"
+                              : "Underline"
+                        }
+                        aria-pressed={active}
                         disabled={selectedProps.readOnly}
                         onClick={() => toggleTextStyle(key)}
                         className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -895,6 +904,7 @@ export const PropertiesPanel = ({
                         key={align}
                         type="button"
                         aria-label={`Align text ${align}`}
+                        aria-pressed={selectedProps.textAlign === align}
                         disabled={selectedProps.readOnly}
                         onClick={() => setTextAlign(align)}
                         className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -938,6 +948,7 @@ export const PropertiesPanel = ({
                     </Label>
                     <select
                       value={selectedProps.fontFamily || "Arial"}
+                      aria-label="Font family"
                       disabled={selectedProps.readOnly}
                       onChange={(e) => {
                         handleFontFamilyChange(e.target.value);

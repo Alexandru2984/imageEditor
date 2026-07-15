@@ -172,6 +172,7 @@ export const Toolbar = ({
             variant={isActive ? "default" : "ghost"}
             size="icon"
             aria-label={tool.label}
+            aria-pressed={isActive}
             onClick={() => onToolChange(tool.id)}
             className={`w-10 h-10 ${
               isActive

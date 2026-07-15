@@ -125,6 +125,36 @@ test("uploading an image opens the editor", async ({ page }) => {
   await expect(page.locator("canvas").first()).toBeVisible();
 });
 
+test("supports keyboard upload and labels the core editor controls", async ({
+  page,
+}) => {
+  const upload = page.getByRole("button", { name: "Upload an image" });
+  await upload.focus();
+  await expect(upload).toBeFocused();
+
+  const fileChooserPromise = page.waitForEvent("filechooser");
+  await page.keyboard.press("Enter");
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({
+    name: "keyboard-upload.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_BASE64, "base64"),
+  });
+
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Redo" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zoom out" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Zoom in" })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Fit image to screen" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+});
+
 test("rejects a spoofed image MIME type before decoding", async ({ page }) => {
   await page.getByTestId("image-input").setInputFiles({
     name: "not-really-a-png.png",

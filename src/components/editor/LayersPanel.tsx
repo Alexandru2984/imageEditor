@@ -438,6 +438,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
             </Label>
             <select
               value={selectedBlend}
+              aria-label="Layer blend mode"
               disabled={selectedLayer.locked}
               onChange={(e) => handleBlendModeChange(e.target.value)}
               className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
@@ -490,7 +491,20 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                 <div
                   key={layer.id}
                   data-layer-id={layer.id}
+                  role="group"
+                  tabIndex={0}
+                  aria-label={`${layer.name} layer`}
                   onClick={() => handleSelectLayer(layer)}
+                  onKeyDown={(event) => {
+                    if (event.target !== event.currentTarget) return;
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handleSelectLayer(layer);
+                    } else if (event.key === "F2" && !layer.locked) {
+                      event.preventDefault();
+                      startRename(layer);
+                    }
+                  }}
                   className={`
                     group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
                     transition-colors duration-100 [content-visibility:auto] [contain-intrinsic-size:auto_40px]
@@ -525,6 +539,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                   {renamingId === layer.id ? (
                     <input
                       autoFocus
+                      aria-label={`Rename ${layer.name}`}
                       value={renameValue}
                       onChange={(e) => setRenameValue(e.target.value)}
                       onBlur={commitRename}
@@ -547,7 +562,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                     </span>
                   )}
 
-                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
