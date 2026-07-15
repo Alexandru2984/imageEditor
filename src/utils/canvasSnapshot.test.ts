@@ -90,6 +90,32 @@ describe("takeSnapshot / parseSnapshot", () => {
     expect(parseSnapshot(snapshot)).toEqual(data);
   });
 
+  it("re-inlines sources nested outside group object arrays", () => {
+    const data = {
+      objects: [
+        {
+          type: "image",
+          src: BIG_SRC,
+          clipPath: { type: "image", src: OTHER_SRC },
+        },
+      ],
+    };
+    const snapshot = takeSnapshot(fakeCanvas(data));
+
+    expect(snapshot.json).not.toContain(BIG_SRC);
+    expect(snapshot.json).not.toContain(OTHER_SRC);
+    expect(parseSnapshot(snapshot)).toEqual(data);
+  });
+
+  it("rejects broken placeholders instead of loading a relative URL", () => {
+    expect(() =>
+      parseSnapshot({
+        json: '{"objects":[{"type":"image","src":"__snapshot_src_3"}]}',
+        srcs: [BIG_SRC],
+      })
+    ).toThrow(/invalid image placeholder/);
+  });
+
   it("is a no-op for documents without images", () => {
     const data = { objects: [{ type: "rect" }, { type: "i-text" }] };
     const snapshot = takeSnapshot(fakeCanvas(data));

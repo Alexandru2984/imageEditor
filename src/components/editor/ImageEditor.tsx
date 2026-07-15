@@ -13,6 +13,7 @@ import {
   saveProject,
   loadProject,
   clearProject,
+  InvalidAutosaveError,
   type SavedProject,
 } from "@/utils/projectStore";
 import { downloadProjectFile, readProjectFile } from "@/utils/projectFile";
@@ -47,40 +48,119 @@ export const ImageEditor = () => {
 
   const isMobile = useIsMobile();
 
-  const uploadedImageRef = useRef<string | null>(null);
-  uploadedImageRef.current = uploadedImage;
   const autosaveTimerRef = useRef<number | null>(null);
+  const latestSnapshotRef = useRef<CanvasSnapshot | null>(null);
+  const autosaveGenerationRef = useRef(0);
+  const autosaveFailureShownRef = useRef(false);
+
+  const cancelScheduledAutosave = useCallback(() => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    latestSnapshotRef.current = null;
+    autosaveGenerationRef.current += 1;
+  }, []);
+
+  const flushAutosave = useCallback(() => {
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    const snapshot = latestSnapshotRef.current;
+    if (!snapshot) return;
+
+    const generation = autosaveGenerationRef.current;
+    const project: SavedProject = { snapshot, savedAt: Date.now() };
+    // Start in a microtask so a synchronous size-limit failure follows the
+    // same error path as an IndexedDB transaction failure.
+    void Promise.resolve()
+      .then(() => saveProject(project))
+      .then(() => {
+        if (generation !== autosaveGenerationRef.current) return;
+        if (latestSnapshotRef.current === snapshot) {
+          latestSnapshotRef.current = null;
+        }
+        autosaveFailureShownRef.current = false;
+        setSavedProject(project);
+      })
+      .catch((error) => {
+        if (
+          generation === autosaveGenerationRef.current &&
+          !autosaveFailureShownRef.current
+        ) {
+          autosaveFailureShownRef.current = true;
+          console.warn("Autosave failed:", error);
+          toast.error("Autosave failed. Save a project file before leaving.");
+        }
+      });
+  }, []);
 
   const handleSnapshot = useCallback((snapshot: CanvasSnapshot) => {
-    const image = uploadedImageRef.current;
-    if (!image) return;
+    latestSnapshotRef.current = snapshot;
     if (autosaveTimerRef.current !== null) {
       window.clearTimeout(autosaveTimerRef.current);
     }
     autosaveTimerRef.current = window.setTimeout(() => {
-      autosaveTimerRef.current = null;
-      saveProject({ snapshot, uploadedImage: image, savedAt: Date.now() }).catch(
-        (error) => console.warn("Autosave failed:", error)
-      );
+      flushAutosave();
     }, AUTOSAVE_DELAY_MS);
+  }, [flushAutosave]);
+
+  const handleHistoryError = useCallback((error: unknown) => {
+    console.error("Could not update edit history:", error);
+    toast.error("Undo/redo failed. The editor attempted a safe rollback.");
   }, []);
 
   const { undo, redo, canUndo, canRedo } = useUndoRedo(
     fabricCanvas,
-    handleSnapshot
+    handleSnapshot,
+    handleHistoryError
   );
 
   // Offer to continue the last session
   useEffect(() => {
+    let active = true;
+    const generation = autosaveGenerationRef.current;
     loadProject()
-      .then((project) => setSavedProject(project ?? null))
-      .catch(() => setSavedProject(null));
+      .then((project) => {
+        if (active && generation === autosaveGenerationRef.current) {
+          setSavedProject(project ?? null);
+        }
+      })
+      .catch((error) => {
+        if (!active || generation !== autosaveGenerationRef.current) return;
+        setSavedProject(null);
+        console.warn("Could not load autosave:", error);
+        if (error instanceof InvalidAutosaveError) {
+          void clearProject().catch(() => {});
+          toast.error("A corrupt local autosave was removed for safety.");
+        } else {
+          toast.error("Local autosave is unavailable in this browser.");
+        }
+      });
     return () => {
+      active = false;
       if (autosaveTimerRef.current !== null) {
         window.clearTimeout(autosaveTimerRef.current);
       }
     };
   }, []);
+
+  // Flush the latest snapshot when the page is backgrounded. This is the last
+  // reliable lifecycle signal on mobile browsers, where tabs are often killed
+  // without a conventional unload.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushAutosave();
+    };
+    const handlePageHide = () => flushAutosave();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
+    };
+  }, [flushAutosave]);
 
   // On mobile the properties panel is a fullscreen overlay — start closed
   useEffect(() => {
@@ -111,10 +191,11 @@ export const ImageEditor = () => {
   const handleCanvasLoadError = useCallback((error: unknown) => {
     console.error("Failed to load canvas document:", error);
     toast.error("The image or project could not be decoded safely");
+    cancelScheduledAutosave();
     setFabricCanvas(null);
     setInitialSnapshot(null);
     setUploadedImage(null);
-  }, []);
+  }, [cancelScheduledAutosave]);
 
   useKeyboardShortcuts({
     canvas: fabricCanvas,
@@ -126,15 +207,21 @@ export const ImageEditor = () => {
   });
 
   const handleImageUpload = useCallback((dataUrl: string) => {
+    cancelScheduledAutosave();
+    setSavedProject(null);
+    void clearProject().catch((error) => {
+      console.warn("Could not clear previous autosave:", error);
+    });
     setInitialSnapshot(null);
     setUploadedImage(dataUrl);
-  }, []);
+  }, [cancelScheduledAutosave]);
 
   const handleRestoreProject = useCallback(() => {
     if (!savedProject) return;
+    cancelScheduledAutosave();
     setInitialSnapshot(savedProject.snapshot);
-    setUploadedImage(savedProject.uploadedImage);
-  }, [savedProject]);
+    setUploadedImage(savedProject.snapshot.srcs[0] ?? "restored-project");
+  }, [cancelScheduledAutosave, savedProject]);
 
   const handleSaveProjectFile = useCallback(() => {
     if (!fabricCanvas) return;
@@ -151,6 +238,11 @@ export const ImageEditor = () => {
   const handleOpenProjectFile = useCallback(async (file: File) => {
     try {
       const snapshot = await readProjectFile(file);
+      cancelScheduledAutosave();
+      setSavedProject(null);
+      void clearProject().catch((error) => {
+        console.warn("Could not clear previous autosave:", error);
+      });
       setFabricCanvas(null);
       setInitialSnapshot(snapshot);
       // uploadedImage just needs to be truthy to show the editor; reuse the
@@ -164,21 +256,21 @@ export const ImageEditor = () => {
           : "Couldn't open that file — is it a project file?"
       );
     }
-  }, []);
+  }, [cancelScheduledAutosave]);
 
   const handleNewProject = useCallback(() => {
-    if (autosaveTimerRef.current !== null) {
-      window.clearTimeout(autosaveTimerRef.current);
-      autosaveTimerRef.current = null;
-    }
-    clearProject().catch(() => {});
+    cancelScheduledAutosave();
+    void clearProject().catch((error) => {
+      console.warn("Could not clear autosave:", error);
+      toast.error("The local autosave could not be cleared.");
+    });
     setSavedProject(null);
     setInitialSnapshot(null);
     setUploadedImage(null);
     setFabricCanvas(null);
     setActiveTool("select");
     setZoom(1);
-  }, []);
+  }, [cancelScheduledAutosave]);
 
   const handleToggleProperties = useCallback(() => {
     setShowProperties((prev) => !prev);

@@ -14,6 +14,68 @@ async function uploadImage(page: Page) {
   await expect(page.getByText("Remove BG")).toBeVisible();
 }
 
+async function getAutosaveJson(page: Page): Promise<string | null> {
+  return page.evaluate(
+    () =>
+      new Promise<string | null>((resolve, reject) => {
+        const open = indexedDB.open("image-editor", 1);
+        open.onupgradeneeded = () => {
+          if (!open.result.objectStoreNames.contains("projects")) {
+            open.result.createObjectStore("projects");
+          }
+        };
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction("projects", "readonly");
+          const request = tx.objectStore("projects").get("autosave");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const value = request.result as
+              | { snapshot?: { json?: unknown } }
+              | undefined;
+            resolve(
+              typeof value?.snapshot?.json === "string"
+                ? value.snapshot.json
+                : null
+            );
+          };
+          tx.oncomplete = () => db.close();
+          tx.onabort = () => db.close();
+        };
+      })
+  );
+}
+
+async function putAutosave(page: Page, value: unknown): Promise<void> {
+  await page.evaluate(
+    (record) =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("image-editor", 1);
+        open.onupgradeneeded = () => {
+          if (!open.result.objectStoreNames.contains("projects")) {
+            open.result.createObjectStore("projects");
+          }
+        };
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const db = open.result;
+          const tx = db.transaction("projects", "readwrite");
+          tx.objectStore("projects").put(record, "autosave");
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onabort = () => {
+            db.close();
+            reject(tx.error);
+          };
+        };
+      }),
+    value
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
 });
@@ -113,6 +175,37 @@ test("rejects project patterns that could fetch an external resource", async ({
   expect(externalRequestSeen).toBe(false);
 });
 
+test("quarantines an unsafe IndexedDB autosave before Fabric loads it", async ({
+  page,
+}) => {
+  let externalRequestSeen = false;
+  page.on("request", (request) => {
+    if (request.url().startsWith("https://evil.example/")) {
+      externalRequestSeen = true;
+    }
+  });
+  await putAutosave(page, {
+    savedAt: Date.now(),
+    snapshot: {
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "Image",
+            src: "https://evil.example/tracker.png",
+          },
+        ],
+      }),
+      srcs: [],
+    },
+  });
+
+  await page.reload();
+  await expect(page.getByText(/corrupt local autosave was removed/i)).toBeVisible();
+  await expect(page.getByText("Continue last project")).toHaveCount(0);
+  await expect.poll(() => getAutosaveJson(page)).toBeNull();
+  expect(externalRequestSeen).toBe(false);
+});
+
 test("adding a shape selects it, and undo removes it", async ({ page }) => {
   await uploadImage(page);
 
@@ -123,6 +216,36 @@ test("adding a shape selects it, and undo removes it", async ({ page }) => {
   // Ctrl+Z removes the shape, clearing the selection
   await page.keyboard.press("Control+z");
   await expect(page.getByText("Object Properties")).toHaveCount(0);
+});
+
+test("commits autosaved edits and restores them after reload", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+
+  await expect
+    .poll(() => getAutosaveJson(page))
+    .toMatch(/"type":"Rect"/i);
+
+  page.on("dialog", (dialog) => void dialog.accept());
+  await page.reload();
+  await expect(page.getByText("Continue last project")).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  await expect(page.getByText("Rectangle 1", { exact: true })).toBeVisible();
+});
+
+test("new project cannot be overwritten by a pending autosave", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Start new" }).click();
+
+  await expect(page.getByText("Upload an Image")).toBeVisible();
+  await expect.poll(() => getAutosaveJson(page)).toBeNull();
 });
 
 test("locked image layers stay visible, protected, and persist", async ({

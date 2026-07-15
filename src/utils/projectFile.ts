@@ -1,7 +1,10 @@
 import { z } from "zod";
 import type { Canvas as FabricCanvas } from "fabric";
 import { takeSnapshot, type CanvasSnapshot } from "./canvasSnapshot";
-import { inspectRasterDataUrl } from "./imageFile";
+import {
+  MAX_EMBEDDED_IMAGE_BYTES,
+  inspectRasterDataUrl,
+} from "./imageFile";
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -50,13 +53,50 @@ const ALLOWED_SERIALIZED_TYPES = new Set([
 
 // Formal shape of a project file. Zod guards the structure; assertSafeSources
 // (below) enforces the security invariant that every image source is inline.
-const ProjectFileSchema = z.object({
-  version: z.literal(FILE_VERSION).optional(),
-  snapshot: z.object({
+const SnapshotSchema = z
+  .object({
     json: z.string().max(MAX_SNAPSHOT_JSON_CHARS),
     srcs: z.array(z.string()).max(MAX_IMAGE_SOURCES),
-  }).strict(),
-}).strict();
+  })
+  .strict();
+
+const ProjectFileSchema = z
+  .object({
+    version: z.literal(FILE_VERSION).optional(),
+    snapshot: SnapshotSchema,
+  })
+  .strict();
+
+const estimatedDecodedBytes = (dataUrl: string): number => {
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return Number.POSITIVE_INFINITY;
+  return Math.ceil((dataUrl.length - comma - 1) / 4) * 3;
+};
+
+/**
+ * Cheap limits for trusted, freshly generated snapshots. Full signature and
+ * object-graph validation is intentionally reserved for the load boundary so
+ * autosaving a large document does not rescan megabytes of base64 every time.
+ */
+export function assertProjectSnapshotStorageLimits(
+  value: CanvasSnapshot
+): CanvasSnapshot {
+  const result = SnapshotSchema.safeParse(value);
+  if (!result.success) throw new Error("Project snapshot is too large to autosave");
+
+  let totalImageBytes = 0;
+  for (const source of result.data.srcs) {
+    const byteLength = estimatedDecodedBytes(source);
+    if (byteLength > MAX_EMBEDDED_IMAGE_BYTES) {
+      throw new Error("Project contains an oversized embedded image");
+    }
+    totalImageBytes += byteLength;
+    if (totalImageBytes > MAX_TOTAL_IMAGE_BYTES) {
+      throw new Error("Project contains too much embedded image data");
+    }
+  }
+  return result.data as CanvasSnapshot;
+}
 
 // A portable project file: the same snapshot format used for undo/autosave,
 // wrapped with a version tag and written to disk so projects survive beyond
@@ -188,6 +228,15 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
   }
 }
 
+/** Validate an untrusted snapshot before Fabric is allowed to deserialize it. */
+export function validateProjectSnapshot(value: unknown): CanvasSnapshot {
+  const result = SnapshotSchema.safeParse(value);
+  if (!result.success) throw new Error("Not a valid project snapshot");
+  const snapshot = result.data as CanvasSnapshot;
+  assertSafeSources(snapshot);
+  return snapshot;
+}
+
 export function downloadProjectFile(canvas: FabricCanvas): void {
   const snapshot = takeSnapshot(canvas);
   assertSafeSources(snapshot);
@@ -218,7 +267,5 @@ export async function readProjectFile(file: File): Promise<CanvasSnapshot> {
   if (!result.success) {
     throw new Error("Not a valid project file");
   }
-  const snapshot = result.data.snapshot as CanvasSnapshot;
-  assertSafeSources(snapshot);
-  return snapshot;
+  return validateProjectSnapshot(result.data.snapshot);
 }

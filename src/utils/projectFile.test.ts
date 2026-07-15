@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { readProjectFile } from "./projectFile";
+import {
+  assertProjectSnapshotStorageLimits,
+  readProjectFile,
+} from "./projectFile";
 
 function fileOf(content: string): File {
   return new File([content], "p.imgedit.json", { type: "application/json" });
@@ -9,6 +12,15 @@ const PNG_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR4nGP8z8Dwn4EIwDiqEAAvyQP4rvqiVQAAAABJRU5ErkJggg==";
 
 describe("readProjectFile", () => {
+  it("rejects oversized snapshots before autosave reaches IndexedDB", () => {
+    expect(() =>
+      assertProjectSnapshotStorageLimits({
+        json: "x".repeat(8 * 1024 * 1024 + 1),
+        srcs: [],
+      })
+    ).toThrow(/too large to autosave/);
+  });
+
   it("parses a valid project file into a snapshot", async () => {
     const snapshot = { json: '{"objects":[]}', srcs: [] };
     const file = fileOf(JSON.stringify({ version: 1, snapshot }));

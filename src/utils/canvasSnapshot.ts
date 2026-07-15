@@ -58,22 +58,35 @@ export function takeSnapshot(canvas: FabricCanvas): CanvasSnapshot {
   return { json, srcs };
 }
 
-function reinlineSrcs(objects: unknown, srcs: string[]) {
-  if (!Array.isArray(objects)) return;
-  for (const entry of objects) {
-    if (entry && typeof entry === "object") {
-      const obj = entry as PlainObject;
-      if (typeof obj.src === "string" && obj.src.startsWith(SRC_PLACEHOLDER)) {
-        obj.src = srcs[Number(obj.src.slice(SRC_PLACEHOLDER.length))];
-      }
-      reinlineSrcs(obj.objects, srcs);
+function reinlineSrcs(value: unknown, srcs: string[]): void {
+  const pending: unknown[] = [value];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current || typeof current !== "object") continue;
+    if (Array.isArray(current)) {
+      for (const entry of current) pending.push(entry);
+      continue;
     }
+
+    const object = current as PlainObject;
+    if (
+      typeof object.src === "string" &&
+      object.src.startsWith(SRC_PLACEHOLDER)
+    ) {
+      const index = Number(object.src.slice(SRC_PLACEHOLDER.length));
+      const source = srcs[index];
+      if (!Number.isSafeInteger(index) || index < 0 || source === undefined) {
+        throw new Error("Snapshot contains an invalid image placeholder");
+      }
+      object.src = source;
+    }
+    for (const entry of Object.values(object)) pending.push(entry);
   }
 }
 
 /** Rebuild the plain object for loadFromJSON, re-inlining extracted srcs. */
 export function parseSnapshot(snapshot: CanvasSnapshot): PlainObject {
   const data = JSON.parse(snapshot.json) as PlainObject;
-  reinlineSrcs(data.objects, snapshot.srcs);
+  reinlineSrcs(data, snapshot.srcs);
   return data;
 }
