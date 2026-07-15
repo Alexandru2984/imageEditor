@@ -130,6 +130,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   const [renameValue, setRenameValue] = useState("");
   const thumbnailCacheRef = useRef<Map<FabricObject, string>>(new Map());
   const refreshFrameRef = useRef<number | null>(null);
+  const pendingOpacityCommitRef = useRef<FabricObject | null>(null);
+  const opacityCommitTimerRef = useRef<number | null>(null);
 
   const refreshLayers = useCallback(() => {
     if (!fabricCanvas) {
@@ -212,6 +214,52 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId) ?? null;
 
+  const fireOpacityCommit = useCallback(
+    (target: FabricObject): boolean => {
+      if (
+        !fabricCanvas ||
+        isProtectedObject(target) ||
+        !fabricCanvas.getObjects().includes(target)
+      ) {
+        return false;
+      }
+      fabricCanvas.fire("object:modified", { target });
+      return true;
+    },
+    [fabricCanvas]
+  );
+
+  const flushOpacityCommit = useCallback(() => {
+    if (opacityCommitTimerRef.current !== null) {
+      window.clearTimeout(opacityCommitTimerRef.current);
+      opacityCommitTimerRef.current = null;
+    }
+    const target = pendingOpacityCommitRef.current;
+    pendingOpacityCommitRef.current = null;
+    if (target) fireOpacityCommit(target);
+  }, [fireOpacityCommit]);
+
+  const scheduleOpacityCommit = useCallback(
+    (target: FabricObject) => {
+      pendingOpacityCommitRef.current = target;
+      if (opacityCommitTimerRef.current !== null) {
+        window.clearTimeout(opacityCommitTimerRef.current);
+      }
+      opacityCommitTimerRef.current = window.setTimeout(() => {
+        opacityCommitTimerRef.current = null;
+        const pending = pendingOpacityCommitRef.current;
+        pendingOpacityCommitRef.current = null;
+        if (pending) fireOpacityCommit(pending);
+      }, 75);
+    },
+    [fireOpacityCommit]
+  );
+
+  useEffect(
+    () => () => flushOpacityCommit(),
+    [fabricCanvas, flushOpacityCommit]
+  );
+
   // Blend mode + opacity act on the selected layer (Photoshop-style header)
   const selectedBlend =
     (selectedLayer?.fabricObject.globalCompositeOperation as string) ||
@@ -238,11 +286,11 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     fabricCanvas.renderAll();
     // Reflect the new value without waiting for a full refresh
     setLayers((prev) => [...prev]);
+    scheduleOpacityCommit(selectedLayer.fabricObject);
   };
 
   const handleOpacityCommit = () => {
-    if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
-    fabricCanvas.fire("object:modified", { target: selectedLayer.fabricObject });
+    flushOpacityCommit();
   };
 
   const startRename = (layer: LayerItem) => {
@@ -407,6 +455,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
             </Label>
             <Slider
               value={[selectedOpacity]}
+              aria-label="Layer opacity"
               disabled={selectedLayer.locked}
               onValueChange={handleOpacityChange}
               onValueCommit={handleOpacityCommit}

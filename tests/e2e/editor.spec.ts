@@ -282,6 +282,33 @@ test("coalesces filter changes and stores only active adjustments", async ({
     .toBe(1);
 });
 
+test("keyboard slider edits always reach history and autosave", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+
+  const savedRectangleOpacity = async () => {
+    const json = await getAutosaveJson(page);
+    if (!json) return null;
+    const document = JSON.parse(json) as {
+      objects?: Array<{ type?: string; opacity?: number }>;
+    };
+    return document.objects?.find(
+      (object) => object.type?.toLowerCase() === "rect"
+    )?.opacity;
+  };
+
+  await page.getByRole("slider", { name: "Object opacity" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(savedRectangleOpacity).toBe(0.99);
+
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  await page.getByRole("slider", { name: "Layer opacity" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(savedRectangleOpacity).toBe(0.98);
+});
+
 test("commits autosaved edits and restores them after reload", async ({
   page,
 }) => {

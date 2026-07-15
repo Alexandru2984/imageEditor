@@ -121,6 +121,8 @@ export const PropertiesPanel = ({
     values: FilterValues;
   } | null>(null);
   const filterTimerRef = useRef<number | null>(null);
+  const pendingObjectCommitRef = useRef<FabricObject | null>(null);
+  const objectCommitTimerRef = useRef<number | null>(null);
 
   // Filters target the selected image layer if one is selected, else the
   // background photo. That's the image the filter sliders read from and write to.
@@ -147,6 +149,50 @@ export const PropertiesPanel = ({
     const active = fabricCanvas?.getActiveObject();
     return active && !isReadOnlySelection(active) ? active : undefined;
   }, [fabricCanvas]);
+
+  const fireObjectModified = useCallback(
+    (target: FabricObject): boolean => {
+      if (!fabricCanvas || isReadOnlySelection(target)) return false;
+      const isActive = fabricCanvas.getActiveObject() === target;
+      if (!isActive && !fabricCanvas.getObjects().includes(target)) return false;
+      fabricCanvas.fire("object:modified", { target });
+      return true;
+    },
+    [fabricCanvas]
+  );
+
+  const flushScheduledObjectCommit = useCallback((): FabricObject | null => {
+    if (objectCommitTimerRef.current !== null) {
+      window.clearTimeout(objectCommitTimerRef.current);
+      objectCommitTimerRef.current = null;
+    }
+    const target = pendingObjectCommitRef.current;
+    pendingObjectCommitRef.current = null;
+    return target && fireObjectModified(target) ? target : null;
+  }, [fireObjectModified]);
+
+  const scheduleObjectCommit = useCallback(
+    (target: FabricObject) => {
+      pendingObjectCommitRef.current = target;
+      if (objectCommitTimerRef.current !== null) {
+        window.clearTimeout(objectCommitTimerRef.current);
+      }
+      objectCommitTimerRef.current = window.setTimeout(() => {
+        objectCommitTimerRef.current = null;
+        const pending = pendingObjectCommitRef.current;
+        pendingObjectCommitRef.current = null;
+        if (pending) fireObjectModified(pending);
+      }, 75);
+    },
+    [fireObjectModified]
+  );
+
+  useEffect(
+    () => () => {
+      flushScheduledObjectCommit();
+    },
+    [fabricCanvas, flushScheduledObjectCommit]
+  );
 
   const applyFiltersToTarget = useCallback(
     (target: FabricImage, values: FilterValues): boolean => {
@@ -233,11 +279,15 @@ export const PropertiesPanel = ({
   // happen together so pointer and keyboard event ordering cannot lose edits.
   const commitObjectChange = useCallback(() => {
     if (!fabricCanvas) return;
+    const flushed = flushScheduledObjectCommit();
     const active = getEditableActiveObject();
-    if (active) {
-      fabricCanvas.fire("object:modified", { target: active });
-    }
-  }, [fabricCanvas, getEditableActiveObject]);
+    if (active && active !== flushed) fireObjectModified(active);
+  }, [
+    fabricCanvas,
+    fireObjectModified,
+    flushScheduledObjectCommit,
+    getEditableActiveObject,
+  ]);
 
   const commitFilterChange = useCallback(() => {
     if (!fabricCanvas) return;
@@ -393,6 +443,7 @@ export const PropertiesPanel = ({
       setObjectOpacity(v);
       active.set("opacity", v / 100);
       fabricCanvas.renderAll();
+      scheduleObjectCommit(active);
     }
   };
 
@@ -415,6 +466,7 @@ export const PropertiesPanel = ({
       active.set("strokeWidth", strokeWidth);
       fabricCanvas.renderAll();
       readSelectedObject();
+      scheduleObjectCommit(active);
     }
   };
 
@@ -427,6 +479,7 @@ export const PropertiesPanel = ({
       active.set("fontSize", fontSize);
       fabricCanvas.renderAll();
       readSelectedObject();
+      scheduleObjectCommit(active);
     }
   };
 
@@ -574,6 +627,7 @@ export const PropertiesPanel = ({
             </div>
             <Slider
               value={[brushWidth]}
+              aria-label="Brush width"
               onValueChange={(v) => onBrushWidthChange(v[0] ?? brushWidth)}
               min={1}
               max={50}
@@ -593,6 +647,7 @@ export const PropertiesPanel = ({
             </div>
             <Slider
               value={[brushHardness]}
+              aria-label="Brush hardness"
               onValueChange={(v) =>
                 onBrushHardnessChange(v[0] ?? brushHardness)
               }
@@ -614,6 +669,7 @@ export const PropertiesPanel = ({
             </div>
             <Slider
               value={[brushOpacity]}
+              aria-label="Brush opacity"
               onValueChange={(v) =>
                 onBrushOpacityChange(v[0] ?? brushOpacity)
               }
@@ -654,9 +710,10 @@ export const PropertiesPanel = ({
                 </div>
                 <Slider
                   value={[objectOpacity]}
+                  aria-label="Object opacity"
                   disabled={selectedProps.readOnly}
                   onValueChange={handleObjectOpacityChange}
-                  onValueCommit={commitObjectChange}
+                  onValueCommit={() => flushScheduledObjectCommit()}
                   min={0}
                   max={100}
                   step={1}
@@ -722,9 +779,10 @@ export const PropertiesPanel = ({
                 </div>
                 <Slider
                   value={[selectedProps.strokeWidth]}
+                  aria-label="Stroke width"
                   disabled={selectedProps.readOnly}
                   onValueChange={handleObjectStrokeWidthChange}
-                  onValueCommit={commitObjectChange}
+                  onValueCommit={() => flushScheduledObjectCommit()}
                   min={0}
                   max={20}
                   step={1}
@@ -862,9 +920,10 @@ export const PropertiesPanel = ({
                     </div>
                     <Slider
                       value={[selectedProps.fontSize || 24]}
+                      aria-label="Font size"
                       disabled={selectedProps.readOnly}
                       onValueChange={handleFontSizeChange}
-                      onValueCommit={commitObjectChange}
+                      onValueCommit={() => flushScheduledObjectCommit()}
                       min={8}
                       max={200}
                       step={1}
