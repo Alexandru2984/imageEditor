@@ -29,13 +29,25 @@ export const hasAdjustments = (v: FilterValues): boolean =>
 
 /** Rebuild the image's filter stack from slider values (a fixed-order stack). */
 export function applyFilterValues(image: FabricImage, v: FilterValues): void {
-  image.filters = [
-    new fabric.filters.Brightness({ brightness: v.brightness / 100 }),
-    new fabric.filters.Contrast({ contrast: v.contrast / 100 }),
-    new fabric.filters.Saturation({ saturation: v.saturation / 100 }),
-    new fabric.filters.Blur({ blur: v.blur / 100 }),
-    new fabric.filters.HueRotation({ rotation: v.hue / 100 }),
-  ];
+  // Identity filters still cost a full image pass. Keep the same stable order,
+  // but instantiate only adjustments that actually change pixels.
+  const next: fabric.filters.BaseFilter<string, object>[] = [];
+  if (v.brightness !== 0) {
+    next.push(new fabric.filters.Brightness({ brightness: v.brightness / 100 }));
+  }
+  if (v.contrast !== 0) {
+    next.push(new fabric.filters.Contrast({ contrast: v.contrast / 100 }));
+  }
+  if (v.saturation !== 0) {
+    next.push(new fabric.filters.Saturation({ saturation: v.saturation / 100 }));
+  }
+  if (v.blur !== 0) {
+    next.push(new fabric.filters.Blur({ blur: v.blur / 100 }));
+  }
+  if (v.hue !== 0) {
+    next.push(new fabric.filters.HueRotation({ rotation: v.hue / 100 }));
+  }
+  image.filters = next;
   image.applyFilters();
 }
 

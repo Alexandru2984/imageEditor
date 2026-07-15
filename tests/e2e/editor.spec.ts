@@ -243,6 +243,28 @@ test("adding a shape selects it, and undo removes it", async ({ page }) => {
   await expect(page.getByText("Object Properties")).toHaveCount(0);
 });
 
+test("coalesces filter changes and stores only active adjustments", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  const brightness = page.getByRole("slider", { name: "Brightness filter" });
+  await brightness.focus();
+  await page.keyboard.press("ArrowRight");
+
+  await expect
+    .poll(async () => {
+      const json = await getAutosaveJson(page);
+      if (!json) return null;
+      const document = JSON.parse(json) as {
+        objects?: Array<{ type?: string; filters?: unknown[] }>;
+      };
+      return document.objects?.find((object) =>
+        object.type?.toLowerCase().includes("image")
+      )?.filters?.length;
+    })
+    .toBe(1);
+});
+
 test("commits autosaved edits and restores them after reload", async ({
   page,
 }) => {
@@ -326,6 +348,53 @@ test("locked image layers stay visible, protected, and persist", async ({
   await expect(
     page.locator("[data-layer-id]").filter({ hasText: "Background" })
   ).toBeVisible();
+});
+
+test("caps synchronous layer thumbnail rendering on large documents", async ({
+  page,
+}) => {
+  await page.evaluate(() => {
+    const trackedWindow = window as Window & { __thumbnailRenderCount?: number };
+    trackedWindow.__thumbnailRenderCount = 0;
+    const original = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function (
+      ...args: Parameters<HTMLCanvasElement["toDataURL"]>
+    ) {
+      trackedWindow.__thumbnailRenderCount =
+        (trackedWindow.__thumbnailRenderCount ?? 0) + 1;
+      return original.apply(this, args);
+    };
+  });
+
+  const snapshot = {
+    json: JSON.stringify({
+      objects: Array.from({ length: 250 }, (_, index) => ({
+        type: "Rect",
+        width: 20,
+        height: 20,
+        left: index % 25,
+        top: Math.floor(index / 25),
+        fill: "#ff0000",
+      })),
+    }),
+    srcs: [],
+  };
+  await page.getByTestId("project-input").setInputFiles({
+    name: "many-layers.imgedit.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ version: 1, snapshot })),
+  });
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  await expect(page.getByText("Rectangle 250", { exact: true })).toBeVisible();
+
+  const thumbnailRenders = await page.evaluate(
+    () =>
+      (window as Window & { __thumbnailRenderCount?: number })
+        .__thumbnailRenderCount ?? 0
+  );
+  expect(thumbnailRenders).toBeGreaterThan(0);
+  expect(thumbnailRenders).toBeLessThanOrEqual(120);
 });
 
 test("keyboard shortcut selects the marquee tool", async ({ page }) => {

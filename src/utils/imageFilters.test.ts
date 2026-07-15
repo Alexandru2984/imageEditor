@@ -1,5 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { readFilterValues, DEFAULT_FILTERS, hasAdjustments } from "./imageFilters";
+import { describe, it, expect, vi } from "vitest";
+import type { FabricImage } from "fabric";
+import {
+  applyFilterValues,
+  readFilterValues,
+  DEFAULT_FILTERS,
+  hasAdjustments,
+} from "./imageFilters";
 
 describe("readFilterValues", () => {
   it("returns defaults for an empty or missing filter stack", () => {
@@ -40,5 +46,39 @@ describe("hasAdjustments", () => {
   it("is true when any channel is non-zero", () => {
     expect(hasAdjustments({ ...DEFAULT_FILTERS, blur: 5 })).toBe(true);
     expect(hasAdjustments({ ...DEFAULT_FILTERS, hue: -1 })).toBe(true);
+  });
+});
+
+describe("applyFilterValues", () => {
+  it("does not run identity filters over the image", () => {
+    const image = {
+      filters: [],
+      applyFilters: vi.fn(),
+    } as unknown as FabricImage;
+
+    applyFilterValues(image, DEFAULT_FILTERS);
+
+    expect(image.filters).toEqual([]);
+    expect(image.applyFilters).toHaveBeenCalledOnce();
+  });
+
+  it("builds only the active filters in stable order", () => {
+    const image = {
+      filters: [],
+      applyFilters: vi.fn(),
+    } as unknown as FabricImage;
+
+    applyFilterValues(image, {
+      ...DEFAULT_FILTERS,
+      brightness: 25,
+      blur: 10,
+      hue: -50,
+    });
+
+    expect(image.filters.map((filter) => filter.type)).toEqual([
+      "Brightness",
+      "Blur",
+      "HueRotation",
+    ]);
   });
 });

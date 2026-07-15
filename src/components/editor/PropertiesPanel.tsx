@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   Canvas as FabricCanvas,
   FabricImage,
@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "sonner";
 import {
   Paintbrush,
   Bold,
@@ -114,6 +115,12 @@ export const PropertiesPanel = ({
   const [selectedProps, setSelectedProps] =
     useState<SelectedObjectProps | null>(null);
   const [objectOpacity, setObjectOpacity] = useState(100);
+  const filtersRef = useRef<FilterValues>(DEFAULT_FILTERS);
+  const pendingFilterRef = useRef<{
+    target: FabricImage;
+    values: FilterValues;
+  } | null>(null);
+  const filterTimerRef = useRef<number | null>(null);
 
   // Filters target the selected image layer if one is selected, else the
   // background photo. That's the image the filter sliders read from and write to.
@@ -141,19 +148,89 @@ export const PropertiesPanel = ({
     return active && !isReadOnlySelection(active) ? active : undefined;
   }, [fabricCanvas]);
 
-  const applyFilters = useCallback(
-    (values: FilterValues) => {
-      if (!fabricCanvas) return;
-      const target = getFilterTarget();
-      if (!target || isFilterReadOnly(target)) return;
-      applyFilterValues(target, values);
-      fabricCanvas.renderAll();
+  const applyFiltersToTarget = useCallback(
+    (target: FabricImage, values: FilterValues): boolean => {
+      if (
+        !fabricCanvas ||
+        !fabricCanvas.getObjects().includes(target) ||
+        isFilterReadOnly(target)
+      ) {
+        return false;
+      }
+
+      const previousFilters = [...(target.filters ?? [])];
+      try {
+        applyFilterValues(target, values);
+        fabricCanvas.renderAll();
+        return true;
+      } catch (error) {
+        console.error("Image filter rendering failed:", error);
+        target.filters = previousFilters;
+        try {
+          target.applyFilters();
+          fabricCanvas.renderAll();
+        } catch (rollbackError) {
+          console.error("Image filter rollback failed:", rollbackError);
+        }
+        const restored = readFilterValues(previousFilters as never);
+        filtersRef.current = restored;
+        setFilters(restored);
+        toast.error("This image is too large for that filter in this browser");
+        return false;
+      }
     },
-    [fabricCanvas, getFilterTarget, isFilterReadOnly]
+    [fabricCanvas, isFilterReadOnly]
   );
 
-  // Sliders apply live while dragging; the *Commit handlers below fire
-  // object:modified once at drag end so the change lands in undo history
+  const cancelScheduledFilterApply = useCallback(() => {
+    if (filterTimerRef.current !== null) {
+      window.clearTimeout(filterTimerRef.current);
+      filterTimerRef.current = null;
+    }
+    pendingFilterRef.current = null;
+  }, []);
+
+  const flushScheduledFilterApply = useCallback((): FabricImage | null => {
+    if (filterTimerRef.current !== null) {
+      window.clearTimeout(filterTimerRef.current);
+      filterTimerRef.current = null;
+    }
+    const pending = pendingFilterRef.current;
+    pendingFilterRef.current = null;
+    return pending && applyFiltersToTarget(pending.target, pending.values)
+      ? pending.target
+      : null;
+  }, [applyFiltersToTarget]);
+
+  const scheduleFilterApply = useCallback(
+    (target: FabricImage, values: FilterValues) => {
+      pendingFilterRef.current = { target, values };
+      if (filterTimerRef.current !== null) {
+        window.clearTimeout(filterTimerRef.current);
+      }
+      filterTimerRef.current = window.setTimeout(() => {
+        filterTimerRef.current = null;
+        const pending = pendingFilterRef.current;
+        pendingFilterRef.current = null;
+        if (
+          pending &&
+          applyFiltersToTarget(pending.target, pending.values) &&
+          fabricCanvas
+        ) {
+          fabricCanvas.fire("object:modified", { target: pending.target });
+        }
+      }, 75);
+    },
+    [applyFiltersToTarget, fabricCanvas]
+  );
+
+  useEffect(
+    () => () => cancelScheduledFilterApply(),
+    [cancelScheduledFilterApply, fabricCanvas]
+  );
+
+  // Slider work is coalesced; applying pixels and recording the history entry
+  // happen together so pointer and keyboard event ordering cannot lose edits.
   const commitObjectChange = useCallback(() => {
     if (!fabricCanvas) return;
     const active = getEditableActiveObject();
@@ -164,35 +241,43 @@ export const PropertiesPanel = ({
 
   const commitFilterChange = useCallback(() => {
     if (!fabricCanvas) return;
-    const target = getFilterTarget();
-    if (target && !isFilterReadOnly(target)) {
-      fabricCanvas.fire("object:modified", { target });
-    }
-  }, [fabricCanvas, getFilterTarget, isFilterReadOnly]);
+    const target = flushScheduledFilterApply();
+    if (target) fabricCanvas.fire("object:modified", { target });
+  }, [
+    fabricCanvas,
+    flushScheduledFilterApply,
+  ]);
 
   const setFilter = (key: keyof FilterValues) => (value: number[]) => {
     const filterValue = value[0];
     if (filterValue === undefined) return;
     const target = getFilterTarget();
     if (!target || isFilterReadOnly(target)) return;
-    setFilters((prev) => {
-      const next = { ...prev, [key]: filterValue };
-      applyFilters(next);
-      return next;
-    });
+    const next = { ...filtersRef.current, [key]: filterValue };
+    filtersRef.current = next;
+    setFilters(next);
+    scheduleFilterApply(target, next);
   };
 
   // Read the current filter target's values into the sliders. Runs on selection
   // change and after undo/redo, so the sliders always reflect what's on screen.
   const syncFiltersFromCanvas = useCallback(() => {
+    cancelScheduledFilterApply();
     const target = getFilterTarget();
     setHasTargetImage(!!target);
     setTargetIsSelection(
       !!target && target === fabricCanvas?.getActiveObject()
     );
     setFilterTargetReadOnly(isFilterReadOnly(target));
-    setFilters(readFilterValues(target?.filters as never));
-  }, [fabricCanvas, getFilterTarget, isFilterReadOnly]);
+    const next = readFilterValues(target?.filters as never);
+    filtersRef.current = next;
+    setFilters(next);
+  }, [
+    cancelScheduledFilterApply,
+    fabricCanvas,
+    getFilterTarget,
+    isFilterReadOnly,
+  ]);
 
   useEffect(() => {
     if (!fabricCanvas) return;

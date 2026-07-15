@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Eye,
   EyeOff,
@@ -19,7 +19,6 @@ import {
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Label } from "@/components/ui/label";
 import {
@@ -39,7 +38,6 @@ import {
   isEditorChrome,
   isObjectLocked,
   isProtectedObject,
-  normalizeEditorObjects,
   setObjectLocked,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
@@ -60,6 +58,12 @@ interface LayerItem {
 interface LayersPanelProps {
   fabricCanvas: FabricCanvas | null;
 }
+
+// Generating a Fabric data URL is a real canvas render. Keep previews for the
+// top of the stack and use type icons deeper down instead of blocking the UI on
+// hundreds (or thousands) of synchronous offscreen renders.
+const MAX_LAYER_THUMBNAILS = 120;
+const MAX_CACHED_THUMBNAILS = 160;
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -124,6 +128,8 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const thumbnailCacheRef = useRef<Map<FabricObject, string>>(new Map());
+  const refreshFrameRef = useRef<number | null>(null);
 
   const refreshLayers = useCallback(() => {
     if (!fabricCanvas) {
@@ -131,7 +137,6 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       return;
     }
 
-    normalizeEditorObjects(fabricCanvas);
     const objects = fabricCanvas.getObjects();
     const layerItems: LayerItem[] = [];
     const usedIds = new Set<string>();
@@ -152,15 +157,58 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
         visible: obj.visible !== false,
         locked: isBackground || isObjectLocked(obj),
         isBackground,
-        thumbnail: objectThumbnail(obj),
+        thumbnail: "",
         fabricObject: obj,
       });
       if (!isBackground) counter += 1;
     }
 
-    // Reverse so topmost layer appears first
-    setLayers(layerItems.reverse());
+    // Reverse so topmost layer appears first. Thumbnails are memoized by
+    // object identity and invalidated only when that object changes.
+    const ordered = layerItems.reverse();
+    for (let index = 0; index < ordered.length; index += 1) {
+      const layer = ordered[index];
+      if (!layer || index >= MAX_LAYER_THUMBNAILS) continue;
+      const cache = thumbnailCacheRef.current;
+      const cached = cache.get(layer.fabricObject);
+      if (cache.has(layer.fabricObject)) {
+        const thumbnail = cached ?? "";
+        layer.thumbnail = thumbnail;
+        // Refresh insertion order so the bounded map behaves as a small LRU.
+        cache.delete(layer.fabricObject);
+        cache.set(layer.fabricObject, thumbnail);
+      } else {
+        const thumbnail = objectThumbnail(layer.fabricObject);
+        cache.set(layer.fabricObject, thumbnail);
+        if (cache.size > MAX_CACHED_THUMBNAILS) {
+          const oldest = cache.keys().next().value as FabricObject | undefined;
+          if (oldest) cache.delete(oldest);
+        }
+        layer.thumbnail = thumbnail;
+      }
+    }
+    setLayers(ordered);
+
+    const active = fabricCanvas.getActiveObject() as EditorObject | undefined;
+    if (active && !isEditorChrome(active)) {
+      setSelectedLayerId(active.__layerId ?? null);
+    } else if (!active) {
+      setSelectedLayerId(null);
+    }
   }, [fabricCanvas]);
+
+  const scheduleRefresh = useCallback(
+    (target?: FabricObject) => {
+      if (target) thumbnailCacheRef.current.delete(target);
+      else thumbnailCacheRef.current.clear();
+      if (refreshFrameRef.current !== null) return;
+      refreshFrameRef.current = window.requestAnimationFrame(() => {
+        refreshFrameRef.current = null;
+        refreshLayers();
+      });
+    },
+    [refreshLayers]
+  );
 
   const selectedLayer = layers.find((l) => l.id === selectedLayerId) ?? null;
 
@@ -213,43 +261,39 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     if (layer && !layer.locked && name) {
       layer.fabricObject.name = name;
       fabricCanvas.fire("object:modified", { target: layer.fabricObject });
-      refreshLayers();
     }
     setRenamingId(null);
   };
 
   useEffect(() => {
     if (!fabricCanvas) return;
+    const thumbnailCache = thumbnailCacheRef.current;
 
     refreshLayers();
 
-    const events = [
-      "object:added",
-      "object:removed",
-      "object:modified",
-      "selection:created",
-      "selection:updated",
-      "selection:cleared",
-    ] as const;
+    const events = ["object:added", "object:removed", "object:modified"] as const;
 
-    const handler = () => refreshLayers();
+    const handler = (event: { target?: FabricObject }) =>
+      scheduleRefresh(event.target);
     events.forEach((event) => fabricCanvas.on(event, handler));
 
     return () => {
       events.forEach((event) => fabricCanvas.off(event, handler));
+      if (refreshFrameRef.current !== null) {
+        window.cancelAnimationFrame(refreshFrameRef.current);
+        refreshFrameRef.current = null;
+      }
+      thumbnailCache.clear();
     };
-  }, [fabricCanvas, refreshLayers]);
+  }, [fabricCanvas, refreshLayers, scheduleRefresh]);
 
   // Sync selection state
   useEffect(() => {
     if (!fabricCanvas) return;
 
     const onSelectionCreated = (e: { selected?: FabricObject[] }) => {
-      const obj = e.selected?.[0];
-      if (obj) {
-        const layer = layers.find((l) => l.fabricObject === obj);
-        if (layer) setSelectedLayerId(layer.id);
-      }
+      const obj = e.selected?.[0] as EditorObject | undefined;
+      setSelectedLayerId(obj?.__layerId ?? null);
     };
 
     const onSelectionCleared = () => setSelectedLayerId(null);
@@ -263,7 +307,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       fabricCanvas.off("selection:updated", onSelectionCreated);
       fabricCanvas.off("selection:cleared", onSelectionCleared);
     };
-  }, [fabricCanvas, layers]);
+  }, [fabricCanvas]);
 
   const handleSelectLayer = (layer: LayerItem) => {
     if (!fabricCanvas) return;
@@ -278,7 +322,6 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     layer.fabricObject.set("visible", !layer.visible);
     fabricCanvas.fire("object:modified", { target: layer.fabricObject });
     fabricCanvas.renderAll();
-    refreshLayers();
   };
 
   const handleToggleLock = (layer: LayerItem, e: React.MouseEvent) => {
@@ -289,7 +332,6 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     setObjectLocked(layer.fabricObject, !isLocked);
     fabricCanvas.fire("object:modified", { target: layer.fabricObject });
     fabricCanvas.renderAll();
-    refreshLayers();
   };
 
   const handleDelete = (layer: LayerItem, e: React.MouseEvent) => {
@@ -297,7 +339,6 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
     fabricCanvas.remove(layer.fabricObject);
     fabricCanvas.renderAll();
-    refreshLayers();
   };
 
   const handleMoveUp = (layer: LayerItem, e: React.MouseEvent) => {
@@ -311,7 +352,6 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       fabricCanvas.moveObjectTo(layer.fabricObject, index + 1);
       fabricCanvas.fire("object:modified", { target: layer.fabricObject });
       fabricCanvas.renderAll();
-      refreshLayers();
     }
   };
 
@@ -328,7 +368,6 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
       fabricCanvas.moveObjectTo(layer.fabricObject, index - 1);
       fabricCanvas.fire("object:modified", { target: layer.fabricObject });
       fabricCanvas.renderAll();
-      refreshLayers();
     }
   };
 
@@ -405,7 +444,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                   onClick={() => handleSelectLayer(layer)}
                   className={`
                     group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
-                    transition-colors duration-100
+                    transition-colors duration-100 [content-visibility:auto] [contain-intrinsic-size:auto_40px]
                     ${
                       isSelected
                         ? "bg-primary/15 border border-primary/30"
