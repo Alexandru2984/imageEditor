@@ -6,6 +6,7 @@ import {
   inspectRasterDataUrl,
 } from "./imageFile";
 import { downloadBlob } from "./download";
+import { throwIfAborted } from "./abort";
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -249,13 +250,19 @@ export function downloadProjectFile(canvas: FabricCanvas): void {
   downloadBlob(blob, `project-${Date.now()}.imgedit.json`);
 }
 
-export async function readProjectFile(file: File): Promise<CanvasSnapshot> {
+export async function readProjectFile(
+  file: File,
+  signal?: AbortSignal
+): Promise<CanvasSnapshot> {
+  throwIfAborted(signal);
   if (file.size > MAX_PROJECT_BYTES) {
     throw new Error("Project file is too large");
   }
+  const text = await file.text();
+  throwIfAborted(signal);
   let payload: unknown;
   try {
-    payload = JSON.parse(await file.text());
+    payload = JSON.parse(text);
   } catch {
     throw new Error("Project file is not valid JSON");
   }
@@ -263,5 +270,7 @@ export async function readProjectFile(file: File): Promise<CanvasSnapshot> {
   if (!result.success) {
     throw new Error("Not a valid project file");
   }
-  return validateProjectSnapshot(result.data.snapshot);
+  const snapshot = validateProjectSnapshot(result.data.snapshot);
+  throwIfAborted(signal);
+  return snapshot;
 }

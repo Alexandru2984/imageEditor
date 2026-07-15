@@ -16,6 +16,10 @@ import {
   DEFAULT_FILTERS,
   type FilterValues,
 } from "@/utils/imageFilters";
+import {
+  isEditorChrome,
+  isReadOnlySelection,
+} from "@/utils/editorObjects";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
@@ -78,6 +82,7 @@ interface SelectedObjectProps {
   type?: string;
   hasMask: boolean;
   maskInverted: boolean;
+  readOnly: boolean;
 }
 
 // Text-only props are absent on the base FabricObject type
@@ -105,6 +110,7 @@ export const PropertiesPanel = ({
   const [filters, setFilters] = useState<FilterValues>(DEFAULT_FILTERS);
   const [hasTargetImage, setHasTargetImage] = useState(false);
   const [targetIsSelection, setTargetIsSelection] = useState(false);
+  const [filterTargetReadOnly, setFilterTargetReadOnly] = useState(false);
   const [selectedProps, setSelectedProps] =
     useState<SelectedObjectProps | null>(null);
   const [objectOpacity, setObjectOpacity] = useState(100);
@@ -118,38 +124,57 @@ export const PropertiesPanel = ({
     return findBackgroundImage(fabricCanvas);
   }, [fabricCanvas]);
 
+  // The background remains adjustable even though it is protected from
+  // transforms. A selected, explicitly locked image layer does not.
+  const isFilterReadOnly = useCallback(
+    (target: FabricImage | undefined): boolean =>
+      !!target &&
+      target === fabricCanvas?.getActiveObject() &&
+      isReadOnlySelection(target),
+    [fabricCanvas]
+  );
+
+  const getEditableActiveObject = useCallback(():
+    | FabricObject
+    | undefined => {
+    const active = fabricCanvas?.getActiveObject();
+    return active && !isReadOnlySelection(active) ? active : undefined;
+  }, [fabricCanvas]);
+
   const applyFilters = useCallback(
     (values: FilterValues) => {
       if (!fabricCanvas) return;
       const target = getFilterTarget();
-      if (!target) return;
+      if (!target || isFilterReadOnly(target)) return;
       applyFilterValues(target, values);
       fabricCanvas.renderAll();
     },
-    [fabricCanvas, getFilterTarget]
+    [fabricCanvas, getFilterTarget, isFilterReadOnly]
   );
 
   // Sliders apply live while dragging; the *Commit handlers below fire
   // object:modified once at drag end so the change lands in undo history
   const commitObjectChange = useCallback(() => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (active) {
       fabricCanvas.fire("object:modified", { target: active });
     }
-  }, [fabricCanvas]);
+  }, [fabricCanvas, getEditableActiveObject]);
 
   const commitFilterChange = useCallback(() => {
     if (!fabricCanvas) return;
     const target = getFilterTarget();
-    if (target) {
+    if (target && !isFilterReadOnly(target)) {
       fabricCanvas.fire("object:modified", { target });
     }
-  }, [fabricCanvas, getFilterTarget]);
+  }, [fabricCanvas, getFilterTarget, isFilterReadOnly]);
 
   const setFilter = (key: keyof FilterValues) => (value: number[]) => {
     const filterValue = value[0];
     if (filterValue === undefined) return;
+    const target = getFilterTarget();
+    if (!target || isFilterReadOnly(target)) return;
     setFilters((prev) => {
       const next = { ...prev, [key]: filterValue };
       applyFilters(next);
@@ -165,8 +190,9 @@ export const PropertiesPanel = ({
     setTargetIsSelection(
       !!target && target === fabricCanvas?.getActiveObject()
     );
+    setFilterTargetReadOnly(isFilterReadOnly(target));
     setFilters(readFilterValues(target?.filters as never));
-  }, [fabricCanvas, getFilterTarget]);
+  }, [fabricCanvas, getFilterTarget, isFilterReadOnly]);
 
   useEffect(() => {
     if (!fabricCanvas) return;
@@ -185,7 +211,7 @@ export const PropertiesPanel = ({
     }
 
     const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
-    if (!active) {
+    if (!active || isEditorChrome(active)) {
       setSelectedProps(null);
       return;
     }
@@ -205,13 +231,14 @@ export const PropertiesPanel = ({
       type: active.type,
       hasMask: !!clip,
       maskInverted: !!clip?.inverted,
+      readOnly: isReadOnlySelection(active),
     });
     setObjectOpacity(Math.round((active.opacity ?? 1) * 100));
   }, [fabricCanvas]);
 
   const toggleMaskInverted = () => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     const clip = active?.clipPath as { inverted?: boolean } | undefined;
     if (active && clip) {
       clip.inverted = !clip.inverted;
@@ -223,7 +250,7 @@ export const PropertiesPanel = ({
 
   const releaseMask = () => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (active?.clipPath) {
       active.clipPath = undefined;
       fabricCanvas.fire("object:modified", { target: active });
@@ -264,7 +291,7 @@ export const PropertiesPanel = ({
     onColorChange(color);
 
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (active) {
       active.set("fill", color);
       fabricCanvas.renderAll();
@@ -275,11 +302,10 @@ export const PropertiesPanel = ({
   const handleObjectOpacityChange = (value: number[]) => {
     const v = value[0];
     if (v === undefined) return;
-    setObjectOpacity(v);
-
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (active) {
+      setObjectOpacity(v);
       active.set("opacity", v / 100);
       fabricCanvas.renderAll();
     }
@@ -287,7 +313,7 @@ export const PropertiesPanel = ({
 
   const handleObjectStrokeChange = (color: string) => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (active) {
       active.set("stroke", color);
       fabricCanvas.renderAll();
@@ -299,7 +325,7 @@ export const PropertiesPanel = ({
     if (!fabricCanvas) return;
     const strokeWidth = value[0];
     if (strokeWidth === undefined) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (active) {
       active.set("strokeWidth", strokeWidth);
       fabricCanvas.renderAll();
@@ -311,7 +337,7 @@ export const PropertiesPanel = ({
     if (!fabricCanvas) return;
     const fontSize = value[0];
     if (fontSize === undefined) return;
-    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
+    const active = getEditableActiveObject() as TextlikeObject | undefined;
     if (active && active.fontSize !== undefined) {
       active.set("fontSize", fontSize);
       fabricCanvas.renderAll();
@@ -321,7 +347,7 @@ export const PropertiesPanel = ({
 
   const handleFontFamilyChange = (family: string) => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
+    const active = getEditableActiveObject() as TextlikeObject | undefined;
     if (active && active.fontFamily !== undefined) {
       active.set("fontFamily", family);
       fabricCanvas.renderAll();
@@ -331,7 +357,7 @@ export const PropertiesPanel = ({
 
   const toggleTextStyle = (key: "fontWeight" | "fontStyle" | "underline") => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
+    const active = getEditableActiveObject() as TextlikeObject | undefined;
     if (!active) return;
     if (key === "fontWeight") {
       active.set("fontWeight", active.fontWeight === "bold" ? "normal" : "bold");
@@ -347,7 +373,7 @@ export const PropertiesPanel = ({
 
   const setTextAlign = (align: string) => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject() as TextlikeObject | undefined;
+    const active = getEditableActiveObject() as TextlikeObject | undefined;
     if (!active) return;
     active.set("textAlign", align);
     fabricCanvas.fire("object:modified", { target: active });
@@ -361,7 +387,7 @@ export const PropertiesPanel = ({
     mode: "left" | "centerH" | "right" | "top" | "middle" | "bottom"
   ) => {
     if (!fabricCanvas) return;
-    const active = fabricCanvas.getActiveObject();
+    const active = getEditableActiveObject();
     if (!active) return;
 
     const zoom = fabricCanvas.getZoom();
@@ -423,6 +449,8 @@ export const PropertiesPanel = ({
             {COLOR_SWATCHES.map((color) => (
               <button
                 key={color}
+                type="button"
+                aria-label={`Use color ${color}`}
                 onClick={() => {
                   handleColorChange(color);
                   commitObjectChange();
@@ -438,6 +466,7 @@ export const PropertiesPanel = ({
           </div>
           <input
             type="color"
+            aria-label="Custom active color"
             value={activeColor}
             onChange={(e) => handleColorChange(e.target.value)}
             onBlur={commitObjectChange}
@@ -517,9 +546,16 @@ export const PropertiesPanel = ({
         {selectedProps && (
           <>
             <div>
-              <Label className="text-xs font-semibold mb-3 block">
-                Object Properties
-              </Label>
+              <div className="flex items-center justify-between mb-3">
+                <Label className="text-xs font-semibold">
+                  Object Properties
+                </Label>
+                {selectedProps.readOnly && (
+                  <span className="text-[10px] uppercase tracking-wide text-amber-500">
+                    Locked
+                  </span>
+                )}
+              </div>
 
               {/* Opacity */}
               <div className="mb-3">
@@ -533,6 +569,7 @@ export const PropertiesPanel = ({
                 </div>
                 <Slider
                   value={[objectOpacity]}
+                  disabled={selectedProps.readOnly}
                   onValueChange={handleObjectOpacityChange}
                   onValueCommit={commitObjectChange}
                   min={0}
@@ -550,10 +587,12 @@ export const PropertiesPanel = ({
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
+                    aria-label="Object fill color"
+                    disabled={selectedProps.readOnly}
                     value={selectedProps.fill || "#000000"}
                     onChange={(e) => handleColorChange(e.target.value)}
                     onBlur={commitObjectChange}
-                    className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border"
+                    className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border disabled:cursor-not-allowed disabled:opacity-50"
                   />
                   <span className="text-xs text-muted-foreground font-mono">
                     {selectedProps.fill}
@@ -569,6 +608,8 @@ export const PropertiesPanel = ({
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
+                    aria-label="Object stroke color"
+                    disabled={selectedProps.readOnly}
                     value={
                       selectedProps.stroke === "transparent"
                         ? "#000000"
@@ -576,7 +617,7 @@ export const PropertiesPanel = ({
                     }
                     onChange={(e) => handleObjectStrokeChange(e.target.value)}
                     onBlur={commitObjectChange}
-                    className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border"
+                    className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border disabled:cursor-not-allowed disabled:opacity-50"
                   />
                   <span className="text-xs text-muted-foreground font-mono">
                     {selectedProps.stroke}
@@ -596,6 +637,7 @@ export const PropertiesPanel = ({
                 </div>
                 <Slider
                   value={[selectedProps.strokeWidth]}
+                  disabled={selectedProps.readOnly}
                   onValueChange={handleObjectStrokeWidthChange}
                   onValueCommit={commitObjectChange}
                   min={0}
@@ -613,8 +655,10 @@ export const PropertiesPanel = ({
                   </Label>
                   <div className="flex items-center gap-2">
                     <button
+                      type="button"
+                      disabled={selectedProps.readOnly}
                       onClick={toggleMaskInverted}
-                      className={`flex-1 h-8 rounded-md border text-xs transition-colors ${
+                      className={`flex-1 h-8 rounded-md border text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                         selectedProps.maskInverted
                           ? "border-primary bg-primary/15 text-foreground"
                           : "border-border hover:bg-accent text-muted-foreground"
@@ -623,8 +667,10 @@ export const PropertiesPanel = ({
                       {selectedProps.maskInverted ? "Inverted" : "Invert"}
                     </button>
                     <button
+                      type="button"
+                      disabled={selectedProps.readOnly}
                       onClick={releaseMask}
-                      className="flex-1 h-8 rounded-md border border-border text-xs text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors"
+                      className="flex-1 h-8 rounded-md border border-border text-xs text-muted-foreground hover:text-destructive hover:border-destructive/50 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Release
                     </button>
@@ -650,8 +696,11 @@ export const PropertiesPanel = ({
                   ).map(([mode, Icon]) => (
                     <button
                       key={mode}
+                      type="button"
+                      aria-label={`Align ${mode}`}
+                      disabled={selectedProps.readOnly}
                       onClick={() => alignObject(mode)}
-                      className="flex-1 h-8 rounded-md border border-border hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+                      className="flex-1 h-8 rounded-md border border-border hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Icon className="h-3.5 w-3.5" />
                     </button>
@@ -678,8 +727,11 @@ export const PropertiesPanel = ({
                     ).map(([key, Icon, active]) => (
                       <button
                         key={key}
+                        type="button"
+                        aria-label={`Toggle ${key}`}
+                        disabled={selectedProps.readOnly}
                         onClick={() => toggleTextStyle(key)}
-                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors ${
+                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                           active
                             ? "border-primary bg-primary/15 text-foreground"
                             : "border-border hover:bg-accent text-muted-foreground"
@@ -698,8 +750,11 @@ export const PropertiesPanel = ({
                     ).map(([align, Icon]) => (
                       <button
                         key={align}
+                        type="button"
+                        aria-label={`Align text ${align}`}
+                        disabled={selectedProps.readOnly}
                         onClick={() => setTextAlign(align)}
-                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors ${
+                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                           selectedProps.textAlign === align
                             ? "border-primary bg-primary/15 text-foreground"
                             : "border-border hover:bg-accent text-muted-foreground"
@@ -722,6 +777,7 @@ export const PropertiesPanel = ({
                     </div>
                     <Slider
                       value={[selectedProps.fontSize || 24]}
+                      disabled={selectedProps.readOnly}
                       onValueChange={handleFontSizeChange}
                       onValueCommit={commitObjectChange}
                       min={8}
@@ -738,11 +794,12 @@ export const PropertiesPanel = ({
                     </Label>
                     <select
                       value={selectedProps.fontFamily || "Arial"}
+                      disabled={selectedProps.readOnly}
                       onChange={(e) => {
                         handleFontFamilyChange(e.target.value);
                         commitObjectChange();
                       }}
-                      className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs"
+                      className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {fontFamilies.map((font) => (
                         <option key={font} value={font}>
@@ -766,7 +823,11 @@ export const PropertiesPanel = ({
             <div className="flex items-center justify-between mb-3">
               <Label className="text-xs font-semibold">Image Filters</Label>
               <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {targetIsSelection ? "Selected" : "Background"}
+                {filterTargetReadOnly
+                  ? "Locked"
+                  : targetIsSelection
+                    ? "Selected"
+                    : "Background"}
               </span>
             </div>
 
@@ -783,6 +844,8 @@ export const PropertiesPanel = ({
                   </div>
                   <Slider
                     value={[filters[key]]}
+                    aria-label={`${label} filter`}
+                    disabled={filterTargetReadOnly}
                     onValueChange={setFilter(key)}
                     onValueCommit={commitFilterChange}
                     min={min}

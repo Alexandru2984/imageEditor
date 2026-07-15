@@ -19,6 +19,7 @@ import {
 import { downloadProjectFile, readProjectFile } from "@/utils/projectFile";
 import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { toast } from "sonner";
+import { isAbortError } from "@/utils/abort";
 import type { Tool } from "@/types/editor";
 
 // Re-export Tool so existing consumers (e.g. Toolbar) that import from ./ImageEditor still work
@@ -52,6 +53,26 @@ export const ImageEditor = () => {
   const latestSnapshotRef = useRef<CanvasSnapshot | null>(null);
   const autosaveGenerationRef = useRef(0);
   const autosaveFailureShownRef = useRef(false);
+  const documentLoadControllerRef = useRef<AbortController | null>(null);
+
+  const cancelDocumentLoad = useCallback(() => {
+    documentLoadControllerRef.current?.abort();
+    documentLoadControllerRef.current = null;
+  }, []);
+
+  const beginDocumentLoad = useCallback((): AbortSignal => {
+    documentLoadControllerRef.current?.abort();
+    const controller = new AbortController();
+    documentLoadControllerRef.current = controller;
+    return controller.signal;
+  }, []);
+
+  useEffect(
+    () => () => {
+      cancelDocumentLoad();
+    },
+    [cancelDocumentLoad]
+  );
 
   const cancelScheduledAutosave = useCallback(() => {
     if (autosaveTimerRef.current !== null) {
@@ -191,11 +212,12 @@ export const ImageEditor = () => {
   const handleCanvasLoadError = useCallback((error: unknown) => {
     console.error("Failed to load canvas document:", error);
     toast.error("The image or project could not be decoded safely");
+    cancelDocumentLoad();
     cancelScheduledAutosave();
     setFabricCanvas(null);
     setInitialSnapshot(null);
     setUploadedImage(null);
-  }, [cancelScheduledAutosave]);
+  }, [cancelDocumentLoad, cancelScheduledAutosave]);
 
   useKeyboardShortcuts({
     canvas: fabricCanvas,
@@ -218,10 +240,11 @@ export const ImageEditor = () => {
 
   const handleRestoreProject = useCallback(() => {
     if (!savedProject) return;
+    cancelDocumentLoad();
     cancelScheduledAutosave();
     setInitialSnapshot(savedProject.snapshot);
     setUploadedImage(savedProject.snapshot.srcs[0] ?? "restored-project");
-  }, [cancelScheduledAutosave, savedProject]);
+  }, [cancelDocumentLoad, cancelScheduledAutosave, savedProject]);
 
   const handleSaveProjectFile = useCallback(() => {
     if (!fabricCanvas) return;
@@ -236,8 +259,10 @@ export const ImageEditor = () => {
   }, [fabricCanvas]);
 
   const handleOpenProjectFile = useCallback(async (file: File) => {
+    const signal = beginDocumentLoad();
     try {
-      const snapshot = await readProjectFile(file);
+      const snapshot = await readProjectFile(file, signal);
+      if (signal.aborted) return;
       cancelScheduledAutosave();
       setSavedProject(null);
       void clearProject().catch((error) => {
@@ -250,15 +275,17 @@ export const ImageEditor = () => {
       setUploadedImage(snapshot.srcs[0] ?? "loaded-project");
       toast.success("Project opened");
     } catch (error) {
+      if (signal.aborted || isAbortError(error)) return;
       toast.error(
         error instanceof Error
           ? error.message
           : "Couldn't open that file — is it a project file?"
       );
     }
-  }, [cancelScheduledAutosave]);
+  }, [beginDocumentLoad, cancelScheduledAutosave]);
 
   const handleNewProject = useCallback(() => {
+    cancelDocumentLoad();
     cancelScheduledAutosave();
     void clearProject().catch((error) => {
       console.warn("Could not clear autosave:", error);
@@ -270,7 +297,7 @@ export const ImageEditor = () => {
     setFabricCanvas(null);
     setActiveTool("select");
     setZoom(1);
-  }, [cancelScheduledAutosave]);
+  }, [cancelDocumentLoad, cancelScheduledAutosave]);
 
   const handleToggleProperties = useCallback(() => {
     setShowProperties((prev) => !prev);
@@ -307,6 +334,7 @@ export const ImageEditor = () => {
             <div className="flex items-center justify-center h-full">
               <ImageUpload
                 onImageUpload={handleImageUpload}
+                onImageLoadStart={beginDocumentLoad}
                 savedProject={savedProject}
                 onRestore={handleRestoreProject}
                 onOpenProject={handleOpenProjectFile}
@@ -416,6 +444,7 @@ export const ImageEditor = () => {
           {!uploadedImage ? (
             <ImageUpload
               onImageUpload={handleImageUpload}
+              onImageLoadStart={beginDocumentLoad}
               savedProject={savedProject}
               onRestore={handleRestoreProject}
               onOpenProject={handleOpenProjectFile}

@@ -27,6 +27,15 @@ describe("readProjectFile", () => {
     await expect(readProjectFile(file)).resolves.toEqual(snapshot);
   });
 
+  it("cancels a stale project import", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      readProjectFile(fileOf('{"snapshot":{"json":"{}","srcs":[]}}'), controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("rejects non-JSON content", async () => {
     await expect(readProjectFile(fileOf("not json"))).rejects.toThrow();
   });

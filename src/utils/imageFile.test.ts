@@ -3,6 +3,7 @@ import {
   MAX_IMAGE_DIMENSION,
   inspectRasterBytes,
   inspectRasterDataUrl,
+  readSafeRasterImage,
 } from "./imageFile";
 
 const PNG_BASE64 =
@@ -56,5 +57,17 @@ describe("raster image inspection", () => {
     expect(() => inspectRasterDataUrl("data:image/png;base64,AA=A")).toThrow(
       /valid base64/
     );
+  });
+
+  it("cancels an image import before allocating a file reader", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const file = new File([bytes(PNG_BASE64)], "test.png", {
+      type: "image/png",
+    });
+
+    await expect(
+      readSafeRasterImage(file, controller.signal)
+    ).rejects.toMatchObject({ name: "AbortError" });
   });
 });

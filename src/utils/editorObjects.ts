@@ -66,6 +66,20 @@ export const isObjectLocked = (object: FabricObject): boolean => {
 export const isProtectedObject = (object: FabricObject): boolean =>
   isBackgroundObject(object) || isObjectLocked(object);
 
+/**
+ * Programmatic property/transform controls must protect an entire multi-layer
+ * selection when even one member is locked. Fabric's ActiveSelection itself
+ * does not inherit the lock flags from its children, so checking only the
+ * wrapper would otherwise let keyboard and panel actions bypass layer locks.
+ */
+export const isReadOnlySelection = (object: FabricObject): boolean => {
+  if (isEditorChrome(object) || isProtectedObject(object)) return true;
+  return (
+    object instanceof ActiveSelection &&
+    object.getObjects().some((child) => isReadOnlySelection(child))
+  );
+};
+
 export function markBackgroundObject(image: FabricImage): void {
   const object = image as EditorFabricObject;
   object.__isBackground = true;

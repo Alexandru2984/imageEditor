@@ -198,6 +198,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   };
 
   const startRename = (layer: LayerItem) => {
+    if (layer.locked) return;
     setRenamingId(layer.id);
     setRenameValue(layer.name);
   };
@@ -209,7 +210,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     }
     const layer = layers.find((l) => l.id === renamingId);
     const name = renameValue.trim();
-    if (layer && name) {
+    if (layer && !layer.locked && name) {
       layer.fabricObject.name = name;
       fabricCanvas.fire("object:modified", { target: layer.fabricObject });
       refreshLayers();

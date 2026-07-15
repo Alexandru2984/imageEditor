@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { FabricObject } from "fabric";
+import { ActiveSelection, Rect, type FabricObject } from "fabric";
 import {
   ensureLayerId,
   isObjectLocked,
   isProtectedObject,
+  isReadOnlySelection,
   setObjectLocked,
   type EditorFabricObject,
 } from "./editorObjects";
@@ -59,5 +60,20 @@ describe("editor object metadata", () => {
       lockScalingY: true,
     });
     expect(isObjectLocked(object as FabricObject)).toBe(true);
+  });
+
+  it("makes a multi-layer selection read-only when one child is locked", () => {
+    const editable = new Rect({ width: 10, height: 10 });
+    const locked = new Rect({ width: 10, height: 10 });
+    setObjectLocked(locked, true);
+
+    const selection = new ActiveSelection([editable, locked]);
+    expect(isProtectedObject(selection)).toBe(false);
+    expect(isReadOnlySelection(selection)).toBe(true);
+  });
+
+  it("treats editor chrome as read-only", () => {
+    const cropOverlay = fakeObject({ __isCropOverlay: true });
+    expect(isReadOnlySelection(cropOverlay as FabricObject)).toBe(true);
   });
 });

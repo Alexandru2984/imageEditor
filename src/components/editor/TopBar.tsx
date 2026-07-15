@@ -38,7 +38,7 @@ import { toast } from "sonner";
 import { extractSubjectDataURL } from "@/utils/cutout";
 import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
 import {
-  isProtectedObject,
+  isReadOnlySelection,
   markBackgroundObject,
 } from "@/utils/editorObjects";
 import { renderRegionBlob } from "@/utils/flatten";
@@ -304,7 +304,7 @@ export const TopBar = ({
 
     const activeObject = fabricCanvas.getActiveObject();
     if (activeObject) {
-      if (isProtectedObject(activeObject)) {
+      if (isReadOnlySelection(activeObject)) {
         toast.error("Unlock the layer before rotating it");
         return;
       }

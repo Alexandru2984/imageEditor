@@ -271,6 +271,11 @@ test("locked image layers stay visible, protected, and persist", async ({
   await expect(
     page.getByRole("button", { name: "Unlock Image 1" })
   ).toBeVisible();
+  await expect(page.getByLabel("Object fill color")).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Align left" })).toBeDisabled();
+  await expect(
+    page.getByRole("slider", { name: "Brightness filter" })
+  ).toBeDisabled();
 
   // Locking used to mark image layers as background and made them disappear.
   // It must now also protect the selected layer from keyboard deletion.

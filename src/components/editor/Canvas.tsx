@@ -500,12 +500,27 @@ export const Canvas = ({
     } else if (activeTool === "eraser") {
       const eraser = new EraserBrush(canvas);
       eraser.width = brushWidth;
-      eraser.on("end", async (e) => {
+      eraser.on("end", (e) => {
         e.preventDefault();
-        await eraser.commit(e.detail);
-        // Let listeners (undo history) know the document changed
-        canvas.fire("object:modified");
-        canvas.requestRenderAll();
+        void eraser
+          .commit(e.detail)
+          .then(() => {
+            if (
+              fabricCanvasRef.current !== canvas ||
+              canvas.disposed ||
+              canvas.destroyed
+            ) {
+              return;
+            }
+            // Let listeners (undo history) know the document changed.
+            canvas.fire("object:modified");
+            canvas.requestRenderAll();
+          })
+          .catch((error) => {
+            if (fabricCanvasRef.current !== canvas) return;
+            console.error("Eraser commit failed:", error);
+            toast.error("The eraser could not finish that stroke safely");
+          });
       });
       canvas.freeDrawingBrush = eraser;
     }

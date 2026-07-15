@@ -1,3 +1,5 @@
+import { createAbortError, throwIfAborted } from "./abort";
+
 export const MAX_IMAGE_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_EMBEDDED_IMAGE_BYTES = 48 * 1024 * 1024;
 export const MAX_IMAGE_DIMENSION = 16_384;
@@ -231,30 +233,65 @@ export function inspectRasterDataUrl(
   return metadata;
 }
 
-const readAsDataUrl = (blob: Blob): Promise<string> =>
-  new Promise((resolve, reject) => {
+const readAsDataUrl = (blob: Blob, signal?: AbortSignal): Promise<string> => {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    let settled = false;
+
+    const cleanup = () => {
+      signal?.removeEventListener("abort", handleSignalAbort);
+      reader.onload = null;
+      reader.onerror = null;
+      reader.onabort = null;
+    };
+    const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback();
+    };
+    const fail = (error: Error) => finish(() => reject(error));
+    const handleSignalAbort = () => {
+      if (reader.readyState === FileReader.LOADING) reader.abort();
+      fail(createAbortError());
+    };
+
     reader.onload = () =>
       typeof reader.result === "string"
-        ? resolve(reader.result)
-        : reject(new Error("Failed to read the image"));
-    reader.onerror = () => reject(reader.error ?? new Error("Failed to read the image"));
-    reader.readAsDataURL(blob);
-  });
+        ? finish(() => resolve(reader.result as string))
+        : fail(new Error("Failed to read the image"));
+    reader.onerror = () =>
+      fail(reader.error ?? new Error("Failed to read the image"));
+    reader.onabort = () => fail(createAbortError());
+    signal?.addEventListener("abort", handleSignalAbort, { once: true });
 
-export async function readSafeRasterImage(file: File): Promise<{
+    try {
+      reader.readAsDataURL(blob);
+    } catch (error) {
+      fail(error instanceof Error ? error : new Error("Failed to read the image"));
+    }
+  });
+};
+
+export async function readSafeRasterImage(file: File, signal?: AbortSignal): Promise<{
   dataUrl: string;
   metadata: RasterMetadata;
 }> {
+  throwIfAborted(signal);
   if (file.size === 0) throw new Error("The image file is empty");
   if (file.size > MAX_IMAGE_FILE_BYTES) {
     throw new Error(`Image exceeds the ${formatBytes(MAX_IMAGE_FILE_BYTES)} limit`);
   }
 
-  const header = new Uint8Array(
-    await file.slice(0, Math.min(file.size, MAX_HEADER_BYTES)).arrayBuffer()
-  );
+  const headerBuffer = await file
+    .slice(0, Math.min(file.size, MAX_HEADER_BYTES))
+    .arrayBuffer();
+  throwIfAborted(signal);
+  const header = new Uint8Array(headerBuffer);
   const metadata = inspectRasterBytes(header, file.size);
   const normalized = new Blob([file], { type: metadata.mime });
-  return { dataUrl: await readAsDataUrl(normalized), metadata };
+  const dataUrl = await readAsDataUrl(normalized, signal);
+  throwIfAborted(signal);
+  return { dataUrl, metadata };
 }

@@ -4,6 +4,7 @@ import { clampZoom, fitToScreen } from "@/utils/viewport";
 import {
   isEditorChrome,
   isProtectedObject,
+  isReadOnlySelection,
   removeSelectedObjects,
 } from "@/utils/editorObjects";
 import type { Tool } from "@/types/editor";
@@ -119,7 +120,7 @@ export function useKeyboardShortcuts({
         const active = canvas.getActiveObject();
         if (!active) return;
         e.preventDefault();
-        if (isProtectedObject(active)) return;
+        if (isReadOnlySelection(active)) return;
         const step = e.shiftKey ? 10 : 1;
         if (e.key === "ArrowLeft") active.left -= step;
         else if (e.key === "ArrowRight") active.left += step;

@@ -14,9 +14,11 @@ import {
   RASTER_FILE_ACCEPT,
   readSafeRasterImage,
 } from "@/utils/imageFile";
+import { isAbortError } from "@/utils/abort";
 
 interface ImageUploadProps {
   onImageUpload: (dataUrl: string) => void;
+  onImageLoadStart: () => AbortSignal;
   savedProject?: SavedProject | null;
   onRestore?: () => void;
   onOpenProject?: (file: File) => void;
@@ -24,6 +26,7 @@ interface ImageUploadProps {
 
 export const ImageUpload = ({
   onImageUpload,
+  onImageLoadStart,
   savedProject,
   onRestore,
   onOpenProject,
@@ -34,11 +37,14 @@ export const ImageUpload = ({
 
   const processFile = useCallback(
     async (file: File) => {
+      const signal = onImageLoadStart();
       try {
-        const { dataUrl } = await readSafeRasterImage(file);
+        const { dataUrl } = await readSafeRasterImage(file, signal);
+        if (signal.aborted) return;
         onImageUpload(dataUrl);
         toast.success("Image uploaded successfully!");
       } catch (error) {
+        if (signal.aborted || isAbortError(error)) return;
         toast.error(
           error instanceof Error
             ? error.message
@@ -46,13 +52,13 @@ export const ImageUpload = ({
         );
       }
     },
-    [onImageUpload]
+    [onImageLoadStart, onImageUpload]
   );
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      processFile(file);
+      void processFile(file);
     }
     // Reset input so same file can be re-selected
     if (fileInputRef.current) {
@@ -79,7 +85,7 @@ export const ImageUpload = ({
 
     const file = e.dataTransfer.files?.[0];
     if (file) {
-      processFile(file);
+      void processFile(file);
     }
   };
 
@@ -94,7 +100,7 @@ export const ImageUpload = ({
           e.preventDefault();
           const file = item.getAsFile();
           if (file) {
-            processFile(file);
+            void processFile(file);
           }
           break;
         }

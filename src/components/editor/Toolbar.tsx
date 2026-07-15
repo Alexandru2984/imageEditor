@@ -84,7 +84,7 @@ export const Toolbar = ({
     const controller = new AbortController();
     imageLoadControllerRef.current = controller;
     try {
-      const { dataUrl } = await readSafeRasterImage(file);
+      const { dataUrl } = await readSafeRasterImage(file, controller.signal);
       if (controller.signal.aborted) return;
       const img = await FabricImage.fromURL(dataUrl, {
         signal: controller.signal,
