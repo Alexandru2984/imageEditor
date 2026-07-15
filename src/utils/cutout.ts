@@ -3,18 +3,38 @@ import { removeBackground, blobToDataURL } from "./backgroundRemoval";
 
 const MAX_SEGMENTATION_DIMENSION = 1024;
 
+interface ExtractSubjectOptions {
+  onProgress?: (message: string) => void;
+  signal?: AbortSignal;
+}
+
+const throwIfAborted = (signal?: AbortSignal): void => {
+  if (!signal?.aborted) return;
+  const error = new Error("Background removal was cancelled");
+  error.name = "AbortError";
+  throw error;
+};
+
 /**
  * Run subject matting (RMBG) on a Fabric image and return a PNG data URL of the
  * subject on a transparent background. A data URL (not a revocable blob URL) so
  * undo/autosave snapshots that reference it keep working indefinitely.
  */
-export async function extractSubjectDataURL(image: FabricImage): Promise<string> {
+export async function extractSubjectDataURL(
+  image: FabricImage,
+  options: ExtractSubjectOptions = {}
+): Promise<string> {
+  throwIfAborted(options.signal);
   const el = image.getElement() as HTMLImageElement | HTMLCanvasElement;
   const width = "naturalWidth" in el ? el.naturalWidth : el.width;
   const height = "naturalHeight" in el ? el.naturalHeight : el.height;
 
   if (!width || !height) throw new Error("Image dimensions are invalid");
-  const scale = Math.min(1, MAX_SEGMENTATION_DIMENSION / width, MAX_SEGMENTATION_DIMENSION / height);
+  const scale = Math.min(
+    1,
+    MAX_SEGMENTATION_DIMENSION / width,
+    MAX_SEGMENTATION_DIMENSION / height
+  );
   const outputWidth = Math.max(1, Math.round(width * scale));
   const outputHeight = Math.max(1, Math.round(height * scale));
 
@@ -34,6 +54,7 @@ export async function extractSubjectDataURL(image: FabricImage): Promise<string>
     );
   });
 
-  const result = await removeBackground(blob);
-  return blobToDataURL(result);
+  throwIfAborted(options.signal);
+  const result = await removeBackground(blob, options);
+  return blobToDataURL(result, options.signal);
 }

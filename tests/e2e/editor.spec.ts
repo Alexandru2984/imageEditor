@@ -23,6 +23,7 @@ test("shows the upload screen on first load", async ({ page }) => {
 });
 
 test("serves the production bundle with the hardened browser policy", async ({
+  page,
   request,
 }) => {
   const response = await request.get("/");
@@ -30,10 +31,12 @@ test("serves the production bundle with the hardened browser policy", async ({
   const headers = response.headers();
   expect(headers["x-frame-options"]).toBe("DENY");
   expect(headers["cross-origin-opener-policy"]).toBe("same-origin");
+  expect(headers["cross-origin-embedder-policy"]).toBe("require-corp");
   expect(headers["content-security-policy"]).toContain("object-src 'none'");
   expect(headers["content-security-policy"]).not.toMatch(
     /script-src[^;]*'unsafe-inline'/
   );
+  expect(await page.evaluate(() => window.crossOriginIsolated)).toBe(true);
 });
 
 test("uploading an image opens the editor", async ({ page }) => {
@@ -186,6 +189,70 @@ test("exports a PNG", async ({ page }) => {
   await page.getByRole("button", { name: "PNG", exact: true }).click();
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.png$/);
+});
+
+test("runs the pinned background-removal model end to end", async ({ page }) => {
+  test.skip(
+    process.env.RUN_AI_E2E !== "1",
+    "Set RUN_AI_E2E=1 for the network- and compute-heavy model check"
+  );
+  test.setTimeout(5 * 60_000);
+  const inferenceRequests = new Set<string>();
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.hostname === "huggingface.co" || url.hostname.endsWith(".hf.co")) {
+      inferenceRequests.add(`${url.hostname}${url.pathname}`);
+    } else if (
+      url.pathname.endsWith(".wasm") ||
+      url.pathname.includes("backgroundRemoval.worker")
+    ) {
+      inferenceRequests.add(
+        url.origin === new URL(page.url()).origin
+          ? url.pathname
+          : `${url.hostname}${url.pathname}`
+      );
+    }
+  });
+  await uploadImage(page);
+
+  await page.getByRole("button", { name: "Remove background" }).click();
+
+  try {
+    await expect
+      .poll(
+        async () => {
+          const notifications = await page
+            .locator("[data-sonner-toast]")
+            .allTextContents();
+          if (
+            notifications.some((message) =>
+              message.includes("Background removed successfully!")
+            )
+          ) {
+            return "success";
+          }
+          return notifications[notifications.length - 1] ?? "waiting";
+        },
+        { timeout: 4 * 60_000 }
+      )
+      .toBe("success");
+  } finally {
+    // Paths only: never print signed redirect query parameters.
+    console.log(`AI inference requests: ${JSON.stringify([...inferenceRequests])}`);
+  }
+
+  expect(
+    [...inferenceRequests].some((path) => path.endsWith(".wasm"))
+  ).toBe(true);
+  expect(
+    [...inferenceRequests].some((path) => path.includes("model_quantized.onnx"))
+  ).toBe(true);
+  expect(
+    [...inferenceRequests].filter((path) => path.includes("cdn.jsdelivr.net"))
+  ).toEqual([]);
+  expect([...inferenceRequests].filter((path) => path.includes("/main/"))).toEqual(
+    []
+  );
 });
 
 test("saves a re-editable project file", async ({ page }) => {

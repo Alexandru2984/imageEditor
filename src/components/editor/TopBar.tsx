@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   Download,
   Image as ImageIcon,
@@ -60,6 +60,16 @@ interface TopBarProps {
   onToggleLayers: () => void;
 }
 
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
+const throwIfAborted = (signal: AbortSignal): void => {
+  if (!signal.aborted) return;
+  const error = new Error("Background removal was cancelled");
+  error.name = "AbortError";
+  throw error;
+};
+
 export const TopBar = ({
   fabricCanvas,
   uploadedImage,
@@ -76,6 +86,17 @@ export const TopBar = ({
   onToggleLayers,
 }: TopBarProps) => {
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState<string | null>(
+    null
+  );
+  const processingControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(
+    () => () => {
+      processingControllerRef.current?.abort();
+    },
+    []
+  );
 
   // The image AI actions operate on: the selected image layer, else the
   // background photo.
@@ -92,7 +113,11 @@ export const TopBar = ({
       return;
     }
 
+    processingControllerRef.current?.abort();
+    const controller = new AbortController();
+    processingControllerRef.current = controller;
     setIsProcessing(true);
+    setProcessingMessage("Removing background...");
     const loadingToast = toast.loading(
       "Removing background... This may take a minute."
     );
@@ -103,12 +128,21 @@ export const TopBar = ({
         throw new Error("Could not find background image");
       }
 
-      const resultUrl = await extractSubjectDataURL(bgImage);
+      const resultUrl = await extractSubjectDataURL(bgImage, {
+        signal: controller.signal,
+        onProgress: (message) => {
+          setProcessingMessage(message);
+          toast.loading(message, { id: loadingToast });
+        },
+      });
 
       // Place the result exactly over the old background so annotations
       // keep their position (the model may return a downscaled image)
       const oldRect = bgImage.getBoundingRect();
-      const newImg = await FabricImage.fromURL(resultUrl);
+      const newImg = await FabricImage.fromURL(resultUrl, {
+        signal: controller.signal,
+      });
+      throwIfAborted(controller.signal);
       const scale = Math.min(
         oldRect.width / newImg.width!,
         oldRect.height / newImg.height!
@@ -125,14 +159,23 @@ export const TopBar = ({
       fabricCanvas.sendObjectToBack(newImg);
       fabricCanvas.renderAll();
 
-      toast.dismiss(loadingToast);
       toast.success("Background removed successfully!");
     } catch (error) {
-      console.error("Background removal error:", error);
-      toast.dismiss(loadingToast);
-      toast.error("Failed to remove background. Please try again.");
+      if (!controller.signal.aborted && !isAbortError(error)) {
+        console.error("Background removal error:", error);
+        toast.error(
+          error instanceof Error
+            ? error.message.slice(0, 240)
+            : "Failed to remove background. Please try again."
+        );
+      }
     } finally {
-      setIsProcessing(false);
+      toast.dismiss(loadingToast);
+      if (processingControllerRef.current === controller) {
+        processingControllerRef.current = null;
+        setIsProcessing(false);
+        setProcessingMessage(null);
+      }
     }
   }, [fabricCanvas, uploadedImage]);
 
@@ -150,15 +193,28 @@ export const TopBar = ({
       return;
     }
 
+    processingControllerRef.current?.abort();
+    const controller = new AbortController();
+    processingControllerRef.current = controller;
     setIsProcessing(true);
+    setProcessingMessage("Extracting subject...");
     const loadingToast = toast.loading(
       "Extracting subject... This may take a minute."
     );
 
     try {
-      const resultUrl = await extractSubjectDataURL(source);
+      const resultUrl = await extractSubjectDataURL(source, {
+        signal: controller.signal,
+        onProgress: (message) => {
+          setProcessingMessage(message);
+          toast.loading(message, { id: loadingToast });
+        },
+      });
       const rect = source.getBoundingRect();
-      const cutout = await FabricImage.fromURL(resultUrl);
+      const cutout = await FabricImage.fromURL(resultUrl, {
+        signal: controller.signal,
+      });
+      throwIfAborted(controller.signal);
       const scale = Math.min(
         rect.width / cutout.width!,
         rect.height / cutout.height!
@@ -174,14 +230,23 @@ export const TopBar = ({
       fabricCanvas.setActiveObject(cutout);
       fabricCanvas.renderAll();
 
-      toast.dismiss(loadingToast);
       toast.success("Subject extracted to a new layer!");
     } catch (error) {
-      console.error("Subject extraction error:", error);
-      toast.dismiss(loadingToast);
-      toast.error("Failed to extract subject. Please try again.");
+      if (!controller.signal.aborted && !isAbortError(error)) {
+        console.error("Subject extraction error:", error);
+        toast.error(
+          error instanceof Error
+            ? error.message.slice(0, 240)
+            : "Failed to extract subject. Please try again."
+        );
+      }
     } finally {
-      setIsProcessing(false);
+      toast.dismiss(loadingToast);
+      if (processingControllerRef.current === controller) {
+        processingControllerRef.current = null;
+        setIsProcessing(false);
+        setProcessingMessage(null);
+      }
     }
   }, [fabricCanvas, uploadedImage, getSubjectSource]);
 
@@ -283,10 +348,18 @@ export const TopBar = ({
     onZoomChange(fitToScreen(fabricCanvas));
   };
 
+  const handleStartNew = () => {
+    processingControllerRef.current?.abort();
+    onNewProject();
+  };
+
   const hasImage = !!uploadedImage;
 
   return (
     <div className="h-14 bg-[hsl(var(--editor-panel))] border-b border-border flex items-center justify-between px-3 gap-2">
+      <span className="sr-only" role="status" aria-live="polite">
+        {processingMessage ?? ""}
+      </span>
       {/* Left: Logo */}
       <div className="flex items-center gap-2 shrink-0">
         <ImageIcon className="w-5 h-5 text-primary" />
@@ -398,6 +471,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size={isMobile ? "icon" : "sm"}
+                aria-label="Remove background"
                 onClick={handleRemoveBackground}
                 disabled={isProcessing}
                 className={isMobile ? "h-9 w-9" : "h-9"}
@@ -420,6 +494,7 @@ export const TopBar = ({
               <Button
                 variant="ghost"
                 size={isMobile ? "icon" : "sm"}
+                aria-label="Extract subject to a new layer"
                 onClick={handleExtractToLayer}
                 disabled={isProcessing}
                 className={isMobile ? "h-9 w-9" : "h-9"}
@@ -568,7 +643,7 @@ export const TopBar = ({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onNewProject}>
+                <AlertDialogAction onClick={handleStartNew}>
                   Start new
                 </AlertDialogAction>
               </AlertDialogFooter>

@@ -30,6 +30,7 @@ export default defineConfig({
     strictPort: true,
     headers: {
       "Content-Security-Policy": contentSecurityPolicy,
+      "Cross-Origin-Embedder-Policy": "require-corp",
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Resource-Policy": "same-origin",
       "Origin-Agent-Cluster": "?1",
