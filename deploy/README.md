@@ -1,5 +1,10 @@
 # Production deployment
 
+The shared host must run a supported operating system before application
+deployment. For the Ubuntu 25.10 to 26.04 LTS migration, follow the gated
+[`VPS_UPGRADE_RUNBOOK.md`](VPS_UPGRADE_RUNBOOK.md) and its read-only pre/post
+checker. Do not combine the operating-system migration with an editor release.
+
 The complete production Nginx site and its private snippets are versioned under
 `deploy/nginx/`. Apply them explicitly from the repository root:
 
