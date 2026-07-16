@@ -208,12 +208,31 @@ if [[ -d /opt/mailcow-dockerized/.git ]]; then
 fi
 
 if require_command pg_lsclusters; then
-  offline_clusters=$(pg_lsclusters -h | awk '$4 != "online" { count++ } END { print count + 0 }')
-  online_clusters=$(pg_lsclusters -h | awk '$4 == "online" { count++ } END { print count + 0 }')
-  if (( offline_clusters == 0 && online_clusters > 0 )); then
-    pass "All $online_clusters PostgreSQL cluster(s) are online"
+  cluster_state=$(pg_lsclusters -h)
+  if [[ "$MODE" == "pre" ]]; then
+    offline_clusters=$(awk '$4 != "online" { count++ } END { print count + 0 }' <<<"$cluster_state")
+    online_clusters=$(awk '$4 == "online" { count++ } END { print count + 0 }' <<<"$cluster_state")
+    if (( offline_clusters == 0 && online_clusters > 0 )); then
+      pass "All $online_clusters PostgreSQL cluster(s) are online"
+    else
+      fail "PostgreSQL cluster state is not fully online before the release upgrade"
+    fi
   else
-    fail "PostgreSQL cluster state is not fully online"
+    target_clusters=$(awk '$1 == "18" && $3 == "5432" && $4 == "online" { count++ } END { print count + 0 }' <<<"$cluster_state")
+    retained_offline_clusters=$(awk '$1 != "18" && $4 != "online" { count++ } END { print count + 0 }' <<<"$cluster_state")
+    unexpected_online_clusters=$(awk '$1 != "18" && $4 == "online" { count++ } END { print count + 0 }' <<<"$cluster_state")
+
+    if (( target_clusters == 1 )); then
+      pass "PostgreSQL 18 is online on the application port 5432"
+    else
+      fail "PostgreSQL 18 is not uniquely online on port 5432"
+    fi
+    if (( retained_offline_clusters > 0 )); then
+      pass "$retained_offline_clusters legacy PostgreSQL cluster(s) are retained offline for rollback"
+    fi
+    if (( unexpected_online_clusters > 0 )); then
+      warn "$unexpected_online_clusters legacy PostgreSQL cluster(s) remain online; verify application routing"
+    fi
   fi
 fi
 
