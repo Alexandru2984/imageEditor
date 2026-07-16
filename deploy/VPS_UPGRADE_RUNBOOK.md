@@ -45,6 +45,12 @@ backups, and an announced maintenance window.
   separate, backed-up maintenance operation.
 - The active APT configuration contains only Ubuntu repositories; the
   NodeSource repository is present but disabled.
+- Several first-party repositories under `/home/micu` contain uncommitted or
+  unpushed work. In particular, this editor is intentionally ahead of its
+  remote, and other application repositories also have local-only state. A
+  provider snapshot and protected off-host copy must preserve working trees;
+  Git remotes alone are not a backup. No repository should be pushed merely as
+  an upgrade precaution.
 - SSH key authentication, UFW, Fail2ban, unattended upgrades, and Certbot are
   active. Docker-published ports still require a separate `DOCKER-USER` firewall
   review because Docker can bypass normal UFW expectations.
@@ -61,8 +67,8 @@ true:
    Rspamd, and Postfix data.
 5. Host PostgreSQL and MariaDB have fresh logical dumps.
 6. Docker Compose files, bind-mounted configuration, `/etc`, Nginx, systemd
-   units, certificates, and application environment files are backed up with
-   restrictive permissions.
+   units, certificates, application environment files, and local-only source
+   working trees are backed up with restrictive permissions.
 7. A maintenance window is active and mail/application users have been warned.
 8. The preflight script reports zero failures.
 
