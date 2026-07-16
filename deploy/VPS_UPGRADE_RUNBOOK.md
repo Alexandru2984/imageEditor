@@ -55,6 +55,34 @@ backups, and an announced maintenance window.
   active. Docker-published ports still require a separate `DOCKER-USER` firewall
   review because Docker can bypass normal UFW expectations.
 
+## Completed production upgrade (2026-07-16 UTC)
+
+- Ubuntu 26.04 LTS is active on kernel `7.0.0-27-generic`; APT and dpkg are
+  clean, no reboot is pending, and the provider snapshot from 03:20 UTC remains
+  the host-level rollback point.
+- PostgreSQL 18.4 is online on port 5432 with the migrated application data.
+  PostgreSQL 17 remains preserved and offline on port 5434 as a rollback
+  cluster. Do not delete it until the observation period and a fresh database
+  backup are complete.
+- PHP 8.5 FPM and the PHP extensions previously used by the host are installed.
+  The active and canonical Nginx configurations for `admin.micutu.com` and
+  `php.micutu.com` use `/run/php/php8.5-fpm.sock`.
+- The Aichat, NVIDIA Chat, Brainfuck, COBOL, and Micu Market virtual
+  environments remain on Python 3.13. Their internal interpreter links were
+  pinned to `/usr/bin/python3.13`, and the Python 3.13 runtime packages were
+  marked as manually installed so a future `apt autoremove` cannot remove them.
+- The Lisp service permits writes only to its Common Lisp cache in addition to
+  its existing application data paths. SBCL 2.6 compiled a fresh cache and the
+  service is healthy under its existing sandbox.
+- The abandoned Antigravity/Polyglot deployment, source tree, backup timer,
+  certificate, stale Kubernetes logs, and portfolio entry were removed.
+  `polyglot.micutu.com` still resolves through Cloudflare and its DNS record
+  must be removed manually from the Cloudflare account.
+- Post-upgrade validation reports zero failures: 47 Docker containers are
+  running with no unhealthy containers, all 18 Mailcow containers are running,
+  all 66 remaining Nginx hostnames respond without a 5xx error, and systemd has
+  no failed units. The known dirty Mailcow checkout remains the sole warning.
+
 ## Hard NO-GO gates
 
 Do not update packages or start `do-release-upgrade` until all of these are
