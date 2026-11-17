@@ -25,3 +25,6 @@ export interface LayerInfo {
   locked: boolean;
   isBackground: boolean;
 }
+
+/** Side panel (desktop) / bottom sheet (mobile) tabs. */
+export type PanelTab = "properties" | "adjust" | "layers";

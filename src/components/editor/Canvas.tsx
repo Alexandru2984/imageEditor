@@ -980,7 +980,7 @@ export const Canvas = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full rounded-lg overflow-hidden shadow-2xl border border-border bg-[hsl(var(--editor-canvas))]"
+      className="relative h-full w-full touch-none overflow-hidden bg-editor-canvas"
     >
       <canvas ref={canvasRef} role="img" aria-label="Image editing canvas" />
 
@@ -996,7 +996,7 @@ export const Canvas = ({
 
       {/* Crop confirmation controls */}
       {activeTool === "crop" && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg bg-[hsl(var(--editor-panel))] border border-border shadow-lg px-2 py-1.5">
+        <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-popover/95 px-2 py-1.5 shadow-xl backdrop-blur">
           <Button
             size="sm"
             className="h-8"
@@ -1015,7 +1015,7 @@ export const Canvas = ({
 
       {/* Marquee selection controls */}
       {activeTool === "marquee" && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 rounded-lg bg-[hsl(var(--editor-panel))] border border-border shadow-lg px-2 py-1.5">
+        <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-popover/95 px-2 py-1.5 shadow-xl backdrop-blur">
           {!hasMarquee ? (
             <span className="text-xs text-muted-foreground px-1 py-1.5">
               Drag to select a region

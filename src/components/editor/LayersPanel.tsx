@@ -420,13 +420,12 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
   };
 
   return (
-    <div className="w-72 bg-[hsl(var(--editor-panel))] border-l border-border flex flex-col h-full">
-      <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-        <Layers className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-sm font-semibold">Layers</h3>
-        <span className="text-xs text-muted-foreground ml-auto">
-          {layers.length}
+    <div className="flex h-full w-full flex-col">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
+        <span>
+          {layers.length} layer{layers.length === 1 ? "" : "s"}
         </span>
+        <span className="ml-auto">Top of the list is in front</span>
       </div>
 
       {/* Blend mode + opacity for the selected layer */}

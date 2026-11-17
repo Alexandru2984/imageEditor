@@ -20,9 +20,33 @@ async function canvasCenter(page: Page): Promise<{ x: number; y: number }> {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
 }
 
+const SHAPE_LABELS = new Set([
+  "Rectangle (R)",
+  "Ellipse (C)",
+  "Triangle (Y)",
+  "Star (S)",
+  "Line (L)",
+  "Arrow (A)",
+]);
+
+/** Arm a tool; shape tools live in the Shapes flyout. */
+async function armTool(page: Page, toolLabel: string) {
+  if (SHAPE_LABELS.has(toolLabel)) {
+    await page.getByRole("button", { name: "Shapes" }).click();
+  }
+  await page.getByRole("button", { name: toolLabel }).click();
+}
+
+/** Open the export dialog, pick a format and download. */
+async function exportAs(page: Page, format: "PNG" | "JPG" | "WebP") {
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await page.getByRole("radio", { name: format, exact: true }).click();
+  await page.getByRole("button", { name: "Download" }).click();
+}
+
 /** Arm a shape tool and click the canvas centre to drop a default shape. */
 async function addShape(page: Page, toolLabel = "Rectangle (R)") {
-  await page.getByRole("button", { name: toolLabel }).click();
+  await armTool(page, toolLabel);
   const center = await canvasCenter(page);
   await page.mouse.click(center.x, center.y);
   await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute(
@@ -320,6 +344,7 @@ test("coalesces filter changes and stores only active adjustments", async ({
   page,
 }) => {
   await uploadImage(page);
+  await page.getByRole("tab", { name: "Adjust" }).click();
   const brightness = page.getByRole("slider", { name: "Brightness filter" });
   await brightness.focus();
   await page.keyboard.press("ArrowRight");
@@ -445,11 +470,14 @@ test("locked image layers stay visible, protected, and persist", async ({
   await expect(
     page.getByRole("button", { name: "Unlock Image 1" })
   ).toBeVisible();
+  await page.getByRole("tab", { name: "Properties" }).click();
   await expect(page.getByLabel("Object fill color")).toBeDisabled();
   await expect(page.getByRole("button", { name: "Align left" })).toBeDisabled();
+  await page.getByRole("tab", { name: "Adjust" }).click();
   await expect(
     page.getByRole("slider", { name: "Brightness filter" })
   ).toBeDisabled();
+  await page.getByRole("tab", { name: "Layers" }).click();
 
   // Locking used to mark image layers as background and made them disappear.
   // It must now also protect the selected layer from keyboard deletion.
@@ -535,12 +563,12 @@ test("keyboard shortcut selects the marquee tool", async ({ page }) => {
 test("exports a PNG", async ({ page }) => {
   await uploadImage(page);
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export PNG" }).click();
+  await exportAs(page, "PNG");
   const download = await downloadPromise;
   expect(download.suggestedFilename()).toMatch(/\.png$/);
 });
 
-async function uploadTransparentPng(page: Page) {
+async function uploadTransparentPng(page: Page, name = "transparent.png") {
   const base64 = await page.evaluate(() => {
     const canvas = document.createElement("canvas");
     canvas.width = 64;
@@ -551,7 +579,7 @@ async function uploadTransparentPng(page: Page) {
     return canvas.toDataURL("image/png").split(",")[1]!;
   });
   await page.getByTestId("image-input").setInputFiles({
-    name: "transparent.png",
+    name,
     mimeType: "image/png",
     buffer: Buffer.from(base64, "base64"),
   });
@@ -633,7 +661,7 @@ test("drag draws a shape where the pointer went, even when zoomed", async ({
   await uploadImage(page);
   await page.getByRole("button", { name: "Zoom in" }).click();
   await page.getByRole("button", { name: "Zoom in" }).click();
-  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await armTool(page, "Rectangle (R)");
   const center = await canvasCenter(page);
   await page.mouse.move(center.x - 60, center.y - 40);
   await page.mouse.down();
@@ -694,7 +722,7 @@ test("colour swatches recolour a line's stroke", async ({ page }) => {
 test("PNG export keeps transparent pixels transparent", async ({ page }) => {
   await uploadTransparentPng(page);
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export PNG" }).click();
+  await exportAs(page, "PNG");
   const file = await (await downloadPromise).path();
   expect(await samplePixel(page, file!, "image/png", 0.9, 0.9)).toEqual([
     0, 0, 0, 0,
@@ -707,7 +735,7 @@ test("PNG export keeps transparent pixels transparent", async ({ page }) => {
 test("JPEG export flattens transparency onto white", async ({ page }) => {
   await uploadTransparentPng(page);
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: "Export JPG" }).click();
+  await exportAs(page, "JPG");
   const file = await (await downloadPromise).path();
   const pixel = await samplePixel(page, file!, "image/jpeg", 0.9, 0.9);
   expect(pixel[0]).toBeGreaterThan(240);
@@ -798,7 +826,7 @@ test("runs the pinned background-removal model end to end", async ({ page }) => 
 
 test("saves a re-editable project file", async ({ page }) => {
   await uploadImage(page);
-  await page.getByRole("button", { name: "Arrow (A)" }).click();
+  await armTool(page, "Arrow (A)");
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Save project" }).click();
   const download = await downloadPromise;
@@ -847,4 +875,164 @@ test("drawing and erasing remain compatible with saved projects", async ({
   await page.getByTestId("project-input").setInputFiles(savedPath!);
   await expect(page.getByText("Remove BG")).toBeVisible();
   expect(pageErrors).toEqual([]);
+});
+
+async function autosavedObjects(page: Page): Promise<Array<Record<string, unknown>>> {
+  const json = await getAutosaveJson(page);
+  return json ? (JSON.parse(json).objects as Array<Record<string, unknown>>) : [];
+}
+
+test("crossing the mobile breakpoint keeps the canvas and its history", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await addShape(page);
+  await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).filter((o) => o.type === "Rect").length)
+    .toBe(1);
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  await expect(page.getByText("Rectangle 1", { exact: true })).toBeVisible();
+});
+
+test("export dialog writes WebP at the chosen size and file name", async ({ page }) => {
+  await uploadTransparentPng(page, "holiday photo.png");
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await page.getByRole("radio", { name: "WebP", exact: true }).click();
+  await page.getByRole("radio", { name: "50%", exact: true }).click();
+  await expect(page.getByTestId("export-dimensions")).toHaveText("32 × 32 px");
+  await expect(page.getByLabel("File name")).toHaveValue("holiday-photo");
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("holiday-photo.webp");
+  const file = await download.path();
+  // WebP keeps both the opaque red corner and the transparent rest.
+  const red = await samplePixel(page, file!, "image/webp", 0.2, 0.2);
+  expect(red[0]).toBeGreaterThan(200);
+  expect(red[3]).toBe(255);
+  const clear = await samplePixel(page, file!, "image/webp", 0.8, 0.8);
+  expect(clear[3]).toBeLessThan(10);
+});
+
+test("Ctrl+D duplicates the selected layer and Ctrl+C / Ctrl+V pastes it", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await addShape(page);
+  await page.keyboard.press("Control+d");
+  await expect
+    .poll(async () => (await autosavedObjects(page)).filter((o) => o.type === "Rect").length)
+    .toBe(2);
+  await page.keyboard.press("Control+c");
+  await page.evaluate(() => {
+    const event = new ClipboardEvent("paste", { clipboardData: new DataTransfer() });
+    document.dispatchEvent(event);
+  });
+  await expect
+    .poll(async () => (await autosavedObjects(page)).filter((o) => o.type === "Rect").length)
+    .toBe(3);
+  const ids = (await autosavedObjects(page)).map((o) => o.__layerId);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("dropping an image onto the editor adds it as a layer", async ({ page }) => {
+  await uploadImage(page);
+  const center = await canvasCenter(page);
+  await page.evaluate(
+    async ({ base64, x, y }) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], "dropped.png", { type: "image/png" }));
+      const init = { dataTransfer: transfer, clientX: x, clientY: y, bubbles: true, cancelable: true };
+      const target = document.querySelector("canvas.upper-canvas")!;
+      target.dispatchEvent(new DragEvent("dragenter", init));
+      target.dispatchEvent(new DragEvent("dragover", init));
+      target.dispatchEvent(new DragEvent("drop", init));
+    },
+    { base64: PNG_BASE64, x: center.x, y: center.y }
+  );
+  await expect
+    .poll(async () => (await autosavedObjects(page)).filter((o) => o.type === "Image").length)
+    .toBe(2);
+});
+
+test("blank canvas presets open a document of the preset size", async ({ page }) => {
+  await page.getByRole("button", { name: /New Video thumbnail canvas/ }).click();
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(page.getByTestId("export-dimensions")).toHaveText("1280 × 720 px");
+});
+
+test("the theme choice applies immediately and survives a reload", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("menuitem", { name: "Theme" }).click();
+  await page.getByRole("menuitemradio", { name: "Light" }).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.reload();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+});
+
+test("the colour picker samples the canvas when EyeDropper is unavailable", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    delete (window as unknown as { EyeDropper?: unknown }).EyeDropper;
+  });
+  await page.reload();
+  await uploadTransparentPng(page);
+  await page.getByRole("button", { name: "Pick color" }).click();
+  const overlay = page.getByRole("button", { name: "Pick a color from the canvas" });
+  await expect(overlay).toBeVisible();
+  // The uploaded image is red in its top-left quarter, centred on the canvas.
+  const center = await canvasCenter(page);
+  await page.mouse.click(center.x - 5, center.y - 5);
+  await expect(overlay).toHaveCount(0);
+  await expect(page.getByRole("textbox", { name: "Hex color" })).toHaveValue("#ff0000");
+});
+
+test("Shift+H mirrors the selected layer", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  await page.keyboard.press("Shift+H");
+  await expect
+    .poll(async () => (await autosavedObjects(page)).find((o) => o.type === "Rect")?.flipX)
+    .toBe(true);
+});
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("fits the screen without sideways scrolling and opens the panel sheet", async ({
+    page,
+  }) => {
+    await expect(page.getByRole("button", { name: "Upload an image" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+    await page.getByTestId("image-input").setInputFiles({
+      name: "test.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(PNG_BASE64, "base64"),
+    });
+    await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+    await page.getByRole("button", { name: "Toggle properties" }).click();
+    await expect(page.getByRole("tab", { name: "Layers" })).toBeVisible();
+    await page.getByRole("tab", { name: "Layers" }).click();
+    await expect(
+      page.locator("[data-layer-id]").filter({ hasText: "Background" })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Close panel" }).click();
+    await expect(page.getByRole("tab", { name: "Layers" })).toHaveCount(0);
+  });
 });

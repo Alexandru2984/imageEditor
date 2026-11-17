@@ -1,6 +1,7 @@
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ThemeProvider } from "@/theme/ThemeProvider";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
@@ -13,10 +14,12 @@ const isEditorPath = (pathname: string): boolean =>
 
 const App = () => (
   <ErrorBoundary>
-    <TooltipProvider delayDuration={300}>
-      <Sonner />
-      {isEditorPath(window.location.pathname) ? <Index /> : <NotFound />}
-    </TooltipProvider>
+    <ThemeProvider>
+      <TooltipProvider delayDuration={300}>
+        <Sonner />
+        {isEditorPath(window.location.pathname) ? <Index /> : <NotFound />}
+      </TooltipProvider>
+    </ThemeProvider>
   </ErrorBoundary>
 );
 

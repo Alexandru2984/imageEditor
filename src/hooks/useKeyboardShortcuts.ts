@@ -16,6 +16,19 @@ interface UseKeyboardShortcutsOptions {
   zoom: number;
   onZoomChange: (zoom: number) => void;
   onToolChange: (tool: Tool) => void;
+  /** Editor-level commands; each is optional so the hook stays reusable. */
+  actions?: ShortcutActions;
+}
+
+export interface ShortcutActions {
+  save?: () => void;
+  exportImage?: () => void;
+  duplicate?: () => void;
+  copy?: () => void;
+  arrange?: (action: "front" | "forward" | "backward" | "back") => void;
+  flip?: (axis: "x" | "y") => void;
+  pickColor?: () => void;
+  showShortcuts?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -25,6 +38,7 @@ export function useKeyboardShortcuts({
   zoom,
   onZoomChange,
   onToolChange,
+  actions,
 }: UseKeyboardShortcutsOptions): void {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -35,6 +49,10 @@ export function useKeyboardShortcuts({
         target.tagName === "TEXTAREA" ||
         target.isContentEditable
       ) {
+        return;
+      }
+      // Dialogs and menus own the keyboard while they are open.
+      if (target.closest?.('[role="dialog"], [role="alertdialog"], [role="menu"]')) {
         return;
       }
 
@@ -65,6 +83,51 @@ export function useKeyboardShortcuts({
           }
           removeSelectedObjects(canvas);
         }
+        return;
+      }
+
+      // Ctrl+S — save a project file; Ctrl+E — export dialog
+      if (isCtrlOrMeta && key === "s" && !e.shiftKey && actions?.save) {
+        e.preventDefault();
+        actions.save();
+        return;
+      }
+      if (isCtrlOrMeta && key === "e" && !e.shiftKey && actions?.exportImage) {
+        e.preventDefault();
+        actions.exportImage();
+        return;
+      }
+
+      // Ctrl+D — duplicate; Ctrl+C — copy layers (paste is a paste event)
+      if (isCtrlOrMeta && key === "d" && actions?.duplicate) {
+        e.preventDefault();
+        actions.duplicate();
+        return;
+      }
+      if (isCtrlOrMeta && key === "c" && !e.shiftKey && actions?.copy) {
+        if (canvas?.getActiveObject()) actions.copy();
+        return;
+      }
+
+      // Ctrl+] / Ctrl+[ — forward / backward; with Shift — front / back
+      if (isCtrlOrMeta && (e.code === "BracketRight" || e.code === "BracketLeft") && actions?.arrange) {
+        e.preventDefault();
+        const up = e.code === "BracketRight";
+        actions.arrange(e.shiftKey ? (up ? "front" : "back") : up ? "forward" : "backward");
+        return;
+      }
+
+      // Shift+H / Shift+V — flip the selection (or the whole image)
+      if (!isCtrlOrMeta && !e.altKey && e.shiftKey && (key === "h" || key === "v") && actions?.flip) {
+        e.preventDefault();
+        actions.flip(key === "h" ? "x" : "y");
+        return;
+      }
+
+      // ? — keyboard shortcut reference
+      if (e.key === "?" && actions?.showShortcuts) {
+        e.preventDefault();
+        actions.showShortcuts();
         return;
       }
 
@@ -195,11 +258,14 @@ export function useKeyboardShortcuts({
           case "k":
             onToolChange("crop");
             break;
+          case "i":
+            actions?.pickColor?.();
+            break;
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canvas, undo, redo, zoom, onZoomChange, onToolChange]);
+  }, [canvas, undo, redo, zoom, onZoomChange, onToolChange, actions]);
 }

@@ -1,28 +1,47 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useRef, useState } from "react";
 import {
   Download,
-  Image as ImageIcon,
+  FilePlus2,
+  FlipHorizontal2,
+  FlipVertical2,
+  FolderOpen,
+  Keyboard,
+  Layers,
+  Loader2,
+  Maximize,
+  Monitor,
+  Moon,
+  MoreHorizontal,
+  Redo2,
   RotateCcw,
   RotateCw,
+  Save,
   Scissors,
+  SlidersHorizontal,
   Sparkles,
+  Sun,
   Undo2,
-  Redo2,
+  Wand2,
   ZoomIn,
   ZoomOut,
-  Maximize,
   PanelRight,
-  Layers,
-  FilePlus2,
-  Save,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -32,650 +51,355 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { toast } from "sonner";
-import { extractSubjectDataURL } from "@/utils/cutout";
-import { clampZoom, findBackgroundImage, fitToScreen } from "@/utils/viewport";
-import {
-  isReadOnlySelection,
-  markBackgroundObject,
-} from "@/utils/editorObjects";
-import { renderRegionBlob } from "@/utils/flatten";
-import { downloadBlob } from "@/utils/download";
-import { FabricImage, Point } from "fabric";
-import type { Canvas as FabricCanvas, FabricObject } from "fabric";
+import { IconButton } from "./IconButton";
+import { Logo } from "./Logo";
+import { useTheme, type ThemePreference } from "@/theme/theme";
+import type { AiActions } from "@/hooks/useAiActions";
+import type { PanelTab } from "@/types/editor";
+import { cn } from "@/lib/utils";
 
 interface TopBarProps {
-  fabricCanvas: FabricCanvas | null;
-  uploadedImage: string | null;
-  onNewProject: () => void;
-  onSaveProject: () => void;
+  hasDocument: boolean;
+  isMobile: boolean;
   zoom: number;
-  onZoomChange: (zoom: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
+  onFit: () => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
-  isMobile: boolean;
-  onToggleProperties: () => void;
-  onToggleLayers: () => void;
+  ai: AiActions;
+  onRotate: (degrees: number) => void;
+  onFlip: (axis: "x" | "y") => void;
+  onExport: () => void;
+  onSaveProject: () => void;
+  onOpenProject: (file: File) => void;
+  onNewProject: () => void;
+  onShowShortcuts: () => void;
+  panel: PanelTab | null;
+  onTogglePanel: (tab: PanelTab) => void;
 }
 
-const isAbortError = (error: unknown): boolean =>
-  error instanceof Error && error.name === "AbortError";
-
-const throwIfAborted = (signal: AbortSignal): void => {
-  if (!signal.aborted) return;
-  const error = new Error("Background removal was cancelled");
-  error.name = "AbortError";
-  throw error;
-};
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
+  { value: "light", label: "Light", icon: Sun },
+  { value: "dark", label: "Dark", icon: Moon },
+  { value: "system", label: "System", icon: Monitor },
+];
 
 export const TopBar = ({
-  fabricCanvas,
-  uploadedImage,
-  onNewProject,
-  onSaveProject,
+  hasDocument,
+  isMobile,
   zoom,
-  onZoomChange,
+  onZoomIn,
+  onZoomOut,
+  onFit,
   undo,
   redo,
   canUndo,
   canRedo,
-  isMobile,
-  onToggleProperties,
-  onToggleLayers,
+  ai,
+  onRotate,
+  onFlip,
+  onExport,
+  onSaveProject,
+  onOpenProject,
+  onNewProject,
+  onShowShortcuts,
+  panel,
+  onTogglePanel,
 }: TopBarProps) => {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [processingMessage, setProcessingMessage] = useState<string | null>(
-    null
+  const projectInputRef = useRef<HTMLInputElement>(null);
+  const [confirmNew, setConfirmNew] = useState(false);
+  const { preference, setPreference, resolved } = useTheme();
+  const ThemeIcon = resolved === "dark" ? Moon : Sun;
+
+  const projectInput = (
+    <input
+      ref={projectInputRef}
+      type="file"
+      accept=".json,application/json"
+      className="hidden"
+      tabIndex={-1}
+      aria-hidden="true"
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) onOpenProject(file);
+      }}
+    />
   );
-  const processingControllerRef = useRef<AbortController | null>(null);
 
-  useEffect(
-    () => () => {
-      processingControllerRef.current?.abort();
-    },
-    []
+  const themeSubmenu = (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>
+        <ThemeIcon className="text-muted-foreground" />
+        Theme
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        <DropdownMenuRadioGroup
+          value={preference}
+          onValueChange={(value) => setPreference(value as ThemePreference)}
+        >
+          {THEME_OPTIONS.map(({ value, label }) => (
+            <DropdownMenuRadioItem key={value} value={value}>
+              {label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 
-  // The image AI actions operate on: the selected image layer, else the
-  // background photo.
-  const getSubjectSource = useCallback((): FabricImage | undefined => {
-    if (!fabricCanvas) return undefined;
-    const active = fabricCanvas.getActiveObject();
-    if (active && active.type === "image") return active as FabricImage;
-    return findBackgroundImage(fabricCanvas);
-  }, [fabricCanvas]);
+  const transformItems = (
+    <>
+      <DropdownMenuItem onSelect={() => onRotate(-90)}>
+        <RotateCcw /> Rotate left
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => onRotate(90)}>
+        <RotateCw /> Rotate right
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => onFlip("x")}>
+        <FlipHorizontal2 /> Flip horizontal
+      </DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => onFlip("y")}>
+        <FlipVertical2 /> Flip vertical
+      </DropdownMenuItem>
+    </>
+  );
 
-  const handleRemoveBackground = useCallback(async () => {
-    if (!fabricCanvas || !uploadedImage) {
-      toast.error("No image to process!");
-      return;
-    }
+  const newProjectDialog = (
+    <AlertDialog open={confirmNew} onOpenChange={setConfirmNew}>
+      <AlertDialogContent className="max-w-[calc(100vw-2rem)] rounded-2xl sm:max-w-md">
+        <AlertDialogHeader>
+          <AlertDialogTitle>Start a new project?</AlertDialogTitle>
+          <AlertDialogDescription>
+            The current image and all edits will be discarded. Save a project file first if
+            you want to keep editing later.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={() => {
+              ai.cancel();
+              onNewProject();
+            }}
+          >
+            Start new
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 
-    processingControllerRef.current?.abort();
-    const controller = new AbortController();
-    processingControllerRef.current = controller;
-    setIsProcessing(true);
-    setProcessingMessage("Removing background...");
-    const loadingToast = toast.loading(
-      "Removing background... This may take a minute."
-    );
-
-    try {
-      const bgImage = findBackgroundImage(fabricCanvas);
-      if (!bgImage) {
-        throw new Error("Could not find background image");
-      }
-
-      const resultUrl = await extractSubjectDataURL(bgImage, {
-        signal: controller.signal,
-        onProgress: (message) => {
-          setProcessingMessage(message);
-          toast.loading(message, { id: loadingToast });
-        },
-      });
-
-      // Place the result exactly over the old background so annotations
-      // keep their position (the model may return a downscaled image)
-      const oldRect = bgImage.getBoundingRect();
-      const newImg = await FabricImage.fromURL(resultUrl, {
-        signal: controller.signal,
-      });
-      throwIfAborted(controller.signal);
-      const scale = Math.min(
-        oldRect.width / newImg.width!,
-        oldRect.height / newImg.height!
-      );
-      newImg.scale(scale);
-      newImg.set({
-        left: oldRect.left + oldRect.width / 2 - (newImg.width! * scale) / 2,
-        top: oldRect.top + oldRect.height / 2 - (newImg.height! * scale) / 2,
-      });
-      markBackgroundObject(newImg);
-
-      fabricCanvas.remove(bgImage);
-      fabricCanvas.add(newImg);
-      fabricCanvas.sendObjectToBack(newImg);
-      fabricCanvas.renderAll();
-
-      toast.success("Background removed successfully!");
-    } catch (error) {
-      if (!controller.signal.aborted && !isAbortError(error)) {
-        console.error("Background removal error:", error);
-        toast.error(
-          error instanceof Error
-            ? error.message.slice(0, 240)
-            : "Failed to remove background. Please try again."
-        );
-      }
-    } finally {
-      toast.dismiss(loadingToast);
-      if (processingControllerRef.current === controller) {
-        processingControllerRef.current = null;
-        setIsProcessing(false);
-        setProcessingMessage(null);
-      }
-    }
-  }, [fabricCanvas, uploadedImage]);
-
-  // Non-destructive: cut the subject out onto a new layer, leaving the
-  // original photo untouched — the AI-first way to composite.
-  const handleExtractToLayer = useCallback(async () => {
-    if (!fabricCanvas || !uploadedImage) {
-      toast.error("No image to process!");
-      return;
-    }
-
-    const source = getSubjectSource();
-    if (!source) {
-      toast.error("No image to extract from!");
-      return;
-    }
-
-    processingControllerRef.current?.abort();
-    const controller = new AbortController();
-    processingControllerRef.current = controller;
-    setIsProcessing(true);
-    setProcessingMessage("Extracting subject...");
-    const loadingToast = toast.loading(
-      "Extracting subject... This may take a minute."
-    );
-
-    try {
-      const resultUrl = await extractSubjectDataURL(source, {
-        signal: controller.signal,
-        onProgress: (message) => {
-          setProcessingMessage(message);
-          toast.loading(message, { id: loadingToast });
-        },
-      });
-      const rect = source.getBoundingRect();
-      const cutout = await FabricImage.fromURL(resultUrl, {
-        signal: controller.signal,
-      });
-      throwIfAborted(controller.signal);
-      const scale = Math.min(
-        rect.width / cutout.width!,
-        rect.height / cutout.height!
-      );
-      cutout.scale(scale);
-      cutout.set({
-        left: rect.left + rect.width / 2 - (cutout.width! * scale) / 2,
-        top: rect.top + rect.height / 2 - (cutout.height! * scale) / 2,
-        name: "Cutout",
-      });
-
-      fabricCanvas.add(cutout);
-      fabricCanvas.setActiveObject(cutout);
-      fabricCanvas.renderAll();
-
-      toast.success("Subject extracted to a new layer!");
-    } catch (error) {
-      if (!controller.signal.aborted && !isAbortError(error)) {
-        console.error("Subject extraction error:", error);
-        toast.error(
-          error instanceof Error
-            ? error.message.slice(0, 240)
-            : "Failed to extract subject. Please try again."
-        );
-      }
-    } finally {
-      toast.dismiss(loadingToast);
-      if (processingControllerRef.current === controller) {
-        processingControllerRef.current = null;
-        setIsProcessing(false);
-        setProcessingMessage(null);
-      }
-    }
-  }, [fabricCanvas, uploadedImage, getSubjectSource]);
-
-  const handleExport = async (format: "png" | "jpg") => {
-    if (!fabricCanvas || isExporting) return;
-    setIsExporting(true);
-
-    try {
-      // Crop to the background bounds and request its native resolution so the
-      // export is not a viewport screenshot with editor margins.
-      const background = findBackgroundImage(fabricCanvas);
-      const region = background
-        ? background.getBoundingRect()
-        : {
-            left: 0,
-            top: 0,
-            width: fabricCanvas.width,
-            height: fabricCanvas.height,
-          };
-      const displayedWidth = background?.getScaledWidth() ?? 1;
-      const requestedMultiplier = background
-        ? background.width / displayedWidth
-        : 1;
-      const { blob, plan } = await renderRegionBlob(
-        fabricCanvas,
-        region,
-        requestedMultiplier,
-        format === "png" ? "png" : "jpeg",
-        format === "png" ? 1 : 0.92
-      );
-
-      downloadBlob(blob, `image-editor-export.${format}`);
-      toast.success(
-        plan.limited
-          ? `Exported ${plan.outputWidth}×${plan.outputHeight} ${format.toUpperCase()} (browser safety limit).`
-          : `Exported as ${format.toUpperCase()}!`
-      );
-    } catch (error) {
-      console.error("Image export failed:", error);
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : "The image could not be exported"
-      );
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
-  const handleRotate = () => {
-    if (!fabricCanvas) return;
-
-    const activeObject = fabricCanvas.getActiveObject();
-    if (activeObject) {
-      if (isReadOnlySelection(activeObject)) {
-        toast.error("Unlock the layer before rotating it");
-        return;
-      }
-      activeObject.rotate(((activeObject.angle || 0) + 90) % 360);
-      activeObject.setCoords();
-      fabricCanvas.fire("object:modified", { target: activeObject });
-      fabricCanvas.renderAll();
-      toast.success("Object rotated!");
-    } else {
-      // Rotate the whole canvas: every object turns 90° and also orbits a
-      // shared pivot, so annotations keep their position on the photo
-      const objects = fabricCanvas.getObjects();
-      if (objects.length === 0) return;
-
-      const bgImage = findBackgroundImage(fabricCanvas);
-      const pivot = bgImage
-        ? bgImage.getCenterPoint()
-        : new Point(fabricCanvas.width / 2, fabricCanvas.height / 2);
-
-      objects.forEach((obj: FabricObject) => {
-        const center = obj.getCenterPoint();
-        // 90° clockwise around the pivot: (dx, dy) -> (-dy, dx)
-        const newCenter = new Point(
-          pivot.x - (center.y - pivot.y),
-          pivot.y + (center.x - pivot.x)
-        );
-        obj.rotate(((obj.angle || 0) + 90) % 360);
-        obj.setPositionByOrigin(newCenter, "center", "center");
-        obj.setCoords();
-      });
-
-      fabricCanvas.fire("object:modified");
-      onZoomChange(fitToScreen(fabricCanvas));
-      toast.success("Canvas rotated!");
-    }
-  };
-
-  // Zoom is a fraction (1 = 100%), same units as Fabric's getZoom()
-  const handleZoomIn = () => {
-    onZoomChange(clampZoom(zoom + 0.1));
-  };
-
-  const handleZoomOut = () => {
-    onZoomChange(clampZoom(zoom - 0.1));
-  };
-
-  const handleFitToScreen = () => {
-    if (!fabricCanvas) return;
-    onZoomChange(fitToScreen(fabricCanvas));
-  };
-
-  const handleStartNew = () => {
-    processingControllerRef.current?.abort();
-    onNewProject();
-  };
-
-  const hasImage = !!uploadedImage;
+  const aiBusyIcon = ai.isProcessing ? Loader2 : undefined;
 
   return (
-    <div className="h-14 bg-[hsl(var(--editor-panel))] border-b border-border flex items-center justify-between px-3 gap-2">
+    <header className="relative z-20 flex h-14 shrink-0 items-center gap-1 border-b border-border bg-editor-panel/95 px-2 backdrop-blur supports-[backdrop-filter]:bg-editor-panel/80 sm:px-3">
       <span className="sr-only" role="status" aria-live="polite">
-        {processingMessage ?? ""}
+        {ai.processingMessage ?? ""}
       </span>
-      {/* Left: Logo */}
-      <div className="flex items-center gap-2 shrink-0">
-        <ImageIcon className="w-5 h-5 text-primary" />
+      {projectInput}
+      {newProjectDialog}
+
+      <a
+        href="/"
+        onClick={(event) => event.preventDefault()}
+        className="mr-1 flex shrink-0 items-center gap-2 rounded-md pr-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label="Image Editor"
+      >
+        <Logo className="h-7 w-7" />
         {!isMobile && (
-          <h1 className="text-base font-bold whitespace-nowrap">
-            Image Editor
-          </h1>
+          <h1 className="whitespace-nowrap text-[15px] font-semibold tracking-tight">Image Editor</h1>
         )}
-      </div>
+      </a>
 
-      {/* Center: Undo/Redo + Zoom (when image loaded) */}
-      {hasImage && (
-        <div className="flex items-center gap-1">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Undo"
-                onClick={undo}
-                disabled={!canUndo}
-                className="h-9 w-9"
+      {hasDocument && (
+        <>
+          {!isMobile && <Separator orientation="vertical" className="mx-1.5 h-6" />}
+          <IconButton icon={Undo2} label="Undo" shortcut="Ctrl+Z" onClick={undo} disabled={!canUndo} />
+          <IconButton icon={Redo2} label="Redo" shortcut="Ctrl+Shift+Z" onClick={redo} disabled={!canRedo} />
+
+          {!isMobile && (
+            <>
+              <Separator orientation="vertical" className="mx-1.5 h-6" />
+              <IconButton icon={ZoomOut} label="Zoom out" shortcut="−" onClick={onZoomOut} />
+              <button
+                type="button"
+                onClick={onFit}
+                aria-label="Zoom level"
+                title="Fit to screen"
+                className="h-9 w-14 rounded-md text-center font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
-                <Undo2 className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Undo</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Redo"
-                onClick={redo}
-                disabled={!canRedo}
-                className="h-9 w-9"
-              >
-                <Redo2 className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Redo</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Zoom out"
-                onClick={handleZoomOut}
-                className="h-9 w-9"
-              >
-                <ZoomOut className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Zoom Out</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <span
-            aria-label="Zoom level"
-            className="text-xs font-mono text-muted-foreground w-12 text-center tabular-nums select-none"
-          >
-            {Math.round(zoom * 100)}%
-          </span>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Zoom in"
-                onClick={handleZoomIn}
-                className="h-9 w-9"
-              >
-                <ZoomIn className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Zoom In</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Fit image to screen"
-                onClick={handleFitToScreen}
-                className="h-9 w-9"
-              >
-                <Maximize className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Fit to Screen</p>
-            </TooltipContent>
-          </Tooltip>
-        </div>
+                {Math.round(zoom * 100)}%
+              </button>
+              <IconButton icon={ZoomIn} label="Zoom in" shortcut="+" onClick={onZoomIn} />
+              <IconButton icon={Maximize} label="Fit image to screen" shortcut="Ctrl+0" onClick={onFit} />
+            </>
+          )}
+        </>
       )}
 
-      {/* Right: Actions (when image loaded) */}
-      {hasImage && (
-        <div className="flex items-center gap-1 shrink-0">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={isMobile ? "icon" : "sm"}
-                aria-label="Remove background"
-                onClick={handleRemoveBackground}
-                disabled={isProcessing}
-                className={isMobile ? "h-9 w-9" : "h-9"}
-              >
-                <Scissors className="h-4 w-4" />
-                {!isMobile && (
-                  <span className="ml-1">
-                    {isProcessing ? "Processing..." : "Remove BG"}
-                  </span>
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Remove Background</p>
-            </TooltipContent>
-          </Tooltip>
+      <div className="min-w-0 flex-1" />
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={isMobile ? "icon" : "sm"}
-                aria-label="Extract subject to a new layer"
-                onClick={handleExtractToLayer}
-                disabled={isProcessing}
-                className={isMobile ? "h-9 w-9" : "h-9"}
-              >
-                <Sparkles className="h-4 w-4" />
-                {!isMobile && <span className="ml-1">Extract</span>}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Extract subject to a new layer (AI)</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Rotate selection or canvas"
-                onClick={handleRotate}
-                className="h-9 w-9"
-              >
+      {hasDocument && !isMobile && (
+        <>
+          <IconButton
+            icon={aiBusyIcon ?? Scissors}
+            className={cn(ai.isProcessing && "[&_svg]:animate-spin")}
+            label="Remove background"
+            text={<span className="hidden lg:inline">{ai.isProcessing ? "Working…" : "Remove BG"}</span>}
+            onClick={() => void ai.removeBackground()}
+            disabled={ai.isProcessing}
+          />
+          <IconButton
+            icon={Sparkles}
+            label="Extract subject to a new layer"
+            text={<span className="hidden lg:inline">Extract</span>}
+            onClick={() => void ai.extractSubject()}
+            disabled={ai.isProcessing}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Rotate and flip">
                 <RotateCw className="h-4 w-4" />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Rotate</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size={isMobile ? "icon" : "sm"}
-                aria-label="Export PNG"
-                onClick={() => void handleExport("png")}
-                disabled={isProcessing || isExporting}
-                className={isMobile ? "h-9 w-9" : "h-9"}
-              >
-                <Download className="h-4 w-4" />
-                {!isMobile && <span className="ml-1">PNG</span>}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Export PNG</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="default"
-                size={isMobile ? "icon" : "sm"}
-                aria-label="Export JPG"
-                onClick={() => void handleExport("jpg")}
-                disabled={isProcessing || isExporting}
-                className={isMobile ? "h-9 w-9" : "h-9"}
-              >
-                <Download className="h-4 w-4" />
-                {!isMobile && <span className="ml-1">JPG</span>}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Export JPG</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Save project"
-                onClick={onSaveProject}
-                className="h-9 w-9"
-              >
-                <Save className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Save project file (re-editable)</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Toggle properties"
-                onClick={onToggleProperties}
-                className="h-9 w-9"
-              >
-                <PanelRight className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Toggle Properties</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="Toggle layers"
-                onClick={onToggleLayers}
-                className="h-9 w-9"
-              >
-                <Layers className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>Toggle Layers</p>
-            </TooltipContent>
-          </Tooltip>
-
-          <Separator orientation="vertical" className="h-6 mx-1" />
-
-          <AlertDialog>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <AlertDialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size={isMobile ? "icon" : "sm"}
-                    aria-label="New"
-                    className={`${isMobile ? "h-9 w-9" : "h-9"} text-muted-foreground hover:text-destructive`}
-                  >
-                    <FilePlus2 className="h-4 w-4" />
-                    {!isMobile && <span className="ml-1">New</span>}
-                  </Button>
-                </AlertDialogTrigger>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>New Project</p>
-              </TooltipContent>
-            </Tooltip>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Start a new project?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  The current image and all edits will be discarded. This
-                  cannot be undone.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleStartNew}>
-                  Start new
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>Selection, or whole image</DropdownMenuLabel>
+              {transformItems}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Separator orientation="vertical" className="mx-1.5 h-6" />
+          <IconButton icon={Save} label="Save project" shortcut="Ctrl+S" onClick={onSaveProject} />
+          <Button size="sm" className="h-9 gap-1.5 px-3.5 shadow-sm" onClick={onExport}>
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
+          <Separator orientation="vertical" className="mx-1.5 h-6" />
+          <IconButton
+            icon={PanelRight}
+            label="Toggle properties"
+            active={panel === "properties"}
+            aria-pressed={panel === "properties"}
+            onClick={() => onTogglePanel("properties")}
+          />
+          <IconButton
+            icon={SlidersHorizontal}
+            label="Toggle adjustments"
+            active={panel === "adjust"}
+            aria-pressed={panel === "adjust"}
+            onClick={() => onTogglePanel("adjust")}
+          />
+          <IconButton
+            icon={Layers}
+            label="Toggle layers"
+            active={panel === "layers"}
+            aria-pressed={panel === "layers"}
+            onClick={() => onTogglePanel("layers")}
+          />
+          <Separator orientation="vertical" className="mx-1.5 h-6" />
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="New"
+            className="h-9 gap-1.5 px-2.5 text-muted-foreground hover:text-foreground"
+            onClick={() => setConfirmNew(true)}
+          >
+            <FilePlus2 className="h-4 w-4" />
+            <span className="hidden xl:inline">New</span>
+          </Button>
+        </>
       )}
 
-      {/* Spacer when no image */}
-      {!hasImage && <div className="flex-1" />}
-    </div>
+      {hasDocument && isMobile && (
+        <>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9"
+                aria-label="AI tools"
+                disabled={ai.isProcessing}
+              >
+                {ai.isProcessing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Wand2 className="h-4 w-4" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuLabel>On-device AI</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => void ai.removeBackground()}>
+                <Scissors /> Remove background
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void ai.extractSubject()}>
+                <Sparkles /> Extract subject to layer
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <IconButton
+            icon={SlidersHorizontal}
+            label="Toggle properties"
+            active={panel !== null}
+            aria-pressed={panel !== null}
+            onClick={() => onTogglePanel(panel ?? "properties")}
+          />
+          <Button size="icon" className="h-9 w-9" aria-label="Export" onClick={onExport}>
+            <Download className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="More options">
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          {hasDocument && isMobile && (
+            <>
+              <DropdownMenuItem onSelect={onZoomIn}>
+                <ZoomIn /> Zoom in
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onZoomOut}>
+                <ZoomOut /> Zoom out
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onFit}>
+                <Maximize /> Fit to screen
+                <DropdownMenuShortcut>{Math.round(zoom * 100)}%</DropdownMenuShortcut>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {transformItems}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={onSaveProject}>
+                <Save /> Save project file
+              </DropdownMenuItem>
+            </>
+          )}
+          <DropdownMenuItem onSelect={() => projectInputRef.current?.click()}>
+            <FolderOpen /> Open project file…
+          </DropdownMenuItem>
+          {hasDocument && isMobile && (
+            <DropdownMenuItem onSelect={() => setConfirmNew(true)}>
+              <FilePlus2 /> New project
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          {themeSubmenu}
+          {!isMobile && (
+            <DropdownMenuItem onSelect={onShowShortcuts}>
+              <Keyboard /> Keyboard shortcuts
+              <DropdownMenuShortcut>?</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </header>
   );
 };

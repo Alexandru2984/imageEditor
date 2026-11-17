@@ -27,7 +27,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { applyColor } from "@/utils/shapes";
 import {
-  Paintbrush,
+  SlidersHorizontal,
   Bold,
   Italic,
   Underline,
@@ -52,13 +52,56 @@ interface PropertiesPanelProps {
   brushOpacity: number;
   onBrushOpacityChange: (opacity: number) => void;
   fabricCanvas: FabricCanvas | null;
-  isMobile: boolean;
+  /** Which part of the panel to render: object/brush properties or image adjustments. */
+  section: "properties" | "adjust";
 }
 
 const COLOR_SWATCHES = [
-  "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#10b981",
-  "#3b82f6", "#6366f1", "#a855f7", "#ec4899", "#ffffff",
+  "#000000", "#ffffff", "#ef4444", "#f97316", "#f59e0b", "#22c55e",
+  "#10b981", "#3b82f6", "#6366f1", "#a855f7", "#ec4899",
 ];
+
+/** A compact "#rrggbb" field that only commits valid colours. */
+const HexInput = ({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (color: string) => void;
+}) => {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => setDraft(value), [value]);
+  const commit = () => {
+    const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(draft.trim());
+    if (!match) {
+      setDraft(value);
+      return;
+    }
+    let hex = match[1]!.toLowerCase();
+    if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+    if (`#${hex}` !== value) onCommit(`#${hex}`);
+    else setDraft(value);
+  };
+  return (
+    <input
+      aria-label="Hex color"
+      value={draft}
+      maxLength={7}
+      spellCheck={false}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          commit();
+        } else if (event.key === "Escape") {
+          setDraft(value);
+        }
+      }}
+      className="h-7 w-[5.5rem] rounded-md border border-input bg-background px-2 font-mono text-xs uppercase text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    />
+  );
+};
 
 // Blur only makes sense from 0 up; the rest are symmetric around 0
 const FILTER_SLIDERS: { key: keyof FilterValues; label: string; min: number }[] =
@@ -107,7 +150,7 @@ export const PropertiesPanel = ({
   brushOpacity,
   onBrushOpacityChange,
   fabricCanvas,
-  isMobile,
+  section,
 }: PropertiesPanelProps) => {
   const [filters, setFilters] = useState<FilterValues>(DEFAULT_FILTERS);
   const [hasTargetImage, setHasTargetImage] = useState(false);
@@ -395,9 +438,11 @@ export const PropertiesPanel = ({
     }
   };
 
-  // Listen for selection events
+  // Listen for selection events. The panel can mount while something is
+  // already selected (switching tabs), so read the current selection first.
   useEffect(() => {
     if (!fabricCanvas) return;
+    readSelectedObject();
 
     const onSelect = () => {
       readSelectedObject();
@@ -520,8 +565,8 @@ export const PropertiesPanel = ({
     readSelectedObject();
   };
 
-  // Align the selected object within the currently visible canvas region
-  // (scene coordinates, so it stays correct under zoom/pan).
+  // Align the selected object within the photo or, without one, the visible
+  // canvas region (scene coordinates, so it stays correct under zoom/pan).
   const alignObject = (
     mode: "left" | "centerH" | "right" | "top" | "middle" | "bottom"
   ) => {
@@ -529,12 +574,26 @@ export const PropertiesPanel = ({
     const active = getEditableActiveObject();
     if (!active) return;
 
-    const zoom = fabricCanvas.getZoom();
-    const vpt = fabricCanvas.viewportTransform;
-    const viewLeft = -vpt[4] / zoom;
-    const viewTop = -vpt[5] / zoom;
-    const viewW = fabricCanvas.width / zoom;
-    const viewH = fabricCanvas.height / zoom;
+    // Align to the photo (the artboard) when there is one, else to the view.
+    const background = findBackgroundImage(fabricCanvas);
+    let viewLeft: number;
+    let viewTop: number;
+    let viewW: number;
+    let viewH: number;
+    if (background && background !== active) {
+      const bounds = background.getBoundingRect();
+      viewLeft = bounds.left;
+      viewTop = bounds.top;
+      viewW = bounds.width;
+      viewH = bounds.height;
+    } else {
+      const zoom = fabricCanvas.getZoom();
+      const vpt = fabricCanvas.viewportTransform;
+      viewLeft = -vpt[4] / zoom;
+      viewTop = -vpt[5] / zoom;
+      viewW = fabricCanvas.width / zoom;
+      viewH = fabricCanvas.height / zoom;
+    }
 
     const br = active.getBoundingRect();
     let dx = 0;
@@ -569,22 +628,20 @@ export const PropertiesPanel = ({
   ];
 
   return (
-    <ScrollArea
-      className={`bg-[hsl(var(--editor-panel))] border-l border-border h-full ${isMobile ? "w-full" : "w-72"}`}
-    >
-      <div className="p-4 space-y-5">
-        {/* Header */}
-        <div className="flex items-center gap-2">
-          <Paintbrush className="h-4 w-4 text-muted-foreground" />
-          <h3 className="text-sm font-semibold">Properties</h3>
-        </div>
-
+    <ScrollArea className="h-full w-full">
+      <div className="space-y-5 p-4">
+        {section === "properties" && (
+          <>
         {/* Color Swatches */}
         <div>
-          <Label className="text-xs font-medium mb-2 block text-muted-foreground">
-            Color
-          </Label>
-          <div className="grid grid-cols-5 gap-1.5">
+          <div className="mb-2 flex items-center justify-between">
+            <Label className="text-xs font-medium text-muted-foreground">Color</Label>
+            <HexInput value={activeColor} onCommit={(color) => {
+              handleColorChange(color);
+              commitObjectChange();
+            }} />
+          </div>
+          <div className="flex flex-wrap gap-2">
             {COLOR_SWATCHES.map((color) => (
               <button
                 key={color}
@@ -595,23 +652,32 @@ export const PropertiesPanel = ({
                   handleColorChange(color);
                   commitObjectChange();
                 }}
-                className={`w-full aspect-square rounded-md transition-all border ${
+                className={`h-7 w-7 rounded-full border border-black/10 shadow-sm transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 ${
                   activeColor === color
-                    ? "ring-2 ring-primary ring-offset-1 ring-offset-background scale-105"
-                    : "border-border hover:scale-105"
+                    ? "ring-2 ring-primary ring-offset-2 ring-offset-editor-panel"
+                    : ""
                 }`}
                 style={{ backgroundColor: color }}
               />
             ))}
+            <label
+              className="relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-black/10 shadow-sm transition-transform hover:scale-110 focus-within:ring-2 focus-within:ring-ring dark:border-white/15"
+              style={{
+                background:
+                  "conic-gradient(from 0deg, #ef4444, #f59e0b, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)",
+              }}
+              title="Custom color"
+            >
+              <input
+                type="color"
+                aria-label="Custom active color"
+                value={activeColor}
+                onChange={(e) => handleColorChange(e.target.value)}
+                onBlur={commitObjectChange}
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+              />
+            </label>
           </div>
-          <input
-            type="color"
-            aria-label="Custom active color"
-            value={activeColor}
-            onChange={(e) => handleColorChange(e.target.value)}
-            onBlur={commitObjectChange}
-            className="w-full h-8 rounded-md mt-2 cursor-pointer bg-transparent border border-border"
-          />
         </div>
 
         <Separator />
@@ -971,10 +1037,22 @@ export const PropertiesPanel = ({
             <Separator />
           </>
         )}
+          </>
+        )}
+
+        {section === "adjust" && !hasTargetImage && (
+          <div className="flex flex-col items-center gap-2 py-10 text-center">
+            <SlidersHorizontal className="h-6 w-6 text-muted-foreground" />
+            <p className="text-sm font-medium">No image to adjust</p>
+            <p className="max-w-[14rem] text-xs text-muted-foreground">
+              Select an image layer, or deselect everything to adjust the photo.
+            </p>
+          </div>
+        )}
 
         {/* Image Filters — non-destructive, applied to the selected image
             layer or, with nothing selected, the background photo */}
-        {hasTargetImage && (
+        {section === "adjust" && hasTargetImage && (
           <div>
             <div className="flex items-center justify-between mb-3">
               <Label className="text-xs font-semibold">Image Filters</Label>
