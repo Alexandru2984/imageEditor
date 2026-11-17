@@ -84,7 +84,20 @@ function thumbnailSource(image: FabricImage, size: number): HTMLCanvasElement | 
 
 const thumbnailCache = new WeakMap<object, Map<string, string>>();
 
-/** Render every preset over a thumbnail of `image`, a few per frame. */
+/**
+ * Run `callback` when the browser has nothing more urgent to do, so preview
+ * rendering never delays the user's own edits. Safari has no idle callbacks.
+ */
+function whenIdle(callback: () => void): () => void {
+  if (typeof window.requestIdleCallback === "function") {
+    const id = window.requestIdleCallback(callback, { timeout: 1000 });
+    return () => window.cancelIdleCallback(id);
+  }
+  const id = window.setTimeout(callback, 16);
+  return () => window.clearTimeout(id);
+}
+
+/** Render every preset over a thumbnail of `image`, one per idle period. */
 function usePresetThumbnails(image: FabricImage | null, enabled: boolean) {
   const [thumbs, setThumbs] = useState<Map<string, string>>(new Map());
 
@@ -106,6 +119,7 @@ function usePresetThumbnails(image: FabricImage | null, enabled: boolean) {
     setThumbs(new Map(results));
     let cancelled = false;
     let index = 0;
+    let cancelNext = () => {};
     const step = () => {
       if (cancelled) return;
       const preset = FILTER_PRESETS[index];
@@ -128,12 +142,12 @@ function usePresetThumbnails(image: FabricImage | null, enabled: boolean) {
         }
         setThumbs(new Map(results));
       }
-      window.setTimeout(step, 0);
+      cancelNext = whenIdle(step);
     };
-    const timer = window.setTimeout(step, 30);
+    cancelNext = whenIdle(step);
     return () => {
       cancelled = true;
-      window.clearTimeout(timer);
+      cancelNext();
     };
   }, [image, enabled]);
 

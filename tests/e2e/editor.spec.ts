@@ -1,8 +1,8 @@
 import { test, expect, type FileChooser, type Page } from "@playwright/test";
 
-// A tiny valid 4x4 PNG, decoded from base64 into a file the upload input accepts.
+// A valid 4x4 PNG (red, green, blue and white quadrants) for the upload input.
 const PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAEklEQVR4nGP8z8Dwn4EIwDiqEAAvyQP4rvqiVQAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAI0lEQVR42mN47+LyH4SVjsaBMQOGgHXTt/8g/OvXLzDGEAAAbBUtZYYAvvUAAAAASUVORK5CYII=";
 
 async function uploadImage(page: Page) {
   await page.getByTestId("image-input").setInputFiles({
