@@ -8,6 +8,11 @@ import {
 import { downloadBlob } from "./download";
 import { throwIfAborted } from "./abort";
 
+// The production CSP forbids eval. Zod would otherwise probe `new Function`
+// to compile faster parsers; the probe is caught but still reported as a
+// policy violation, so use the interpreter outright.
+z.config({ jitless: true });
+
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
 const MAX_PROJECT_BYTES = 96 * 1024 * 1024;

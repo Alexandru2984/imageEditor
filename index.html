@@ -6,21 +6,94 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#0b0a10" />
     <script src="/theme-init.js"></script>
-    <title>Image Editor</title>
-    <meta name="description" content="A simple image editor" />
+
+    <title>Image Editor – Free Online Photo Editor, No Sign-up</title>
+    <meta
+      name="description"
+      content="Free photo editor in your browser. Remove backgrounds with AI, crop for social media, add text, stickers and filters. Private: your photos never leave your device."
+    />
     <meta name="author" content="micutu" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://imageeditor.micutu.com/" />
+
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="apple-mobile-web-app-title" content="Image Editor" />
+    <meta name="application-name" content="Image Editor" />
 
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="Image Editor" />
-    <meta property="og:description" content="A simple image editor" />
+    <meta property="og:site_name" content="Image Editor" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://imageeditor.micutu.com/" />
+    <meta property="og:title" content="Image Editor – Free Online Photo Editor" />
+    <meta
+      property="og:description"
+      content="Remove backgrounds with AI, crop for any platform, add text, stickers and filters. Free, private and right in your browser."
+    />
+    <meta property="og:image" content="https://imageeditor.micutu.com/og-image.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The Image Editor app with a sunset photo, a text headline and a sticker"
+    />
 
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Image Editor" />
-    <meta name="twitter:description" content="A simple image editor" />
+    <meta name="twitter:title" content="Image Editor – Free Online Photo Editor" />
+    <meta
+      name="twitter:description"
+      content="Remove backgrounds with AI, crop for any platform, add text, stickers and filters. Free, private and right in your browser."
+    />
+    <meta name="twitter:image" content="https://imageeditor.micutu.com/og-image.png" />
+    <meta
+      name="twitter:image:alt"
+      content="The Image Editor app with a sunset photo, a text headline and a sticker"
+    />
+
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Image Editor",
+        "url": "https://imageeditor.micutu.com/",
+        "description": "Free photo editor that runs in the browser. Remove backgrounds with AI, crop for social media, add text, stickers, brushes and filters, then export PNG, JPG or WebP. Photos never leave the device.",
+        "applicationCategory": "MultimediaApplication",
+        "operatingSystem": "Any",
+        "browserRequirements": "Requires JavaScript and a modern browser",
+        "isAccessibleForFree": true,
+        "inLanguage": "en",
+        "image": "https://imageeditor.micutu.com/og-image.png",
+        "screenshot": "https://imageeditor.micutu.com/og-image.png",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "featureList": [
+          "AI background removal and subject extraction",
+          "Crop presets for posts, stories and thumbnails",
+          "Text styles, bundled fonts and emoji stickers",
+          "Pen, highlighter, neon and dashed brushes",
+          "Filters, presets and one-click auto enhance",
+          "Layers, masks, smart guides and redaction",
+          "Export to PNG, JPG and WebP"
+        ]
+      }
+    </script>
   </head>
 
   <body>
     <div id="root"></div>
+    <noscript>
+      <main style="max-width: 36rem; margin: 15vh auto; padding: 0 1.5rem; font-family: system-ui, sans-serif; line-height: 1.6">
+        <h1>Image Editor</h1>
+        <p>
+          A free photo editor that runs entirely in your browser: remove backgrounds with AI, crop
+          for social media, add text, stickers and filters, and export PNG, JPG or WebP. Your photos
+          never leave your device.
+        </p>
+        <p>Please enable JavaScript to use the editor.</p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

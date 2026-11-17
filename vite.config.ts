@@ -15,6 +15,7 @@ const contentSecurityPolicy = [
   "font-src 'self' data:",
   "connect-src 'self' https://huggingface.co/briaai/RMBG-1.4/resolve/2ceba5a5efaec153162aedea169f76caf9b46cf8/ https://*.hf.co",
   "worker-src 'self' blob:",
+  "manifest-src 'self'",
 ].join("; ");
 
 // https://vitejs.dev/config/

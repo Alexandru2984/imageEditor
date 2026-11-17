@@ -1377,3 +1377,96 @@ test("brush types change how strokes are drawn and saved", async ({ page }) => {
   const neon = (await paths())[2]! as { shadow?: { blur?: number } | null };
   expect(neon.shadow?.blur).toBeGreaterThanOrEqual(10);
 });
+
+test("search and sharing metadata are complete and load under the CSP", async ({
+  page,
+  request,
+}) => {
+  const violations: string[] = [];
+  await page.exposeFunction("reportViolation", (detail: string) => violations.push(detail));
+  await page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      (window as unknown as { reportViolation: (d: string) => void }).reportViolation(
+        `${event.violatedDirective} ${event.blockedURI}`
+      );
+    });
+  });
+  await page.goto("/");
+  await expect(page).toHaveTitle(/Free Online Photo Editor/);
+  // One h1 per view: the hero here, the brand once a photo is open.
+  await expect(page.locator("h1")).toHaveCount(1);
+  await expect(page.locator("h1")).toContainText("Free photo editor");
+  const head = page.locator("head");
+  await expect(head.locator('link[rel="canonical"]')).toHaveAttribute(
+    "href",
+    "https://imageeditor.micutu.com/"
+  );
+  const description = await head.locator('meta[name="description"]').getAttribute("content");
+  expect(description!.length).toBeGreaterThan(70);
+  expect(description!.length).toBeLessThanOrEqual(170);
+  await expect(head.locator('meta[property="og:image"]')).toHaveAttribute(
+    "content",
+    "https://imageeditor.micutu.com/og-image.png"
+  );
+  const jsonLd = JSON.parse(
+    (await head.locator('script[type="application/ld+json"]').textContent()) ?? "{}"
+  );
+  expect(jsonLd["@type"]).toBe("WebApplication");
+  expect(jsonLd.offers.price).toBe("0");
+
+  // Every referenced asset exists with the right type.
+  const manifest = await (await request.get("/site.webmanifest")).json();
+  const assets: Array<[string, RegExp]> = [
+    ["/og-image.png", /image\/png/],
+    ["/favicon.svg", /image\/svg\+xml/],
+    ["/favicon.ico", /image\/(x-icon|vnd\.microsoft\.icon)/],
+    ["/apple-touch-icon.png", /image\/png/],
+    ["/robots.txt", /text\/plain/],
+    ["/sitemap.xml", /xml/],
+    ...(manifest.icons as Array<{ src: string }>).map(
+      (icon) => [icon.src, /image\//] as [string, RegExp]
+    ),
+  ];
+  for (const [url, type] of assets) {
+    const response = await request.get(url);
+    expect(response.status(), url).toBe(200);
+    expect(response.headers()["content-type"], url).toMatch(type);
+  }
+  expect(await (await request.get("/robots.txt")).text()).toContain(
+    "Sitemap: https://imageeditor.micutu.com/sitemap.xml"
+  );
+
+  // The manifest is fetched by the browser itself (manifest-src).
+  await page.waitForLoadState("networkidle");
+  expect(violations).toEqual([]);
+});
+
+test("editing triggers no Content-Security-Policy violations", async ({ page }) => {
+  const violations: string[] = [];
+  await page.exposeFunction("reportViolation", (detail: string) => violations.push(detail));
+  await page.addInitScript(() => {
+    document.addEventListener("securitypolicyviolation", (event) => {
+      (window as unknown as { reportViolation: (d: string) => void }).reportViolation(
+        `${event.violatedDirective} ${event.blockedURI}`
+      );
+    });
+  });
+  await page.goto("/");
+  await page.getByText("Try a sample photo").click();
+  await expect(page.getByText("Remove BG")).toBeVisible();
+
+  // Bundled fonts, WebGL filters, previews, stickers and the export dialog.
+  await page.getByRole("button", { name: "Text (T)" }).click();
+  const center = await canvasCenter(page);
+  await page.mouse.click(center.x, center.y);
+  await page.getByRole("button", { name: "Meme text style" }).click();
+  await page.getByRole("tab", { name: "Adjust" }).click();
+  await page.getByRole("button", { name: "Vivid preset" }).click();
+  await page.getByRole("button", { name: "Stickers" }).click();
+  await page.getByRole("button", { name: "Add sticker 🔥" }).click();
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await page.getByRole("radio", { name: "WebP", exact: true }).click();
+  await expect(page.getByTestId("export-dimensions")).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(violations).toEqual([]);
+});

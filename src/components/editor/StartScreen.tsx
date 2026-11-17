@@ -108,12 +108,12 @@ export const StartScreen = ({
               <ShieldCheck className="h-3.5 w-3.5 text-success" />
               Free · No sign-up · Runs on your device
             </span>
-            <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl sm:leading-[1.05]">
-              Edit photos{" "}
+            <h1 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl sm:leading-[1.05]">
+              Free photo editor{" "}
               <span className="bg-gradient-to-r from-violet-500 via-fuchsia-500 to-pink-500 bg-clip-text text-transparent">
                 right in your browser
               </span>
-            </h2>
+            </h1>
             <p className="max-w-xl text-pretty text-base text-muted-foreground sm:text-lg">
               Remove backgrounds with on-device AI, add text, shapes and drawings, adjust colours,
               crop and export. Your photos never leave your device.
@@ -192,9 +192,9 @@ export const StartScreen = ({
               >
                 {dragActive ? <Upload className="h-8 w-8 animate-bounce" /> : <ImagePlus className="h-8 w-8" />}
               </span>
-              <h3 className="relative text-xl font-semibold">
+              <h2 className="relative text-xl font-semibold">
                 {dragActive ? "Drop your image here" : "Upload an Image"}
-              </h3>
+              </h2>
               <p className="relative mt-1.5 max-w-xs text-sm text-muted-foreground">
                 Drag and drop, paste from the clipboard, or browse your files
               </p>
@@ -226,9 +226,9 @@ export const StartScreen = ({
         <section aria-labelledby="blank-heading" className="space-y-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h3 id="blank-heading" className="text-lg font-semibold tracking-tight">
+              <h2 id="blank-heading" className="text-lg font-semibold tracking-tight">
                 Or start from a blank canvas
-              </h3>
+              </h2>
               <p className="text-sm text-muted-foreground">
                 Perfect for posters, thumbnails, memes and social posts.
               </p>
@@ -304,9 +304,9 @@ export const StartScreen = ({
         </section>
 
         <section aria-labelledby="features-heading" className="space-y-4">
-          <h3 id="features-heading" className="text-lg font-semibold tracking-tight">
+          <h2 id="features-heading" className="text-lg font-semibold tracking-tight">
             Everything you need, nothing to install
-          </h3>
+          </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {FEATURES.map(({ icon: Icon, title, text }) => (
               <div key={title} className="rounded-xl border border-border bg-card p-5">

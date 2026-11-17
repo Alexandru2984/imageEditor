@@ -217,9 +217,13 @@ export const TopBar = ({
         aria-label="Image Editor"
       >
         <Logo className="h-7 w-7" />
-        {!isMobile && (
-          <h1 className="whitespace-nowrap text-[15px] font-semibold tracking-tight">Image Editor</h1>
-        )}
+        {/* The start screen's hero is its h1; in the editor the brand is. */}
+        {!isMobile &&
+          (hasDocument ? (
+            <h1 className="whitespace-nowrap text-[15px] font-semibold tracking-tight">Image Editor</h1>
+          ) : (
+            <span className="whitespace-nowrap text-[15px] font-semibold tracking-tight">Image Editor</span>
+          ))}
       </a>
 
       {hasDocument && (
