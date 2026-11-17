@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { Canvas as FabricCanvas } from "fabric";
 import { takeSnapshot, type CanvasSnapshot } from "./canvasSnapshot";
 import {
@@ -7,11 +6,6 @@ import {
 } from "./imageFile";
 import { downloadBlob } from "./download";
 import { throwIfAborted } from "./abort";
-
-// The production CSP forbids eval. Zod would otherwise probe `new Function`
-// to compile faster parsers; the probe is caught but still reported as a
-// policy violation, so use the interpreter outright.
-z.config({ jitless: true });
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -172,22 +166,42 @@ function assertSafeFilter(object: Record<string, unknown>): void {
   }
 }
 
-// Formal shape of a project file. Zod guards the structure; assertSafeSources
+// Formal shape of a project file:
+//   { version?: 1, snapshot: { json: string, srcs: string[] } }
+// with no other keys. These guards check the structure; assertSafeSources
 // (below) enforces the security invariant that every image source is inline.
-const SnapshotSchema = z.strictObject({
-  json: z.string().max(MAX_SNAPSHOT_JSON_CHARS),
-  srcs: z.array(z.string()).max(MAX_IMAGE_SOURCES),
-});
 
-const ProjectFileSchema = z.strictObject({
-  version: z.literal(FILE_VERSION).optional(),
-  snapshot: SnapshotSchema,
-});
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Object.prototype.toString.call(value) === "[object Object]";
+
+const hasOnlyKeys = (value: Record<string, unknown>, allowed: readonly string[]): boolean =>
+  Object.keys(value).every((key) => allowed.includes(key));
+
+/** A copy of `value` if it is exactly a bounded snapshot, otherwise null. */
+function parseSnapshot(value: unknown): CanvasSnapshot | null {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["json", "srcs"])) return null;
+  const { json, srcs } = value;
+  if (typeof json !== "string" || json.length > MAX_SNAPSHOT_JSON_CHARS) return null;
+  if (!Array.isArray(srcs) || srcs.length > MAX_IMAGE_SOURCES) return null;
+  // Index every slot: a sparse array (possible from IndexedDB) has holes that
+  // Array#every would skip.
+  for (let index = 0; index < srcs.length; index += 1) {
+    if (typeof srcs[index] !== "string") return null;
+  }
+  return { json, srcs: [...(srcs as string[])] };
+}
+
+/** The snapshot inside a project file, if the file has exactly the expected shape. */
+function parseProjectFile(value: unknown): unknown {
+  if (!isRecord(value) || !hasOnlyKeys(value, ["version", "snapshot"])) return null;
+  if (value.version !== undefined && value.version !== FILE_VERSION) return null;
+  return "snapshot" in value ? value.snapshot : null;
+}
 
 /**
- * Reject oversized collections before any schema walks their elements. The
- * schema enforces the same bound; this check makes the cost of a hostile
- * multi-million-entry array O(1) regardless of the validator's internals.
+ * Reject oversized collections before anything walks their elements.
+ * parseSnapshot enforces the same bound; this keeps the cost of a hostile
+ * multi-million-entry array O(1) and its error message specific.
  */
 function assertBoundedSnapshotShape(value: unknown): void {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
@@ -211,11 +225,11 @@ const estimatedDecodedBytes = (dataUrl: string): number => {
 export function assertProjectSnapshotStorageLimits(
   value: CanvasSnapshot
 ): CanvasSnapshot {
-  const result = SnapshotSchema.safeParse(value);
-  if (!result.success) throw new Error("Project snapshot is too large to autosave");
+  const snapshot = parseSnapshot(value);
+  if (!snapshot) throw new Error("Project snapshot is too large to autosave");
 
   let totalImageBytes = 0;
-  for (const source of result.data.srcs) {
+  for (const source of snapshot.srcs) {
     const byteLength = estimatedDecodedBytes(source);
     if (byteLength > MAX_EMBEDDED_IMAGE_BYTES) {
       throw new Error("Project contains an oversized embedded image");
@@ -225,7 +239,7 @@ export function assertProjectSnapshotStorageLimits(
       throw new Error("Project contains too much embedded image data");
     }
   }
-  return result.data as CanvasSnapshot;
+  return snapshot;
 }
 
 // A portable project file: the same snapshot format used for undo/autosave,
@@ -412,9 +426,8 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
 /** Validate an untrusted snapshot before Fabric is allowed to deserialize it. */
 export function validateProjectSnapshot(value: unknown): CanvasSnapshot {
   assertBoundedSnapshotShape(value);
-  const result = SnapshotSchema.safeParse(value);
-  if (!result.success) throw new Error("Not a valid project snapshot");
-  const snapshot = result.data as CanvasSnapshot;
+  const snapshot = parseSnapshot(value);
+  if (!snapshot) throw new Error("Not a valid project snapshot");
   assertSafeSources(snapshot);
   return snapshot;
 }
@@ -449,11 +462,11 @@ export async function readProjectFile(
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
     assertBoundedSnapshotShape((payload as Record<string, unknown>).snapshot);
   }
-  const result = ProjectFileSchema.safeParse(payload);
-  if (!result.success) {
+  const inner = parseProjectFile(payload);
+  if (!parseSnapshot(inner)) {
     throw new Error("Not a valid project file");
   }
-  const snapshot = validateProjectSnapshot(result.data.snapshot);
+  const snapshot = validateProjectSnapshot(inner);
   throwIfAborted(signal);
   return snapshot;
 }

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   assertProjectSnapshotStorageLimits,
   readProjectFile,
+  validateProjectSnapshot,
 } from "./projectFile";
 
 function fileOf(content: string): File {
@@ -19,6 +20,27 @@ describe("readProjectFile", () => {
         srcs: [],
       })
     ).toThrow(/too large to autosave/);
+  });
+
+  it("passes a snapshot within the storage limits through", () => {
+    const snapshot = { json: '{"objects":[]}', srcs: [PNG_DATA_URL] };
+    expect(assertProjectSnapshotStorageLimits(snapshot)).toEqual(snapshot);
+  });
+
+  it("rejects an embedded image over the per-image limit before autosave", () => {
+    // ~49 MB once decoded: just over the 48 MB per-image limit.
+    const huge = `data:image/png;base64,${"A".repeat(Math.ceil((49 * 1024 * 1024) / 3) * 4)}`;
+    expect(() => assertProjectSnapshotStorageLimits({ json: "{}", srcs: [huge] })).toThrow(
+      /oversized embedded image/
+    );
+  });
+
+  it("rejects too much embedded image data in total before autosave", () => {
+    // Two ~40 MB images: each allowed, together over the 72 MB total.
+    const large = `data:image/png;base64,${"A".repeat(Math.ceil((40 * 1024 * 1024) / 3) * 4)}`;
+    expect(() =>
+      assertProjectSnapshotStorageLimits({ json: "{}", srcs: [large, large] })
+    ).toThrow(/too much embedded image data/);
   });
 
   it("parses a valid project file into a snapshot", async () => {
@@ -62,6 +84,30 @@ describe("readProjectFile", () => {
       JSON.stringify({ snapshot: { json: '{"objects":[]}', srcs: [] }, extra: 1 })
     );
     await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
+  });
+
+  it("rejects a project file from a newer, unknown version", async () => {
+    const file = fileOf(JSON.stringify({ version: 2, snapshot: { json: "{}", srcs: [] } }));
+    await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
+  });
+
+  it("rejects unknown snapshot keys", async () => {
+    const file = fileOf(
+      JSON.stringify({ snapshot: { json: '{"objects":[]}', srcs: [], extra: true } })
+    );
+    await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
+  });
+
+  it("rejects non-string image sources", async () => {
+    const file = fileOf(JSON.stringify({ snapshot: { json: "{}", srcs: [PNG_DATA_URL, 7] } }));
+    await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
+  });
+
+  it("rejects a snapshot that is an array or null", async () => {
+    for (const snapshot of [[], null, "snapshot"]) {
+      const file = fileOf(JSON.stringify({ snapshot }));
+      await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
+    }
   });
 
   it("rejects a snapshot whose json isn't a string", async () => {
@@ -320,5 +366,23 @@ describe("readProjectFile", () => {
     await expect(
       readProjectFile(fileOf(JSON.stringify({ version: 99, snapshot })))
     ).rejects.toThrow(/valid project file/);
+  });
+});
+
+describe("validateProjectSnapshot", () => {
+  it("rejects holes in a sparse srcs array, as IndexedDB can store them", () => {
+    const srcs: string[] = [];
+    srcs[1] = PNG_DATA_URL;
+    expect(() => validateProjectSnapshot({ json: '{"objects":[]}', srcs })).toThrow(
+      /valid project snapshot/
+    );
+  });
+
+  it("returns a copy, not the caller's object", () => {
+    const input = { json: '{"objects":[]}', srcs: [] as string[] };
+    const snapshot = validateProjectSnapshot(input);
+    expect(snapshot).toEqual(input);
+    expect(snapshot).not.toBe(input);
+    expect(snapshot.srcs).not.toBe(input.srcs);
   });
 });
