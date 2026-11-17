@@ -19,6 +19,7 @@ import { useKeyboardShortcuts, type ShortcutActions } from "@/hooks/useKeyboardS
 import { useAiActions } from "@/hooks/useAiActions";
 import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
+import { CanvasContextMenu } from "./CanvasContextMenu";
 import {
   saveProject,
   loadProject,
@@ -515,6 +516,14 @@ export const ImageEditor = () => {
     return copies.length > 0;
   }, [fabricCanvas]);
 
+  const canPasteLayers = useCallback(() => clipboardRef.current !== null, []);
+  const handleContextPaste = useCallback(() => {
+    void pasteLayers().catch((error) => {
+      console.error("Paste failed:", error);
+      toast.error("Those layers could not be pasted");
+    });
+  }, [pasteLayers]);
+
   const handlePickedColor = useCallback(
     (hex: string) => {
       setActiveColor(hex);
@@ -837,6 +846,19 @@ export const ImageEditor = () => {
         defaultName={documentName}
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      {hasDocument && (
+        <CanvasContextMenu
+          canvas={fabricCanvas}
+          enabled={activeTool === "select"}
+          onCopy={handleCopy}
+          onPaste={handleContextPaste}
+          canPaste={canPasteLayers}
+          onDuplicate={handleDuplicate}
+          onArrange={handleArrange}
+          onFlip={handleFlip}
+          onFit={handleFit}
+        />
+      )}
     </div>
   );
 };

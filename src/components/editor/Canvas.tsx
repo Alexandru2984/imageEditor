@@ -6,6 +6,7 @@ import {
   FabricImage,
   Point,
   Shadow,
+  filters,
 } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
 import {
@@ -14,8 +15,19 @@ import {
   Copy,
   Crop as CropIcon,
   SquareDashedBottom,
+  EyeOff,
+  Grid3x3,
+  Droplets,
+  Square as SquareIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
 import { flattenRegion } from "@/utils/flatten";
@@ -846,7 +858,7 @@ export const Canvas = ({
     };
   }, [activeTool, animateMarchingAnts]);
 
-  const newLayerFromSelection = useCallback(async () => {
+  const newLayerFromSelection = useCallback(async (effect?: "pixelate" | "blur") => {
     const canvas = fabricCanvasRef.current;
     const rect = marqueeRef.current;
     if (!canvas || !rect || rasterBusyRef.current) return;
@@ -882,11 +894,28 @@ export const Canvas = ({
       }
       img.set({ left: region.left, top: region.top });
       img.scaleToWidth(region.width);
+      if (effect) {
+        // A redaction is a copy of the region with the effect baked into its
+        // filter stack, stacked over the original pixels.
+        const side = Math.max(img.width, img.height);
+        img.filters = [
+          effect === "pixelate"
+            ? new filters.Pixelate({ blocksize: Math.min(64, Math.max(8, Math.round(side / 14))) })
+            : new filters.Blur({ blur: 0.6 }),
+        ];
+        img.applyFilters();
+        (img as EditorFabricObject).name = effect === "pixelate" ? "Pixelated" : "Blurred";
+      }
       removeMarquee(canvas);
       canvas.add(img);
       canvas.setActiveObject(img);
       canvas.renderAll();
       onToolChange("select");
+      if (effect) {
+        toast.success("Region redacted on a new layer", {
+          description: "Exports are flattened. Project files still contain the original photo.",
+        });
+      }
       if (flattened.limited) {
         toast.warning(
           `Selection was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
@@ -904,6 +933,31 @@ export const Canvas = ({
       setIsRasterizing(false);
     }
   }, [loadGeneratedImage, onToolChange]);
+
+  const blackOutSelection = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const rect = marqueeRef.current;
+    if (!canvas || !rect) return;
+    const region = marqueeRegion(canvas, rect);
+    if (!region) {
+      toast.error(OUTSIDE_PHOTO);
+      return;
+    }
+    const box = new Rect({
+      left: region.left,
+      top: region.top,
+      width: region.width,
+      height: region.height,
+      fill: "#000000",
+      strokeWidth: 0,
+    });
+    (box as EditorFabricObject).name = "Redaction";
+    removeMarquee(canvas);
+    canvas.add(box);
+    canvas.setActiveObject(box);
+    canvas.requestRenderAll();
+    onToolChange("select");
+  }, [onToolChange]);
 
   const cropToSelection = useCallback(async () => {
     const canvas = fabricCanvasRef.current;
@@ -1100,6 +1154,26 @@ export const Canvas = ({
                   Mask
                 </Button>
               )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="ghost" className="h-8" disabled={isRasterizing}>
+                    <EyeOff className="h-4 w-4 mr-1" />
+                    Redact
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="center">
+                  <DropdownMenuLabel>Hide what is inside</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={() => void newLayerFromSelection("pixelate")}>
+                    <Grid3x3 /> Pixelate
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void newLayerFromSelection("blur")}>
+                    <Droplets /> Blur
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={blackOutSelection}>
+                    <SquareIcon /> Black out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button
                 size="sm"
                 variant="ghost"

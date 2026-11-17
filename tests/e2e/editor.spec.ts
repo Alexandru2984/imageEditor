@@ -1135,8 +1135,82 @@ async function dragMarquee(page: Page, half = 90) {
   await page.mouse.move(center.x, center.y, { steps: 4 });
   await page.mouse.move(center.x + half, center.y + half, { steps: 4 });
   await page.mouse.up();
-  await expect(page.getByRole("button", { name: "Crop to this" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
 }
+
+test("redact pixelates a region on a new layer and blacks out another", async ({ page }) => {
+  await uploadTransparentPng(page);
+  await dragMarquee(page, 25);
+  await page.getByRole("button", { name: "Redact" }).click();
+  await page.getByRole("menuitem", { name: "Pixelate" }).click();
+  await expect
+    .poll(async () => {
+      const layer = (await autosavedObjects(page)).find((o) => o.name === "Pixelated");
+      return (layer?.filters as Array<{ type: string }> | undefined)?.map((f) => f.type);
+    })
+    .toEqual(["Pixelate"]);
+  await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+
+  await dragMarquee(page, 12);
+  await page.getByRole("button", { name: "Redact" }).click();
+  await page.getByRole("menuitem", { name: "Black out" }).click();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).find((o) => o.name === "Redaction")?.fill)
+    .toBe("#000000");
+  // The black box covers the dragged area, not a 1px stub.
+  const redaction = (await autosavedObjects(page)).find((o) => o.name === "Redaction")!;
+  expect(redaction.width as number).toBeGreaterThan(5);
+  expect(Math.abs((redaction.width as number) - (redaction.height as number))).toBeLessThan(1);
+  const pixelated = (await autosavedObjects(page)).find((o) => o.name === "Pixelated")!;
+  expect((pixelated.width as number) * (pixelated.scaleX as number)).toBeGreaterThan(
+    (redaction.width as number) * 1.5
+  );
+
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((o) => o.name === "Redaction"))
+    .toBe(false);
+});
+
+test("right-click menu duplicates, locks and deletes layers", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  const center = await canvasCenter(page);
+  const rects = async () => (await autosavedObjects(page)).filter((o) => o.type === "Rect");
+
+  await page.mouse.click(center.x, center.y, { button: "right" });
+  await expect(page.getByRole("menu", { name: "Layer actions" })).toBeVisible();
+  await page.getByRole("menuitem", { name: /Duplicate/ }).click();
+  await expect.poll(async () => (await rects()).length).toBe(2);
+
+  // Arrange lives in a submenu; the duplicate (on top) goes to the back.
+  await page.mouse.click(center.x, center.y, { button: "right" });
+  await page.getByRole("menuitem", { name: "Arrange" }).click();
+  await page.getByRole("menuitem", { name: /Send to back/ }).click();
+  await expect(page.getByRole("menu", { name: "Layer actions" })).toHaveCount(0);
+
+  await page.mouse.click(center.x, center.y, { button: "right" });
+  await page.getByRole("menuitem", { name: "Lock" }).click();
+  await expect.poll(async () => (await rects()).filter((o) => o.__locked).length).toBe(1);
+
+  // A locked layer cannot be deleted from the menu until it is unlocked.
+  await page.mouse.click(center.x, center.y, { button: "right" });
+  await expect(page.getByRole("menuitem", { name: /Delete/ })).toBeDisabled();
+  await page.getByRole("menuitem", { name: "Unlock" }).click();
+  await page.mouse.click(center.x, center.y, { button: "right" });
+  await page.getByRole("menuitem", { name: /Delete/ }).click();
+  await expect.poll(async () => (await rects()).length).toBe(1);
+
+  // Right-click on empty workspace offers document actions.
+  const box = (await page.locator("canvas.upper-canvas").boundingBox())!;
+  await page.mouse.click(box.x + 8, box.y + 8, { button: "right" });
+  await expect(page.getByRole("menuitem", { name: /Select all layers/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu", { name: "Layer actions" })).toHaveCount(0);
+});
 
 test("marquee copy and crop use the dragged region", async ({ page }) => {
   await uploadTransparentPng(page);
