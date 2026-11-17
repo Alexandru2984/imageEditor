@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { setCheckerTheme } from "@/utils/workspace";
+import { setCheckerTheme } from "@/utils/checkerTheme";
 import {
   ThemeContext,
   readStoredPreference,

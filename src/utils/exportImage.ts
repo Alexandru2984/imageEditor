@@ -81,18 +81,9 @@ export async function exportImage(
   );
 }
 
-/** A filesystem-safe base name; falls back when the user clears the field. */
-export function sanitizeFileName(name: string, fallback = "edited-image"): string {
-  const cleaned = name
-    .normalize("NFKC")
-    .replace(/\.(png|jpe?g|webp)$/i, "")
-    .replace(/[^\p{L}\p{N}._ -]+/gu, "-")
-    .replace(/\s+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^[-.]+|[-.]+$/g, "")
-    .slice(0, 80);
-  return cleaned || fallback;
-}
+// Kept here for existing callers; it lives in a Fabric-free module so the
+// start screen can use it without loading the editor.
+export { sanitizeFileName } from "./fileName";
 
 export function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
