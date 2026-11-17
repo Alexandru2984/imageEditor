@@ -16,7 +16,7 @@ export interface FlattenedRegion extends RasterPlan {
   dataUrl: string;
 }
 
-type RasterFormat = "png" | "jpeg";
+export type RasterFormat = "png" | "jpeg" | "webp";
 
 const assertRegion = (region: TBBox): void => {
   const values = [region.left, region.top, region.width, region.height];
@@ -150,28 +150,63 @@ export function flattenRegion(
   return { ...plan, dataUrl };
 }
 
+export interface RenderBlobOptions {
+  /**
+   * Opaque colour painted *behind* the artwork. JPEG cannot store alpha, so it
+   * defaults to white there; PNG/WebP keep transparency unless one is given.
+   */
+  matte?: string | null;
+}
+
+const encodeCanvas = (
+  element: HTMLCanvasElement,
+  mime: string,
+  quality: number
+): Promise<Blob | null> =>
+  new Promise((resolve) => {
+    try {
+      element.toBlob((blob) => resolve(blob), mime, quality);
+    } catch {
+      resolve(null);
+    }
+  });
+
 export async function renderRegionBlob(
   canvas: FabricCanvas,
   region: TBBox,
   requestedMultiplier: number,
   format: RasterFormat,
-  quality = 1
+  quality = 1,
+  options: RenderBlobOptions = {}
 ): Promise<{ blob: Blob; plan: RasterPlan }> {
   const plan = planRasterization(region, requestedMultiplier);
-  const blobPromise = renderWithIdentityViewport(canvas, () =>
-    canvas.toBlob({
-      format,
-      quality,
-      multiplier: plan.multiplier,
+  const element = renderWithIdentityViewport(canvas, () =>
+    canvas.toCanvasElement(plan.multiplier, {
       left: region.left,
       top: region.top,
       width: region.width,
       height: region.height,
-      enableRetinaScaling: false,
     })
   );
-  const blob = await blobPromise;
-  if (!blob || blob.size === 0 || !blob.type.startsWith("image/")) {
+
+  const matte = options.matte ?? (format === "jpeg" ? "#ffffff" : null);
+  if (matte) {
+    const ctx = element.getContext("2d");
+    if (!ctx) throw new Error("The browser could not prepare the export");
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = "destination-over";
+    ctx.fillStyle = matte;
+    ctx.fillRect(0, 0, element.width, element.height);
+    ctx.restore();
+  }
+
+  const mime = `image/${format}`;
+  const blob = await encodeCanvas(element, mime, quality);
+  // Release the backing store promptly; large exports can be 64 MB of RGBA.
+  element.width = 0;
+  element.height = 0;
+  if (!blob || blob.size === 0 || blob.type !== mime) {
     throw new Error("The browser could not encode the exported image");
   }
   return { blob, plan };

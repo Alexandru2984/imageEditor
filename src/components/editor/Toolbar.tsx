@@ -152,7 +152,6 @@ export const Toolbar = ({
       );
     if (removable.length > 0) fabricCanvas.remove(...removable);
     fabricCanvas.discardActiveObject();
-    fabricCanvas.backgroundColor = "#1a1a1a";
     fabricCanvas.requestRenderAll();
     toast.success("Canvas cleared!");
   };

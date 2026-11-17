@@ -132,6 +132,9 @@ export function findBackgroundImage(
 export function normalizeEditorObjects(
   canvas: FabricCanvas
 ): FabricImage | undefined {
+  // Older builds stored the dark editor backdrop as the document background,
+  // which then leaked into every export. Documents are transparent by design.
+  canvas.backgroundColor = "";
   const background = findBackgroundImage(canvas);
   const usedIds = new Set<string>();
 

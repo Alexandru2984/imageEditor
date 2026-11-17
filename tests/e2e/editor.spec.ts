@@ -514,6 +514,80 @@ test("exports a PNG", async ({ page }) => {
   expect(download.suggestedFilename()).toMatch(/\.png$/);
 });
 
+async function uploadTransparentPng(page: Page) {
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#ff0000";
+    ctx.fillRect(0, 0, 32, 32);
+    return canvas.toDataURL("image/png").split(",")[1]!;
+  });
+  await page.getByTestId("image-input").setInputFiles({
+    name: "transparent.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(base64, "base64"),
+  });
+  await expect(page.getByText("Remove BG")).toBeVisible();
+}
+
+async function samplePixel(
+  page: Page,
+  file: string,
+  mime: string,
+  x: number,
+  y: number
+): Promise<number[]> {
+  const fs = await import("node:fs");
+  const data = fs.readFileSync(file).toString("base64");
+  return page.evaluate(
+    async ({ data, mime, x, y }) => {
+      const image = new Image();
+      image.src = `data:${mime};base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(image, 0, 0);
+      return Array.from(
+        ctx.getImageData(
+          Math.round(x * image.width),
+          Math.round(y * image.height),
+          1,
+          1
+        ).data
+      );
+    },
+    { data, mime, x, y }
+  );
+}
+
+test("PNG export keeps transparent pixels transparent", async ({ page }) => {
+  await uploadTransparentPng(page);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export PNG" }).click();
+  const file = await (await downloadPromise).path();
+  expect(await samplePixel(page, file!, "image/png", 0.9, 0.9)).toEqual([
+    0, 0, 0, 0,
+  ]);
+  const opaque = await samplePixel(page, file!, "image/png", 0.1, 0.1);
+  expect(opaque[0]).toBeGreaterThan(200);
+  expect(opaque[3]).toBe(255);
+});
+
+test("JPEG export flattens transparency onto white", async ({ page }) => {
+  await uploadTransparentPng(page);
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export JPG" }).click();
+  const file = await (await downloadPromise).path();
+  const pixel = await samplePixel(page, file!, "image/jpeg", 0.9, 0.9);
+  expect(pixel[0]).toBeGreaterThan(240);
+  expect(pixel[1]).toBeGreaterThan(240);
+  expect(pixel[2]).toBeGreaterThan(240);
+});
+
 test("applies and undoes a crop without corrupting the canvas", async ({
   page,
 }) => {

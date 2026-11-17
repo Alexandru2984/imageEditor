@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { flattenRegion } from "@/utils/flatten";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
+import { installWorkspaceRenderer } from "@/utils/workspace";
 import {
   ensureLayerId,
   isBackgroundObject,
@@ -153,10 +154,13 @@ export const Canvas = ({
     const canvas = new FabricCanvas(canvasRef.current, {
       width: clientWidth || 800,
       height: clientHeight || 600,
-      backgroundColor: "#1a1a1a",
+      // Transparent on purpose: the workspace colour is CSS and the
+      // transparency checkerboard is drawn on screen only (see workspace.ts).
+      backgroundColor: "",
     });
 
     fabricCanvasRef.current = canvas;
+    const uninstallWorkspace = installWorkspaceRenderer(canvas);
     let disposed = false;
     let ready = false;
     const loadController = new AbortController();
@@ -437,6 +441,7 @@ export const Canvas = ({
         capture: true,
       });
       resizeObserver.disconnect();
+      uninstallWorkspace();
       if (fabricCanvasRef.current === canvas) fabricCanvasRef.current = null;
       canvas.dispose();
     };
@@ -1036,7 +1041,7 @@ export const Canvas = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full rounded-lg overflow-hidden shadow-2xl border border-border"
+      className="relative w-full h-full rounded-lg overflow-hidden shadow-2xl border border-border bg-[hsl(var(--editor-canvas))]"
     >
       <canvas ref={canvasRef} role="img" aria-label="Image editing canvas" />
 
