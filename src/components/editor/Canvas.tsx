@@ -1,16 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import {
   Canvas as FabricCanvas,
-  Circle,
   Rect,
   PencilBrush,
-  IText,
   FabricImage,
-  Line,
   Point,
   Shadow,
-  Triangle,
-  Group,
 } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
 import {
@@ -37,6 +32,8 @@ import {
 } from "@/utils/editorObjects";
 import type { Tool } from "@/types/editor";
 import type { FabricObject } from "fabric";
+import { useShapeTool } from "@/hooks/useShapeTool";
+import { findBackgroundImage } from "@/utils/viewport";
 
 interface CanvasProps {
   activeTool: Tool;
@@ -530,85 +527,6 @@ export const Canvas = ({
       canvas.freeDrawingBrush = eraser;
     }
 
-    // Only create shapes when tool changes TO a shape tool (not on color changes)
-    const shapeTools: Tool[] = ["rectangle", "circle", "text", "line", "arrow"];
-    const isNewShapeTool = shapeTools.includes(activeTool) && prevTool !== activeTool;
-
-    if (isNewShapeTool) {
-      const centerX = (canvas.width || 800) / 2;
-      const centerY = (canvas.height || 600) / 2;
-
-      if (activeTool === "rectangle") {
-        const rect = new Rect({
-          left: centerX - 75,
-          top: centerY - 50,
-          fill: activeColor,
-          width: 150,
-          height: 100,
-          stroke: activeColor,
-          strokeWidth: 2,
-        });
-        canvas.add(rect);
-        canvas.setActiveObject(rect);
-      } else if (activeTool === "circle") {
-        const circle = new Circle({
-          left: centerX - 75,
-          top: centerY - 75,
-          fill: activeColor,
-          radius: 75,
-          stroke: activeColor,
-          strokeWidth: 2,
-        });
-        canvas.add(circle);
-        canvas.setActiveObject(circle);
-      } else if (activeTool === "text") {
-        const text = new IText("Double click to edit", {
-          left: centerX - 100,
-          top: centerY - 16,
-          fill: activeColor,
-          fontSize: 32,
-          fontFamily: "Arial",
-        });
-        canvas.add(text);
-        canvas.setActiveObject(text);
-      } else if (activeTool === "line") {
-        const line = new Line(
-          [centerX - 75, centerY, centerX + 75, centerY],
-          {
-            stroke: activeColor,
-            strokeWidth: brushWidth,
-          }
-        );
-        canvas.add(line);
-        canvas.setActiveObject(line);
-      } else if (activeTool === "arrow") {
-        const lineLength = 150;
-        const arrowLine = new Line(
-          [centerX - lineLength / 2, centerY, centerX + lineLength / 2 - 15, centerY],
-          {
-            stroke: activeColor,
-            strokeWidth: brushWidth,
-          }
-        );
-        const arrowHead = new Triangle({
-          left: centerX + lineLength / 2,
-          top: centerY,
-          fill: activeColor,
-          width: 20,
-          height: 20,
-          angle: 90,
-          originX: "center",
-          originY: "center",
-        });
-        const arrowGroup = new Group([arrowLine, arrowHead], {
-          left: centerX - lineLength / 2,
-          top: centerY - 10,
-        });
-        canvas.add(arrowGroup);
-        canvas.setActiveObject(arrowGroup);
-      }
-    }
-
     // Crop tool overlay
     if (activeTool === "crop" && prevTool !== "crop") {
       addCropOverlay(canvas);
@@ -642,26 +560,37 @@ export const Canvas = ({
   const addCropOverlay = (canvas: FabricCanvas) => {
     removeCropOverlay(canvas);
 
-    const canvasW = canvas.width || 800;
-    const canvasH = canvas.height || 600;
-    const cropW = canvasW * 0.6;
-    const cropH = canvasH * 0.6;
-
+    // Frame the photo itself (scene coordinates), falling back to the visible
+    // area. Viewport pixels would misplace the frame after zoom or pan.
+    const background = findBackgroundImage(canvas);
+    const zoom = canvas.getZoom() || 1;
+    const vpt = canvas.viewportTransform;
+    const area = background
+      ? background.getBoundingRect()
+      : {
+          left: -vpt[4] / zoom,
+          top: -vpt[5] / zoom,
+          width: canvas.width / zoom,
+          height: canvas.height / zoom,
+        };
+    const inset = 0.1;
     const cropRect = new Rect({
-      left: (canvasW - cropW) / 2,
-      top: (canvasH - cropH) / 2,
-      width: cropW,
-      height: cropH,
+      left: area.left + area.width * inset,
+      top: area.top + area.height * inset,
+      width: area.width * (1 - inset * 2),
+      height: area.height * (1 - inset * 2),
       fill: "rgba(255, 255, 255, 0.05)",
       stroke: "#a855f7",
       strokeWidth: 2,
+      strokeUniform: true,
       strokeDashArray: [8, 4],
       cornerColor: "#a855f7",
-      cornerSize: 10,
+      cornerSize: 12,
+      touchCornerSize: 28,
       transparentCorners: false,
-      hasRotatingPoint: false,
       lockRotation: true,
     });
+    cropRect.setControlVisible("mtr", false);
     (cropRect as unknown as Record<string, unknown>).__isCropOverlay = true;
 
     canvas.add(cropRect);
@@ -1037,6 +966,16 @@ export const Canvas = ({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [activeTool, cancelMarquee]);
+
+  useShapeTool({
+    canvasRef: fabricCanvasRef,
+    canvasKey: uploadedImage,
+    activeTool,
+    color: activeColor,
+    strokeWidth: brushWidth,
+    spaceDownRef,
+    onToolChange,
+  });
 
   return (
     <div

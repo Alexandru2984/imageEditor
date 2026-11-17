@@ -25,6 +25,7 @@ import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
+import { applyColor } from "@/utils/shapes";
 import {
   Paintbrush,
   Bold,
@@ -428,7 +429,7 @@ export const PropertiesPanel = ({
     if (!fabricCanvas) return;
     const active = getEditableActiveObject();
     if (active) {
-      active.set("fill", color);
+      applyColor(active, color);
       fabricCanvas.renderAll();
       readSelectedObject();
     }

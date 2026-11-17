@@ -14,6 +14,23 @@ async function uploadImage(page: Page) {
   await expect(page.getByText("Remove BG")).toBeVisible();
 }
 
+async function canvasCenter(page: Page): Promise<{ x: number; y: number }> {
+  const box = await page.locator("canvas.upper-canvas").boundingBox();
+  if (!box) throw new Error("Canvas is not visible");
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+/** Arm a shape tool and click the canvas centre to drop a default shape. */
+async function addShape(page: Page, toolLabel = "Rectangle (R)") {
+  await page.getByRole("button", { name: toolLabel }).click();
+  const center = await canvasCenter(page);
+  await page.mouse.click(center.x, center.y);
+  await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+}
+
 async function getAutosaveJson(page: Page): Promise<string | null> {
   return page.evaluate(
     () =>
@@ -290,8 +307,8 @@ test("quarantines an unsafe IndexedDB autosave before Fabric loads it", async ({
 test("adding a shape selects it, and undo removes it", async ({ page }) => {
   await uploadImage(page);
 
-  // Clicking a shape tool drops a shape at center and selects it
-  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  // Arming a shape tool and clicking the canvas drops a selected shape
+  await addShape(page);
   await expect(page.getByText("Object Properties")).toBeVisible();
 
   // Ctrl+Z removes the shape, clearing the selection
@@ -325,7 +342,7 @@ test("keyboard slider edits always reach history and autosave", async ({
   page,
 }) => {
   await uploadImage(page);
-  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await addShape(page);
 
   const savedRectangleOpacity = async () => {
     const json = await getAutosaveJson(page);
@@ -352,7 +369,7 @@ test("commits autosaved edits and restores them after reload", async ({
   page,
 }) => {
   await uploadImage(page);
-  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await addShape(page);
 
   await expect
     .poll(() => getAutosaveJson(page))
@@ -370,7 +387,7 @@ test("new project cannot be overwritten by a pending autosave", async ({
   page,
 }) => {
   await uploadImage(page);
-  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await addShape(page);
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("button", { name: "Start new" }).click();
 
@@ -392,7 +409,7 @@ test("a newer clear in another tab blocks a stale pending autosave", async ({
   await expect.poll(() => getAutosaveJson(page)).not.toBeNull();
   await page.waitForTimeout(900);
 
-  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  await addShape(page);
   await page.waitForTimeout(50);
   await secondPage.getByRole("button", { name: "New", exact: true }).click();
   await secondPage.getByRole("button", { name: "Start new" }).click();
@@ -608,6 +625,70 @@ test("fits an uploaded image centred in the workspace", async ({ page }) => {
       })
     )
     .toEqual([true, true, true]);
+});
+
+test("drag draws a shape where the pointer went, even when zoomed", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Rectangle (R)" }).click();
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x - 60, center.y - 40);
+  await page.mouse.down();
+  await page.mouse.move(center.x, center.y, { steps: 4 });
+  await page.mouse.move(center.x + 60, center.y + 40, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.getByText("Object Properties")).toBeVisible();
+
+  // The drawn rectangle sits under the drag: its centre pixel is the fill.
+  const pixel = await page.evaluate(() => {
+    const lower = document.querySelector("canvas") as HTMLCanvasElement;
+    const ctx = lower.getContext("2d")!;
+    return Array.from(
+      ctx.getImageData(
+        Math.floor(lower.width / 2),
+        Math.floor(lower.height / 2),
+        1,
+        1
+      ).data
+    );
+  });
+  // #a855f7 is the default active colour.
+  expect(pixel.slice(0, 3)).toEqual([168, 85, 247]);
+});
+
+test("clicking a shape tool twice still adds a second shape", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  await addShape(page);
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  await expect(page.getByText("Rectangle 2", { exact: true })).toBeVisible();
+});
+
+test("Ctrl+Shift+Z redoes an undone edit", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  await page.getByText("Image Editor").click();
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("button", { name: "Redo" })).toBeEnabled();
+  await page.keyboard.press("Control+Shift+Z");
+  await expect(page.getByRole("button", { name: "Redo" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();
+});
+
+test("colour swatches recolour a line's stroke", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page, "Line (L)");
+  await page.getByRole("button", { name: "Use color #22c55e" }).click();
+  await expect
+    .poll(async () => {
+      const json = await getAutosaveJson(page);
+      const objects = json ? (JSON.parse(json).objects as Array<Record<string, unknown>>) : [];
+      return objects.find((object) => object.type === "Line")?.stroke ?? null;
+    })
+    .toBe("#22c55e");
 });
 
 test("PNG export keeps transparent pixels transparent", async ({ page }) => {

@@ -7,6 +7,7 @@ export type EditorFabricObject = FabricObject & {
   __locked?: boolean;
   __isCropOverlay?: boolean;
   __isMarquee?: boolean;
+  __isPreview?: boolean;
   erasable?: boolean;
   name?: string;
 };
@@ -43,9 +44,16 @@ export function ensureLayerId(
 export const isEditorChrome = (object: FabricObject): boolean => {
   const editorObject = object as EditorFabricObject;
   return (
-    editorObject.__isCropOverlay === true || editorObject.__isMarquee === true
+    editorObject.__isCropOverlay === true ||
+    editorObject.__isMarquee === true ||
+    editorObject.__isPreview === true
   );
 };
+
+/** Flag a transient helper (drawing preview) so history and layers ignore it. */
+export function markEditorChrome(object: FabricObject): void {
+  (object as EditorFabricObject).__isPreview = true;
+}
 
 export const isBackgroundObject = (object: FabricObject): boolean =>
   (object as EditorFabricObject).__isBackground === true;

@@ -48,6 +48,8 @@ export function useKeyboardShortcuts({
       }
 
       const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+      // With Shift or Caps Lock held, letters arrive upper-case ("Z").
+      const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
       // Delete / Backspace — delete selected object
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -67,7 +69,7 @@ export function useKeyboardShortcuts({
       }
 
       // Ctrl+Z — undo
-      if (isCtrlOrMeta && e.key === "z" && !e.shiftKey) {
+      if (isCtrlOrMeta && key === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
         return;
@@ -75,8 +77,8 @@ export function useKeyboardShortcuts({
 
       // Ctrl+Y or Ctrl+Shift+Z — redo
       if (
-        (isCtrlOrMeta && e.key === "y") ||
-        (isCtrlOrMeta && e.key === "z" && e.shiftKey)
+        (isCtrlOrMeta && key === "y") ||
+        (isCtrlOrMeta && key === "z" && e.shiftKey)
       ) {
         e.preventDefault();
         redo();
@@ -84,7 +86,7 @@ export function useKeyboardShortcuts({
       }
 
       // Ctrl+A — select all
-      if (isCtrlOrMeta && e.key === "a") {
+      if (isCtrlOrMeta && key === "a") {
         if (!canvas) return;
         e.preventDefault();
         const objects = canvas
@@ -156,7 +158,7 @@ export function useKeyboardShortcuts({
 
       // Tool shortcuts (only without modifiers)
       if (!isCtrlOrMeta && !e.altKey) {
-        switch (e.key.toLowerCase()) {
+        switch (key) {
           case "v":
             onToolChange("select");
             break;
@@ -177,6 +179,12 @@ export function useKeyboardShortcuts({
             break;
           case "a":
             onToolChange("arrow");
+            break;
+          case "y":
+            onToolChange("triangle");
+            break;
+          case "s":
+            onToolChange("star");
             break;
           case "t":
             onToolChange("text");

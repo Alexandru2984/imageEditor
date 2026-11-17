@@ -5,8 +5,10 @@ import {
   Eraser,
   Square,
   Circle,
+  Triangle,
+  Star,
   Minus,
-  MoveRight,
+  MoveUpRight,
   Type,
   Crop,
   SquareDashed,
@@ -47,9 +49,11 @@ const drawingTools: { id: Tool; icon: typeof MousePointer2; label: string }[] = 
 
 const shapeTools: { id: Tool; icon: typeof MousePointer2; label: string }[] = [
   { id: "rectangle", icon: Square, label: "Rectangle (R)" },
-  { id: "circle", icon: Circle, label: "Circle (C)" },
+  { id: "circle", icon: Circle, label: "Ellipse (C)" },
+  { id: "triangle", icon: Triangle, label: "Triangle (Y)" },
+  { id: "star", icon: Star, label: "Star (S)" },
   { id: "line", icon: Minus, label: "Line (L)" },
-  { id: "arrow", icon: MoveRight, label: "Arrow (A)" },
+  { id: "arrow", icon: MoveUpRight, label: "Arrow (A)" },
 ];
 
 const otherTools: { id: Tool; icon: typeof MousePointer2; label: string }[] = [

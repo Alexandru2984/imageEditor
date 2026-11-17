@@ -6,7 +6,8 @@ import {
   type CanvasSnapshot,
 } from "@/utils/canvasSnapshot";
 import { fireCanvasEvent, HISTORY_RESTORED } from "@/utils/canvasEvents";
-import { normalizeEditorObjects } from "@/utils/editorObjects";
+import { isEditorChrome, normalizeEditorObjects } from "@/utils/editorObjects";
+import type { FabricObject } from "fabric";
 
 const MAX_HISTORY = 50;
 const MAX_HISTORY_JSON_CHARS = 24 * 1024 * 1024;
@@ -245,9 +246,9 @@ export function useUndoRedo(
     currentIndexRef.current = -1;
 
     const handleSave = (e?: { target?: unknown }) => {
-      // Crop/marquee overlays are UI chrome, not document content
-      const target = e?.target as Record<string, unknown> | undefined;
-      if (target?.__isCropOverlay || target?.__isMarquee) return;
+      // Crop/marquee overlays and drawing previews are UI chrome
+      const target = e?.target as FabricObject | undefined;
+      if (target && isEditorChrome(target)) return;
       scheduleSave();
     };
 

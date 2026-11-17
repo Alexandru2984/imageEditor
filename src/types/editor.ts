@@ -4,6 +4,8 @@ export type Tool =
   | "eraser"
   | "rectangle"
   | "circle"
+  | "triangle"
+  | "star"
   | "line"
   | "arrow"
   | "text"
