@@ -55,9 +55,29 @@ export function planRasterization(
 
   return {
     multiplier,
-    outputWidth: Math.max(1, Math.floor(region.width * multiplier)),
-    outputHeight: Math.max(1, Math.floor(region.height * multiplier)),
+    outputWidth: snapPixels(region.width * multiplier),
+    outputHeight: snapPixels(region.height * multiplier),
     limited: multiplier < requestedMultiplier - Number.EPSILON,
+  };
+}
+
+// Scene sizes times a multiplier land a hair under whole numbers
+// (1280 × 0.5625 / 0.5625 = 719.9999…). Treat those as the whole number.
+const PIXEL_EPSILON = 1e-6;
+const snapPixels = (value: number): number =>
+  Math.max(1, Math.floor(value + PIXEL_EPSILON));
+
+/**
+ * Crop rectangle to hand Fabric so its output canvas is exactly the planned
+ * size. Fabric sizes the element to width × multiplier and the DOM truncates
+ * that to an integer, so aim half a pixel past the planned edge.
+ */
+function cropFor(region: TBBox, plan: RasterPlan) {
+  return {
+    left: region.left,
+    top: region.top,
+    width: (plan.outputWidth + 0.5) / plan.multiplier,
+    height: (plan.outputHeight + 0.5) / plan.multiplier,
   };
 }
 
@@ -137,10 +157,7 @@ export function flattenRegion(
       format: "png",
       quality: 1,
       multiplier: plan.multiplier,
-      left: region.left,
-      top: region.top,
-      width: region.width,
-      height: region.height,
+      ...cropFor(region, plan),
       enableRetinaScaling: false,
     })
   );
@@ -181,12 +198,7 @@ export async function renderRegionBlob(
 ): Promise<{ blob: Blob; plan: RasterPlan }> {
   const plan = planRasterization(region, requestedMultiplier);
   const element = renderWithIdentityViewport(canvas, () =>
-    canvas.toCanvasElement(plan.multiplier, {
-      left: region.left,
-      top: region.top,
-      width: region.width,
-      height: region.height,
-    })
+    canvas.toCanvasElement(plan.multiplier, cropFor(region, plan))
   );
 
   const matte = options.matte ?? (format === "jpeg" ? "#ffffff" : null);

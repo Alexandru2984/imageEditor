@@ -71,3 +71,20 @@ describe("canvas rasterization limits", () => {
     expect(fake.skipControlsDrawing).toBe(false);
   });
 });
+
+describe("planRasterization rounding", () => {
+  it("does not lose a pixel to floating-point error", () => {
+    const scale = 0.5625;
+    const plan = planRasterization(
+      { left: 0, top: 0, width: 1280 * scale, height: 720 * scale },
+      1280 / (1280 * scale)
+    );
+    expect(plan.outputWidth).toBe(1280);
+    expect(plan.outputHeight).toBe(720);
+    const awkward = planRasterization(
+      { left: 0, top: 0, width: 719.9999999999, height: 3 },
+      1
+    );
+    expect(awkward.outputWidth).toBe(720);
+  });
+});
