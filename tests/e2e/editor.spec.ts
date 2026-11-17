@@ -564,6 +564,43 @@ async function samplePixel(
   );
 }
 
+test("fits an uploaded image centred in the workspace", async ({ page }) => {
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 600;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#0000ff";
+    ctx.fillRect(0, 0, 800, 600);
+    ctx.fillStyle = "#ffff00";
+    ctx.fillRect(350, 250, 100, 100);
+    return canvas.toDataURL("image/png").split(",")[1]!;
+  });
+  await page.getByTestId("image-input").setInputFiles({
+    name: "centred.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(base64, "base64"),
+  });
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  // The yellow square sits at the image centre, so it must be under the
+  // centre of the visible canvas when the image is fitted correctly.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const lower = document.querySelector("canvas") as HTMLCanvasElement;
+        const ctx = lower.getContext("2d")!;
+        const pixel = ctx.getImageData(
+          Math.floor(lower.width / 2),
+          Math.floor(lower.height / 2),
+          1,
+          1
+        ).data;
+        return [pixel[0]! > 200, pixel[1]! > 200, pixel[2]! < 60];
+      })
+    )
+    .toEqual([true, true, true]);
+});
+
 test("PNG export keeps transparent pixels transparent", async ({ page }) => {
   await uploadTransparentPng(page);
   const downloadPromise = page.waitForEvent("download");

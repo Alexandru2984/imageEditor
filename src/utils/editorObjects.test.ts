@@ -77,3 +77,14 @@ describe("editor object metadata", () => {
     expect(isReadOnlySelection(cropOverlay as FabricObject)).toBe(true);
   });
 });
+
+describe("fabric object defaults", () => {
+  it("places new objects by their top-left corner like earlier builds", () => {
+    const rect = new Rect({ left: 10, top: 20, width: 100, height: 50 });
+    expect(rect.originX).toBe("left");
+    expect(rect.originY).toBe("top");
+    const bounds = rect.getBoundingRect();
+    expect(Math.round(bounds.left)).toBe(10);
+    expect(Math.round(bounds.top)).toBe(20);
+  });
+});
