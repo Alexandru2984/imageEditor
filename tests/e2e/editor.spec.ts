@@ -1,24 +1,11 @@
 import { test, expect, type FileChooser, type Page } from "@playwright/test";
-
-// A valid 4x4 PNG (red, green, blue and white quadrants) for the upload input.
-const PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAI0lEQVR42mN47+LyH4SVjsaBMQOGgHXTt/8g/OvXLzDGEAAAbBUtZYYAvvUAAAAASUVORK5CYII=";
-
-async function uploadImage(page: Page) {
-  await page.getByTestId("image-input").setInputFiles({
-    name: "test.png",
-    mimeType: "image/png",
-    buffer: Buffer.from(PNG_BASE64, "base64"),
-  });
-  // The editor replaces the upload screen with the canvas + actions
-  await expect(page.getByText("Remove BG")).toBeVisible();
-}
-
-async function canvasCenter(page: Page): Promise<{ x: number; y: number }> {
-  const box = await page.locator("canvas.upper-canvas").boundingBox();
-  if (!box) throw new Error("Canvas is not visible");
-  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-}
+import {
+  PNG_BASE64,
+  autosavedObjects,
+  canvasCenter,
+  getAutosaveJson,
+  uploadImage,
+} from "./helpers";
 
 const SHAPE_LABELS = new Set([
   "Rectangle (R)",
@@ -52,39 +39,6 @@ async function addShape(page: Page, toolLabel = "Rectangle (R)") {
   await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute(
     "aria-pressed",
     "true"
-  );
-}
-
-async function getAutosaveJson(page: Page): Promise<string | null> {
-  return page.evaluate(
-    () =>
-      new Promise<string | null>((resolve, reject) => {
-        const open = indexedDB.open("image-editor", 1);
-        open.onupgradeneeded = () => {
-          if (!open.result.objectStoreNames.contains("projects")) {
-            open.result.createObjectStore("projects");
-          }
-        };
-        open.onerror = () => reject(open.error);
-        open.onsuccess = () => {
-          const db = open.result;
-          const tx = db.transaction("projects", "readonly");
-          const request = tx.objectStore("projects").get("autosave");
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const value = request.result as
-              | { snapshot?: { json?: unknown } }
-              | undefined;
-            resolve(
-              typeof value?.snapshot?.json === "string"
-                ? value.snapshot.json
-                : null
-            );
-          };
-          tx.oncomplete = () => db.close();
-          tx.onabort = () => db.close();
-        };
-      })
   );
 }
 
@@ -880,11 +834,6 @@ test("drawing and erasing remain compatible with saved projects", async ({
   expect(pageErrors).toEqual([]);
 });
 
-async function autosavedObjects(page: Page): Promise<Array<Record<string, unknown>>> {
-  const json = await getAutosaveJson(page);
-  return json ? (JSON.parse(json).objects as Array<Record<string, unknown>>) : [];
-}
-
 test("crossing the mobile breakpoint keeps the canvas and its history", async ({
   page,
 }) => {
@@ -1009,35 +958,6 @@ test("Shift+H mirrors the selected layer", async ({ page }) => {
   await expect
     .poll(async () => (await autosavedObjects(page)).find((o) => o.type === "Rect")?.flipX)
     .toBe(true);
-});
-
-test.describe("on a phone", () => {
-  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-
-  test("fits the screen without sideways scrolling and opens the panel sheet", async ({
-    page,
-  }) => {
-    await expect(page.getByRole("button", { name: "Upload an image" })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-
-    await page.getByTestId("image-input").setInputFiles({
-      name: "test.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(PNG_BASE64, "base64"),
-    });
-    await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-
-    await page.getByRole("button", { name: "Toggle properties" }).click();
-    await expect(page.getByRole("tab", { name: "Layers" })).toBeVisible();
-    await page.getByRole("tab", { name: "Layers" }).click();
-    await expect(
-      page.locator("[data-layer-id]").filter({ hasText: "Background" })
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Close panel" }).click();
-    await expect(page.getByRole("tab", { name: "Layers" })).toHaveCount(0);
-  });
 });
 
 test("presets, auto enhance and compare are undoable and never leak into saves", async ({

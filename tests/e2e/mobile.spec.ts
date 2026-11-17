@@ -1,0 +1,132 @@
+import { test, expect, type Locator, type Page } from "@playwright/test";
+import { PNG_BASE64, autosavedObjects, canvasCenter } from "./helpers";
+
+// Runs in the "mobile" project (a touch phone, see playwright.config.ts).
+
+async function expectNoSidewaysScroll(page: Page) {
+  const { scrollWidth, innerWidth } = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    innerWidth: window.innerWidth,
+  }));
+  expect(scrollWidth).toBeLessThanOrEqual(innerWidth);
+}
+
+/**
+ * The element ends up entirely on screen, not clipped by the phone's edges.
+ * Retried, because sheets slide in from below.
+ */
+async function expectOnScreen(page: Page, locator: Locator) {
+  await expect(locator).toBeVisible();
+  await expect(async () => {
+    const box = await locator.boundingBox();
+    const viewport = page.viewportSize();
+    if (!box || !viewport) throw new Error("Nothing to measure");
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 0.5);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 0.5);
+  }).toPass({ timeout: 3_000 });
+}
+
+async function openPhoto(page: Page) {
+  await page.getByTestId("image-input").setInputFiles({
+    name: "test.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_BASE64, "base64"),
+  });
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+}
+
+async function tapCanvasCenter(page: Page) {
+  const center = await canvasCenter(page);
+  await page.touchscreen.tap(center.x, center.y);
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.goto("/");
+});
+
+test("the start screen fits the phone and the sample photo opens", async ({ page }) => {
+  await expect(page.locator("h1")).toContainText("Free photo editor");
+  await expectOnScreen(page, page.getByRole("button", { name: "Upload an image" }));
+  await expectNoSidewaysScroll(page);
+
+  await page.getByText("Try a sample photo").tap();
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await expectOnScreen(page, page.getByRole("button", { name: "Export", exact: true }));
+  await expectNoSidewaysScroll(page);
+});
+
+test("fits the screen without sideways scrolling and opens the panel sheet", async ({
+  page,
+}) => {
+  await openPhoto(page);
+  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
+  await expectNoSidewaysScroll(page);
+
+  await page.getByRole("button", { name: "Toggle properties" }).tap();
+  await expect(page.getByRole("tab", { name: "Layers" })).toBeVisible();
+  await page.getByRole("tab", { name: "Layers" }).tap();
+  await expect(page.locator("[data-layer-id]").filter({ hasText: "Background" })).toBeVisible();
+  await page.getByRole("button", { name: "Close panel" }).tap();
+  await expect(page.getByRole("tab", { name: "Layers" })).toHaveCount(0);
+});
+
+test("tapping with the Text tool adds text that can be styled", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Text (T)" }).tap();
+  await tapCanvasCenter(page);
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((object) => object.type === "IText"))
+    .toBe(true);
+  // Typing straight away edits the new text.
+  await page.keyboard.press("Escape");
+
+  const meme = page.getByRole("button", { name: "Meme text style" });
+  if (!(await meme.isVisible())) {
+    await page.getByRole("button", { name: "Toggle properties" }).tap();
+  }
+  await meme.tap();
+  await expect
+    .poll(
+      async () =>
+        (await autosavedObjects(page)).find((object) => object.type === "IText")?.fontFamily
+    )
+    .toBe("Anton");
+  await expectNoSidewaysScroll(page);
+});
+
+test("stickers and the export dialog fit on the phone", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Stickers" }).tap();
+  const sticker = page.getByRole("button", { name: "Add sticker 🔥" });
+  await expectOnScreen(page, sticker);
+  await sticker.tap();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((object) => object.text === "🔥"))
+    .toBe(true);
+
+  await page.getByRole("button", { name: "Export", exact: true }).tap();
+  const dialog = page.getByRole("dialog");
+  await expectOnScreen(page, dialog);
+  await expectOnScreen(page, dialog.getByRole("button", { name: "Download" }));
+  await page.getByRole("radio", { name: "JPG", exact: true }).tap();
+  await expect(page.getByTestId("export-dimensions")).toBeVisible();
+  await expectNoSidewaysScroll(page);
+});
+
+test("the crop bar fits on the phone and applies a square crop", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Crop (K)" }).tap();
+  await expectOnScreen(page, page.getByRole("button", { name: "Apply crop" }));
+  await expectOnScreen(page, page.getByRole("button", { name: "Cancel" }));
+
+  const square = page.getByRole("radio", { name: "1:1" });
+  await square.tap();
+  await expect(square).toHaveAttribute("aria-checked", "true");
+  await expect(page.getByTestId("crop-size")).toHaveText(/^(\d+) × \1 px$/);
+
+  await page.getByRole("button", { name: "Apply crop" }).tap();
+  await expect(page.getByRole("button", { name: "Apply crop" })).toHaveCount(0);
+  await expectNoSidewaysScroll(page);
+});
