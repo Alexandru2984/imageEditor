@@ -140,19 +140,28 @@ function assertSafeFilter(object: Record<string, unknown>): void {
 
 // Formal shape of a project file. Zod guards the structure; assertSafeSources
 // (below) enforces the security invariant that every image source is inline.
-const SnapshotSchema = z
-  .object({
-    json: z.string().max(MAX_SNAPSHOT_JSON_CHARS),
-    srcs: z.array(z.string()).max(MAX_IMAGE_SOURCES),
-  })
-  .strict();
+const SnapshotSchema = z.strictObject({
+  json: z.string().max(MAX_SNAPSHOT_JSON_CHARS),
+  srcs: z.array(z.string()).max(MAX_IMAGE_SOURCES),
+});
 
-const ProjectFileSchema = z
-  .object({
-    version: z.literal(FILE_VERSION).optional(),
-    snapshot: SnapshotSchema,
-  })
-  .strict();
+const ProjectFileSchema = z.strictObject({
+  version: z.literal(FILE_VERSION).optional(),
+  snapshot: SnapshotSchema,
+});
+
+/**
+ * Reject oversized collections before any schema walks their elements. The
+ * schema enforces the same bound; this check makes the cost of a hostile
+ * multi-million-entry array O(1) regardless of the validator's internals.
+ */
+function assertBoundedSnapshotShape(value: unknown): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const srcs = (value as Record<string, unknown>).srcs;
+  if (Array.isArray(srcs) && srcs.length > MAX_IMAGE_SOURCES) {
+    throw new Error("Project contains too many embedded images");
+  }
+}
 
 const estimatedDecodedBytes = (dataUrl: string): number => {
   const comma = dataUrl.indexOf(",");
@@ -368,6 +377,7 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
 
 /** Validate an untrusted snapshot before Fabric is allowed to deserialize it. */
 export function validateProjectSnapshot(value: unknown): CanvasSnapshot {
+  assertBoundedSnapshotShape(value);
   const result = SnapshotSchema.safeParse(value);
   if (!result.success) throw new Error("Not a valid project snapshot");
   const snapshot = result.data as CanvasSnapshot;
@@ -401,6 +411,9 @@ export async function readProjectFile(
     payload = JSON.parse(text);
   } catch {
     throw new Error("Project file is not valid JSON");
+  }
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    assertBoundedSnapshotShape((payload as Record<string, unknown>).snapshot);
   }
   const result = ProjectFileSchema.safeParse(payload);
   if (!result.success) {

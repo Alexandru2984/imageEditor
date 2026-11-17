@@ -51,6 +51,19 @@ describe("readProjectFile", () => {
     await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
   });
 
+  it("rejects a hostile oversized srcs collection before walking it", async () => {
+    const srcs = new Array(2_000_000).fill(0);
+    const file = fileOf(JSON.stringify({ snapshot: { json: "{}", srcs } }));
+    await expect(readProjectFile(file)).rejects.toThrow(/too many embedded images/);
+  });
+
+  it("rejects unknown top-level project keys", async () => {
+    const file = fileOf(
+      JSON.stringify({ snapshot: { json: '{"objects":[]}', srcs: [] }, extra: 1 })
+    );
+    await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
+  });
+
   it("rejects a snapshot whose json isn't a string", async () => {
     const file = fileOf(JSON.stringify({ snapshot: { json: 5, srcs: [] } }));
     await expect(readProjectFile(file)).rejects.toThrow(/valid project file/);
