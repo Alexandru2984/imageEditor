@@ -5,13 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Weekly: catch a moved or broken background-removal model download.
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # Cancel superseded runs on the same ref
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,13 +38,15 @@ jobs:
         run: npm run audit:signatures
       - name: Lint
         run: npm run lint
+      - name: Lint shell scripts
+        run: npm run lint:scripts
       - name: Unit tests
         run: npm test
       - name: Build (includes typecheck gate)
         run: npm run build
 
   e2e:
-    name: End-to-end (Playwright)
+    name: End-to-end (desktop and phone)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -66,3 +72,47 @@ jobs:
             test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  nginx:
+    name: Production Nginx site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Install Nginx
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends nginx
+      - name: Serve the build through the site and check headers, caching and 404s
+        run: npm run test:nginx
+
+  ai-model:
+    name: Background removal with the real model
+    # Downloads the pinned model from Hugging Face: weekly and on demand only.
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install Playwright Chromium
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Run the model end to end
+        env:
+          RUN_AI_E2E: "1"
+        run: npx playwright test --project=chromium -g "background-removal model"
