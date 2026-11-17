@@ -16,6 +16,7 @@ import {
   XCircle,
   ImagePlus,
   Pipette,
+  Smile,
 } from "lucide-react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,7 @@ import {
   removeSelectedObjects,
 } from "@/utils/editorObjects";
 import { isShapeKind, type ShapeKind } from "@/utils/shapes";
+import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
 import { cn } from "@/lib/utils";
 
 interface ToolbarProps {
@@ -80,6 +82,7 @@ export const Toolbar = ({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const imageLoadControllerRef = useRef<AbortController | null>(null);
   const [shapesOpen, setShapesOpen] = useState(false);
+  const [stickersOpen, setStickersOpen] = useState(false);
   const [lastShape, setLastShape] = useState<ShapeKind>("rectangle");
   const tooltipSide = vertical ? "right" : "top";
 
@@ -233,6 +236,58 @@ export const Toolbar = ({
     </Popover>
   );
 
+  const stickersButton = (
+    <Popover open={stickersOpen} onOpenChange={setStickersOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Stickers"
+              className={cn(buttonSize, IDLE_CLASS)}
+            >
+              <Smile className="h-[18px] w-[18px]" />
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent side={tooltipSide}>Stickers</TooltipContent>
+      </Tooltip>
+      <PopoverContent
+        side={vertical ? "right" : "top"}
+        align="start"
+        className="max-h-[min(24rem,60dvh)] w-[19rem] overflow-y-auto p-2"
+      >
+        {STICKER_GROUPS.map((group) => (
+          <div key={group.title} className="mb-2 last:mb-0">
+            <p className="px-1 pb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              {group.title}
+            </p>
+            <div className="grid grid-cols-8 gap-0.5">
+              {group.items.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  aria-label={`Add sticker ${emoji}`}
+                  onClick={() => {
+                    if (!fabricCanvas) return;
+                    addSticker(fabricCanvas, emoji);
+                    onToolChange("select");
+                    setStickersOpen(false);
+                  }}
+                  className="flex aspect-square items-center justify-center rounded-md text-[22px] leading-none transition-transform hover:scale-110 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  style={{ fontFamily: STICKER_FONT }}
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+
   const actionButton = (
     Icon: typeof Trash2,
     label: string,
@@ -281,6 +336,7 @@ export const Toolbar = ({
       {separator}
       {shapesButton}
       {SECONDARY_TOOLS.map(renderTool)}
+      {stickersButton}
       {separator}
       {actionButton(ImagePlus, "Add image layer", "Add image layer", () =>
         imageInputRef.current?.click()

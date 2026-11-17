@@ -10,6 +10,7 @@ import {
   type ShapeKind,
 } from "@/utils/shapes";
 import { markEditorChrome } from "@/utils/editorObjects";
+import { DEFAULT_TEXT_FONT } from "@/utils/fonts";
 import type { Tool } from "@/types/editor";
 
 const CLICK_TOLERANCE_PX = 4;
@@ -98,7 +99,7 @@ export function useShapeTool({
         top: point.y - fontSize / 2,
         fill: styleRef.current.color,
         fontSize,
-        fontFamily: "Arial",
+        fontFamily: DEFAULT_TEXT_FONT,
       });
       finish(text);
       text.enterEditing();

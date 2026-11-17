@@ -17,15 +17,10 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { toast } from "sonner";
 import { applyColor } from "@/utils/shapes";
+import { isSticker } from "@/utils/stickers";
+import { TextControls, type ApplyMode, type TextObject } from "./TextControls";
 import {
-  Bold,
-  Italic,
-  Underline,
-  AlignLeft,
-  AlignCenter,
-  AlignRight,
   AlignStartVertical,
   AlignCenterVertical,
   AlignEndVertical,
@@ -331,55 +326,6 @@ export const PropertiesPanel = ({
     }
   };
 
-  const handleFontSizeChange = (value: number[]) => {
-    if (!fabricCanvas) return;
-    const fontSize = value[0];
-    if (fontSize === undefined) return;
-    const active = getEditableActiveObject() as TextlikeObject | undefined;
-    if (active && active.fontSize !== undefined) {
-      active.set("fontSize", fontSize);
-      fabricCanvas.renderAll();
-      readSelectedObject();
-      scheduleObjectCommit(active);
-    }
-  };
-
-  const handleFontFamilyChange = (family: string) => {
-    if (!fabricCanvas) return;
-    const active = getEditableActiveObject() as TextlikeObject | undefined;
-    if (active && active.fontFamily !== undefined) {
-      active.set("fontFamily", family);
-      fabricCanvas.renderAll();
-      readSelectedObject();
-    }
-  };
-
-  const toggleTextStyle = (key: "fontWeight" | "fontStyle" | "underline") => {
-    if (!fabricCanvas) return;
-    const active = getEditableActiveObject() as TextlikeObject | undefined;
-    if (!active) return;
-    if (key === "fontWeight") {
-      active.set("fontWeight", active.fontWeight === "bold" ? "normal" : "bold");
-    } else if (key === "fontStyle") {
-      active.set("fontStyle", active.fontStyle === "italic" ? "normal" : "italic");
-    } else {
-      active.set("underline", !active.underline);
-    }
-    fabricCanvas.fire("object:modified", { target: active });
-    fabricCanvas.renderAll();
-    readSelectedObject();
-  };
-
-  const setTextAlign = (align: string) => {
-    if (!fabricCanvas) return;
-    const active = getEditableActiveObject() as TextlikeObject | undefined;
-    if (!active) return;
-    active.set("textAlign", align);
-    fabricCanvas.fire("object:modified", { target: active });
-    fabricCanvas.renderAll();
-    readSelectedObject();
-  };
-
   // Align the selected object within the photo or, without one, the visible
   // canvas region (scene coordinates, so it stays correct under zoom/pan).
   const alignObject = (
@@ -426,21 +372,28 @@ export const PropertiesPanel = ({
     fabricCanvas.renderAll();
   };
 
-  const isTextObject =
-    selectedProps?.type === "i-text" ||
-    selectedProps?.type === "text" ||
-    selectedProps?.type === "textbox";
+  /** Apply text styling to the selected text layer. */
+  const applyTextChanges = (changes: Record<string, unknown>, mode: ApplyMode) => {
+    if (!fabricCanvas) return;
+    const active = getEditableActiveObject();
+    if (!active) return;
+    active.set(changes);
+    active.setCoords();
+    fabricCanvas.requestRenderAll();
+    readSelectedObject();
+    if (mode === "schedule") {
+      scheduleObjectCommit(active);
+      return;
+    }
+    const flushed = flushScheduledObjectCommit();
+    if (flushed !== active) fireObjectModified(active);
+  };
 
-  const fontFamilies = [
-    "Arial",
-    "Helvetica",
-    "Times New Roman",
-    "Courier New",
-    "Georgia",
-    "Verdana",
-    "Impact",
-    "Comic Sans MS",
-  ];
+  const isTextObject =
+    (selectedProps?.type === "i-text" ||
+      selectedProps?.type === "text" ||
+      selectedProps?.type === "textbox") &&
+    !isSticker({ fontFamily: selectedProps?.fontFamily });
 
   return (
     <ScrollArea className="h-full w-full">
@@ -493,6 +446,9 @@ export const PropertiesPanel = ({
           </div>
         </div>
 
+        {/* Brush settings matter while drawing; a selection shows its own props */}
+        {!selectedProps && (
+          <>
         <Separator />
 
         {/* Brush */}
@@ -564,6 +520,9 @@ export const PropertiesPanel = ({
 
         <Separator />
 
+          </>
+        )}
+
         {/* Object Properties (when selected) */}
         {selectedProps && (
           <>
@@ -578,6 +537,18 @@ export const PropertiesPanel = ({
                   </span>
                 )}
               </div>
+
+              {isTextObject && fabricCanvas?.getActiveObject() && (
+                <div className="mb-4 border-b border-border pb-4">
+                  <TextControls
+                    object={fabricCanvas.getActiveObject() as TextObject}
+                    readOnly={selectedProps.readOnly}
+                    activeColor={activeColor}
+                    apply={applyTextChanges}
+                    commit={commitObjectChange}
+                  />
+                </div>
+              )}
 
               {/* Opacity */}
               <div className="mb-3">
@@ -623,6 +594,9 @@ export const PropertiesPanel = ({
                 </div>
               </div>
 
+              {/* Text layers use the Outline effect instead */}
+              {!isTextObject && (
+                <>
               {/* Stroke */}
               <div className="mb-3">
                 <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">
@@ -670,6 +644,9 @@ export const PropertiesPanel = ({
                   className="w-full"
                 />
               </div>
+
+                </>
+              )}
 
               {/* Layer Mask (non-destructive clip) */}
               {selectedProps.hasMask && (
@@ -733,118 +710,6 @@ export const PropertiesPanel = ({
                 </div>
               </div>
 
-              {/* Text Properties */}
-              {isTextObject && (
-                <>
-                  <Separator className="my-3" />
-                  <Label className="text-xs font-semibold mb-3 block">
-                    Text Properties
-                  </Label>
-
-                  {/* Style toggles + alignment */}
-                  <div className="flex items-center gap-1 mb-3">
-                    {(
-                      [
-                        ["fontWeight", Bold, selectedProps.fontWeight === "bold"],
-                        ["fontStyle", Italic, selectedProps.fontStyle === "italic"],
-                        ["underline", Underline, !!selectedProps.underline],
-                      ] as const
-                    ).map(([key, Icon, active]) => (
-                      <button
-                        key={key}
-                        type="button"
-                        aria-label={
-                          key === "fontWeight"
-                            ? "Bold"
-                            : key === "fontStyle"
-                              ? "Italic"
-                              : "Underline"
-                        }
-                        aria-pressed={active}
-                        disabled={selectedProps.readOnly}
-                        onClick={() => toggleTextStyle(key)}
-                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                          active
-                            ? "border-primary bg-primary/15 text-foreground"
-                            : "border-border hover:bg-accent text-muted-foreground"
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                      </button>
-                    ))}
-                    <div className="w-px h-6 bg-border mx-0.5" />
-                    {(
-                      [
-                        ["left", AlignLeft],
-                        ["center", AlignCenter],
-                        ["right", AlignRight],
-                      ] as const
-                    ).map(([align, Icon]) => (
-                      <button
-                        key={align}
-                        type="button"
-                        aria-label={`Align text ${align}`}
-                        aria-pressed={selectedProps.textAlign === align}
-                        disabled={selectedProps.readOnly}
-                        onClick={() => setTextAlign(align)}
-                        className={`flex-1 h-8 rounded-md border flex items-center justify-center transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                          selectedProps.textAlign === align
-                            ? "border-primary bg-primary/15 text-foreground"
-                            : "border-border hover:bg-accent text-muted-foreground"
-                        }`}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Font Size */}
-                  <div className="mb-3">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <Label className="text-xs font-medium text-muted-foreground">
-                        Font Size
-                      </Label>
-                      <span className="text-xs text-muted-foreground tabular-nums">
-                        {selectedProps.fontSize}px
-                      </span>
-                    </div>
-                    <Slider
-                      value={[selectedProps.fontSize || 24]}
-                      aria-label="Font size"
-                      disabled={selectedProps.readOnly}
-                      onValueChange={handleFontSizeChange}
-                      onValueCommit={() => flushScheduledObjectCommit()}
-                      min={8}
-                      max={200}
-                      step={1}
-                      className="w-full"
-                    />
-                  </div>
-
-                  {/* Font Family */}
-                  <div>
-                    <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">
-                      Font Family
-                    </Label>
-                    <select
-                      value={selectedProps.fontFamily || "Arial"}
-                      aria-label="Font family"
-                      disabled={selectedProps.readOnly}
-                      onChange={(e) => {
-                        handleFontFamilyChange(e.target.value);
-                        commitObjectChange();
-                      }}
-                      className="w-full h-9 rounded-md border border-border bg-background px-3 text-xs disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {fontFamilies.map((font) => (
-                        <option key={font} value={font}>
-                          {font}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )}
             </div>
 
             <Separator />

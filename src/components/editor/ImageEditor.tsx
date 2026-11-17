@@ -18,6 +18,7 @@ import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { useKeyboardShortcuts, type ShortcutActions } from "@/hooks/useKeyboardShortcuts";
 import { useAiActions } from "@/hooks/useAiActions";
 import { useEyedropper } from "@/hooks/useEyedropper";
+import { useDocumentFonts } from "@/hooks/useDocumentFonts";
 import {
   saveProject,
   loadProject,
@@ -211,6 +212,7 @@ export const ImageEditor = () => {
   );
 
   const ai = useAiActions(fabricCanvas);
+  useDocumentFonts(fabricCanvas);
 
   // Offer to continue the last session
   useEffect(() => {

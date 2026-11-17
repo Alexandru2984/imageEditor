@@ -1076,3 +1076,53 @@ test("presets, auto enhance and compare are undoable and never leak into saves",
   await page.getByRole("button", { name: "Reset adjustments" }).click();
   await expect.poll(filterTypes).toEqual([]);
 });
+
+test("text styles, fonts and effects apply to a text layer and persist", async ({ page }) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Text (T)" }).click();
+  const center = await canvasCenter(page);
+  await page.mouse.click(center.x, center.y);
+  await expect(page.getByRole("button", { name: "Meme text style" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Meme text style" }).click();
+  const textLayer = async () =>
+    (await autosavedObjects(page)).find((o) => o.type === "IText") as
+      | Record<string, unknown>
+      | undefined;
+  await expect.poll(async () => (await textLayer())?.fontFamily).toBe("Anton");
+  const meme = (await textLayer())!;
+  expect(meme.text).toBe("YOUR TEXT");
+  expect(meme.stroke).toBe("#000000");
+  expect(meme.paintFirst).toBe("stroke");
+
+  await page.getByRole("button", { name: "Font family" }).click();
+  await page.getByRole("option", { name: /Playfair Display/ }).click();
+  await expect.poll(async () => (await textLayer())?.fontFamily).toBe("Playfair Display");
+  expect(await page.evaluate(() => document.fonts.check('32px "Playfair Display"'))).toBe(true);
+
+  await page.getByRole("button", { name: "Shadow", exact: true }).click();
+  await expect.poll(async () => (await textLayer())?.shadow).not.toBeNull();
+  await page.getByRole("button", { name: "Highlight", exact: true }).click();
+  await expect.poll(async () => (await textLayer())?.textBackgroundColor).toBeTruthy();
+
+  // The styled layer survives a project round trip.
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Save project" }).click();
+  const savedPath = await (await downloadPromise).path();
+  await page.getByRole("button", { name: "New", exact: true }).click();
+  await page.getByRole("button", { name: "Start new" }).click();
+  await page.getByTestId("project-input").setInputFiles(savedPath!);
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  await expect.poll(async () => (await textLayer())?.fontFamily).toBe("Playfair Display");
+});
+
+test("stickers are added as scalable layers", async ({ page }) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Stickers" }).click();
+  await page.getByRole("button", { name: "Add sticker 🔥" }).click();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).find((o) => o.type === "Text")?.text)
+    .toBe("🔥");
+  // Stickers are not edited like text.
+  await expect(page.getByRole("button", { name: "Meme text style" })).toHaveCount(0);
+});
