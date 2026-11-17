@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type FileChooser, type Page } from "@playwright/test";
 
 // A tiny valid 4x4 PNG, decoded from base64 into a file the upload input accepts.
 const PNG_BASE64 =
@@ -132,9 +132,18 @@ test("supports keyboard upload and labels the core editor controls", async ({
   await upload.focus();
   await expect(upload).toBeFocused();
 
-  const fileChooserPromise = page.waitForEvent("filechooser");
-  await page.keyboard.press("Enter");
-  const fileChooser = await fileChooserPromise;
+  // Headless Chromium occasionally drops the native chooser event under
+  // parallel load; retry the keyboard activation instead of the whole test.
+  let fileChooser: FileChooser | null = null;
+  for (let attempt = 0; attempt < 3 && !fileChooser; attempt += 1) {
+    const chooserPromise = page
+      .waitForEvent("filechooser", { timeout: 5_000 })
+      .catch(() => null);
+    await upload.focus();
+    await page.keyboard.press("Enter");
+    fileChooser = await chooserPromise;
+  }
+  if (!fileChooser) throw new Error("The keyboard never opened the file chooser");
   await fileChooser.setFiles({
     name: "keyboard-upload.png",
     mimeType: "image/png",
