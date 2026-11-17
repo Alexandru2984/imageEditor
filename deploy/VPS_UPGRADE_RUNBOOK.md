@@ -218,8 +218,8 @@ Only after the shared host is healthy:
 
 ```sh
 cd /home/micu/imageEditor
-./scripts/install-nginx.sh
 ./scripts/deploy.sh
+./scripts/install-nginx.sh
 ```
 
 Then verify the origin and Cloudflare responses, the exact deployed asset hash,

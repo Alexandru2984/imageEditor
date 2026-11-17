@@ -1,0 +1,110 @@
+# imageeditor.micutu.com: static Vite build of the browser-only image editor.
+# Installed to /etc/nginx/sites-available/imageeditor.micutu.com-canary by
+# scripts/install-nginx.sh. Traffic arrives through the Cloudflare tunnel
+# (catch-all ingress -> https://127.0.0.1:443).
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name imageeditor.micutu.com;
+    server_tokens off;
+
+    access_log /var/log/nginx/imageeditor-canary.access.log;
+    error_log /var/log/nginx/imageeditor-canary.error.log warn;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name imageeditor.micutu.com;
+    server_tokens off;
+
+    # releases/<id> is swapped in atomically by scripts/deploy.sh.
+    root /srv/canary/imageeditor.micutu.com/current;
+    index index.html;
+
+    access_log /var/log/nginx/imageeditor-canary.access.log;
+    error_log /var/log/nginx/imageeditor-canary.error.log warn;
+
+    ssl_certificate /etc/letsencrypt/live/imageeditor.micutu.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/imageeditor.micutu.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:imageeditor_canary_tls:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # A static site: no request bodies and nothing but GET/HEAD.
+    client_max_body_size 1k;
+    if ($request_method !~ ^(GET|HEAD)$) {
+        return 405;
+    }
+
+    gzip on;
+    gzip_vary on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types text/css application/javascript text/javascript application/json
+               application/manifest+json image/svg+xml text/plain application/xml
+               application/wasm;
+
+    # nginx drops every inherited add_header as soon as a block declares its
+    # own, so each location below includes the security headers again.
+    include snippets/imageeditor-headers.conf;
+
+    # Real 404s. The editor is a single page, so there is no SPA fallback: an
+    # unknown URL, or a hashed asset that no longer exists, must not come back
+    # as the app's HTML with status 200.
+    error_page 404 /404.html;
+    location = /404.html {
+        internal;
+        include snippets/imageeditor-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    location = / {
+        try_files /index.html =404;
+        include snippets/imageeditor-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    location = /index.html {
+        include snippets/imageeditor-headers.conf;
+        add_header Cache-Control "no-cache" always;
+    }
+
+    # Vite content-hashes every file under /assets/. Deploys carry older
+    # assets forward so tabs opened before a deploy can still lazy-load
+    # the chunks and workers they reference.
+    location ^~ /assets/ {
+        include snippets/imageeditor-headers.conf;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    # Dotfiles (.git, .env, ...) never leave the server, and do not even
+    # admit to existing.
+    location ~ /\.(?!well-known) {
+        access_log off;
+        log_not_found off;
+        return 404;
+    }
+
+    # /etc/nginx/mime.types has no entry for web app manifests.
+    location = /site.webmanifest {
+        types { }
+        default_type application/manifest+json;
+        include snippets/imageeditor-headers.conf;
+        add_header Cache-Control "public, max-age=3600" always;
+    }
+
+    # Everything else from public/ keeps a fixed name (icons, manifest,
+    # robots.txt, sitemap.xml, theme-init.js), so it revalidates hourly.
+    location / {
+        include snippets/imageeditor-headers.conf;
+        add_header Cache-Control "public, max-age=3600" always;
+        try_files $uri =404;
+    }
+}
