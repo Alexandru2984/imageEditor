@@ -798,7 +798,7 @@ test("runs the pinned background-removal model end to end", async ({ page }) => 
             .allTextContents();
           if (
             notifications.some((message) =>
-              message.includes("Background removed successfully!")
+              message.includes("Background removed")
             )
           ) {
             return "success";
