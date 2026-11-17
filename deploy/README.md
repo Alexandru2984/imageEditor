@@ -67,7 +67,8 @@ The installer backs up the active files under `/etc/nginx/backups/`, validates
 the complete configuration and reloads without downtime. It then checks the
 origin directly:
 - security headers;
-- `no-cache` on the index and `immutable` on hashed assets;
+- `no-store` and a fresh CSP nonce on the index, `immutable` on hashed
+  assets;
 - a real 404 for unknown URLs and dotfiles;
 - 405 for anything but GET and HEAD.
 
@@ -84,22 +85,34 @@ What the site configuration guarantees:
   Permissions-Policy. Each location that adds a header includes the snippet
   again, because nginx otherwise drops the inherited headers.
 - `/assets/*` (content-hashed) is cached for a year as `immutable`. The index
-  and 404 page are `no-cache`. Other public files (icons, manifest, robots,
-  sitemap) are cached for an hour.
+  and 404 page are `no-store`, with no ETag and no conditional responses (see
+  Cloudflare below). Other public files (icons, manifest, robots, sitemap)
+  are cached for an hour.
 - Unknown URLs get a real 404 with `404.html`, not the app with status 200.
 - Dotfiles answer 404, request bodies are refused, and only GET and HEAD are
   allowed.
 
-The preview server in `vite.config.ts` sends the same headers, so the E2E
-suite exercises the production CSP. That includes a test asserting that
+The preview server in `vite.config.ts` sends the same headers (minus the
+per-response nonce), so the E2E suite exercises the production CSP. That includes a test asserting that
 loading and editing raise no CSP violations.
 
 ## Cloudflare
 
-Cloudflare features that rewrite HTML or inject scripts must stay disabled for
-this hostname: Browser Insights, email obfuscation, Rocket Loader, and
-challenge scripts on the app route. They conflict with the strict CSP by
-design; do not add `script-src 'unsafe-inline'` to accommodate them.
+Cloudflare injects two scripts into the HTML, and the CSP allows exactly
+those:
+- **Bot Management JavaScript detections**, an inline script. Nginx puts
+  `'nonce-$request_id'` (fresh and random per response) in `script-src`, and
+  Cloudflare tags its script with that nonce. Because the nonce in the body
+  must match the header it arrived with, HTML is never stored and never
+  answered with a 304.
+- **Web Analytics**, the beacon from `static.cloudflareinsights.com`, which
+  reports to `cloudflareinsights.com`. The beacon is served with
+  `Cross-Origin-Resource-Policy: cross-origin`, so cross-origin isolation
+  still holds.
+
+Never add `'unsafe-inline'` or `'strict-dynamic'` to `script-src`. Other
+HTML-rewriting features (email obfuscation, Rocket Loader) must stay disabled
+for this hostname; the CSP blocks them by design.
 
 Before any commercial deployment, resolve the BRIA model licensing requirement
 documented in [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).

@@ -97,9 +97,9 @@ Found and fixed along the way:
 - the crop-size label could disagree with the exported size.
 
 Still open:
-- Cloudflare: keep HTML-rewriting features (Rocket Loader, email
-  obfuscation, Browser Insights) off for this hostname; the strict CSP
-  blocks them.
+- Cloudflare: Rocket Loader and email obfuscation must stay off for this
+  hostname. Bot detection and Web Analytics are allowed through a
+  per-response nonce and the beacon's own origin (`deploy/README.md`).
 - The BRIA model licence must be resolved before any commercial use
   (`THIRD_PARTY_NOTICES.md`).
 - The main chunk (930 kB, 288 kB gzipped) is dominated by Fabric and the

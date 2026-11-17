@@ -93,7 +93,7 @@ check() {
 }
 
 readonly SECURE=(
-  "^content-security-policy: default-src 'none';.*script-src 'self' 'wasm-unsafe-eval';.*manifest-src 'self'"
+  "^content-security-policy: default-src 'none';.*script-src 'self' 'wasm-unsafe-eval' 'nonce-[0-9a-f]{32}' https://static\\.cloudflareinsights\\.com;.*connect-src [^;]* https://cloudflareinsights\\.com;.*manifest-src 'self'"
   "^cross-origin-embedder-policy: require-corp"
   "^cross-origin-opener-policy: same-origin"
   "^x-content-type-options: nosniff"
@@ -104,8 +104,8 @@ js="$(grep -oE '/assets/[A-Za-z0-9._-]+\.js' "$REPO_ROOT/dist/index.html" | head
 wasm="/assets/$(find "$REPO_ROOT/dist/assets" -maxdepth 1 -name '*.wasm' -printf '%f\n' | head -n 1)"
 
 echo "Nginx site behaviour ($BASE):"
-check "index" / 200 "${SECURE[@]}" "^cache-control: no-cache" "^content-type: text/html"
-check "index with a query string" "/?utm_source=test" 200 "^cache-control: no-cache"
+check "index" / 200 "${SECURE[@]}" "^cache-control: no-store$" "^content-type: text/html"
+check "index with a query string" "/?utm_source=test" 200 "^cache-control: no-store$"
 check "hashed script" "$js" 200 "${SECURE[@]}" \
   "^cache-control: public, max-age=31536000, immutable" "^content-type: application/javascript"
 check "WebAssembly runtime" "$wasm" 200 "${SECURE[@]}" "^content-type: application/wasm" \
@@ -116,7 +116,7 @@ check "web app manifest" /site.webmanifest 200 "${SECURE[@]}" \
 check "social preview image" /og-image.png 200 "${SECURE[@]}" "^cache-control: public, max-age=3600$"
 check "robots.txt" /robots.txt 200 "^content-type: text/plain"
 check "sitemap" /sitemap.xml 200 "^content-type: (text|application)/xml"
-check "unknown page is a real 404" /no-such-page 404 "${SECURE[@]}" "^cache-control: no-cache" \
+check "unknown page is a real 404" /no-such-page 404 "${SECURE[@]}" "^cache-control: no-store$" \
   "^content-type: text/html"
 check "missing hashed asset is a 404" /assets/missing-0000.js 404 "${SECURE[@]}"
 check "404 page is not directly addressable" /404.html 404
@@ -131,6 +131,31 @@ if ! curl -s "$BASE/no-such-page" | grep -q "<title>Page not found"; then
 else
   pass "404 responses use 404.html"
 fi
+
+# Cloudflare copies each response's nonce into the script it injects, so the
+# nonce must be fresh every time and HTML must never come back as a 304.
+nonce_of() { curl -s -o /dev/null -D - "$BASE/" | grep -oiE "'nonce-[0-9a-f]{32}'"; }
+first_nonce="$(nonce_of || true)"
+if [[ -n "$first_nonce" && "$first_nonce" != "$(nonce_of || true)" ]]; then
+  pass "a fresh CSP nonce on every response"
+else
+  fail "a fresh CSP nonce on every response (got '$first_nonce')"
+fi
+for path in / /index.html; do
+  headers="$(curl -s -o /dev/null -D - "$BASE$path" | tr -d '\r')"
+  if grep -qi '^etag:' <<<"$headers"; then
+    fail "$path is never answered with a 304: it sends an ETag"
+    continue
+  fi
+  modified="$(grep -i '^last-modified:' <<<"$headers" | cut -d' ' -f2- || true)"
+  status="$(curl -s -o /dev/null -w '%{http_code}' -H 'If-None-Match: *' \
+    ${modified:+-H "If-Modified-Since: $modified"} "$BASE$path")"
+  if [[ "$status" == 200 ]]; then
+    pass "$path is never answered with a 304"
+  else
+    fail "$path is never answered with a 304 (got $status)"
+  fi
+done
 
 if ((failures)); then
   echo "$failures check(s) failed" >&2

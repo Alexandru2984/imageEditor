@@ -7,6 +7,8 @@ const read = (relative: string) => readFileSync(fileURLToPath(new URL(relative, 
 const snippet = read("./snippets/imageeditor-headers.conf");
 const site = read("./sites-available/imageeditor.micutu.com-canary");
 
+const NONCE = " 'nonce-$request_id'";
+
 const productionHeaders = new Map(
   [...snippet.matchAll(/^add_header ([\w-]+) "([^"]*)" always;$/gm)].map(([, name, value]) => [
     name!.toLowerCase(),
@@ -37,7 +39,31 @@ describe("production Nginx site", () => {
     const preview = viteConfig.preview?.headers ?? {};
     expect(Object.keys(preview).length).toBeGreaterThan(5);
     for (const [name, value] of Object.entries(preview)) {
-      expect(productionHeaders.get(name.toLowerCase()), name).toBe(value);
+      let production = productionHeaders.get(name.toLowerCase());
+      // The preview cannot mint a per-response nonce; nothing else may differ.
+      if (name === "Content-Security-Policy") production = production?.replace(NONCE, "");
+      expect(production, name).toBe(value);
+    }
+  });
+
+  it("gives Cloudflare's injected script a fresh nonce and nothing broader", () => {
+    const csp = productionHeaders.get("content-security-policy") ?? "";
+    const scriptSrc = csp.split("; ").find((directive) => directive.startsWith("script-src "));
+    expect(scriptSrc).toBe(
+      "script-src 'self' 'wasm-unsafe-eval' 'nonce-$request_id' https://static.cloudflareinsights.com"
+    );
+    expect(csp).not.toMatch(/'strict-dynamic'|'unsafe-eval'/);
+    expect(csp).toContain("https://*.hf.co https://cloudflareinsights.com;");
+  });
+
+  it("never stores or revalidates HTML, so a body always matches its nonce", () => {
+    const blocks = locationBlocks(site);
+    for (const match of ["= /", "= /index.html", "= /404.html"]) {
+      const block = blocks.find((candidate) => candidate.match === match);
+      expect(block, `location ${match}`).toBeDefined();
+      expect(block!.body, `location ${match}`).toContain('add_header Cache-Control "no-store" always;');
+      expect(block!.body, `location ${match}`).toContain("etag off;");
+      expect(block!.body, `location ${match}`).toContain("if_modified_since off;");
     }
   });
 

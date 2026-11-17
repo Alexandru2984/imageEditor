@@ -101,7 +101,8 @@ expect "index status" "$index_headers" '^HTTP/[0-9.]+ 200'
 expect "CSP" "$index_headers" "^content-security-policy: default-src 'none';.*object-src 'none'"
 expect "COEP" "$index_headers" '^cross-origin-embedder-policy: require-corp'
 expect "frame options" "$index_headers" '^x-frame-options: DENY'
-expect "index caching" "$index_headers" '^cache-control: no-cache'
+expect "index caching" "$index_headers" '^cache-control: no-store'
+expect "CSP nonce" "$index_headers" "script-src 'self' 'wasm-unsafe-eval' 'nonce-[0-9a-f]{32}' https://static\\.cloudflareinsights\\.com;"
 
 asset="$(curl "${origin[@]}" "https://$HOST/" | grep -oE '/assets/[A-Za-z0-9._-]+\.js' | head -n 1 || true)"
 if [[ -n "$asset" ]]; then

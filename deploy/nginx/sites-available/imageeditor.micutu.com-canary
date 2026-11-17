@@ -57,22 +57,32 @@ server {
     # Real 404s. The editor is a single page, so there is no SPA fallback: an
     # unknown URL, or a hashed asset that no longer exists, must not come back
     # as the app's HTML with status 200.
+    #
+    # HTML is never stored or revalidated. Cloudflare writes the CSP nonce of
+    # each response into the script it injects; a 304 would pair a cached body
+    # (old nonce) with fresh headers (new nonce) and block that script.
     error_page 404 /404.html;
     location = /404.html {
         internal;
+        etag off;
+        if_modified_since off;
         include snippets/imageeditor-headers.conf;
-        add_header Cache-Control "no-cache" always;
+        add_header Cache-Control "no-store" always;
     }
 
     location = / {
         try_files /index.html =404;
+        etag off;
+        if_modified_since off;
         include snippets/imageeditor-headers.conf;
-        add_header Cache-Control "no-cache" always;
+        add_header Cache-Control "no-store" always;
     }
 
     location = /index.html {
+        etag off;
+        if_modified_since off;
         include snippets/imageeditor-headers.conf;
-        add_header Cache-Control "no-cache" always;
+        add_header Cache-Control "no-store" always;
     }
 
     # Vite content-hashes every file under /assets/. Deploys carry older
