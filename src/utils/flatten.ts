@@ -128,7 +128,8 @@ function renderWithIdentityViewport<T>(
   }
 }
 
-const nativeMultiplier = (canvas: FabricCanvas): number => {
+/** Scene-to-pixel multiplier that reproduces the photo at 100% resolution. */
+export const nativeMultiplier = (canvas: FabricCanvas): number => {
   const background = findBackgroundImage(canvas);
   if (!background) return 1;
   const displayedWidth = background.getScaledWidth();

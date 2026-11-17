@@ -1313,3 +1313,26 @@ test("smart guides snap a dragged layer to the photo centre", async ({ page }) =
   expect(Math.abs((await centres()).dx)).toBeGreaterThan(0.5);
   expect(await page.evaluate(() => localStorage.getItem("ie-snap"))).toBe("0");
 });
+
+test("crop presets frame the photo and the label matches the result", async ({ page }) => {
+  await page.getByText("Try a sample photo").click();
+  await expect(page.getByText("Remove BG")).toBeVisible();
+  await page.getByRole("button", { name: "Crop (K)" }).click();
+
+  const size = page.getByTestId("crop-size");
+  await page.getByRole("radio", { name: "16:9" }).click();
+  await expect(page.getByRole("radio", { name: "16:9" })).toHaveAttribute("aria-checked", "true");
+  await expect(size).toHaveText("1600 × 900 px");
+  await page.getByRole("radio", { name: "9:16" }).click();
+  await expect(size).toHaveText("562 × 1000 px");
+  await page.getByRole("radio", { name: "1:1" }).click();
+  await expect(size).toHaveText("1000 × 1000 px");
+
+  await page.getByRole("button", { name: "Apply crop" }).click();
+  await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  await expect(page.getByTestId("export-dimensions")).toHaveText("1000 × 1000 px");
+});

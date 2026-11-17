@@ -1,6 +1,12 @@
 import type { Canvas as FabricCanvas, TBBox } from "fabric";
 import { findBackgroundImage, isEditorChrome } from "./editorObjects";
-import { planRasterization, renderRegionBlob, type RasterFormat, type RasterPlan } from "./flatten";
+import {
+  nativeMultiplier,
+  planRasterization,
+  renderRegionBlob,
+  type RasterFormat,
+  type RasterPlan,
+} from "./flatten";
 
 export type ExportFormat = RasterFormat;
 
@@ -50,15 +56,6 @@ export function exportRegion(canvas: FabricCanvas): TBBox | null {
     bottom = Math.max(bottom, rect.top + rect.height);
   }
   return { left, top, width: right - left, height: bottom - top };
-}
-
-/** Scene-to-pixel multiplier that reproduces the photo at 100% resolution. */
-export function nativeMultiplier(canvas: FabricCanvas): number {
-  const background = findBackgroundImage(canvas);
-  if (!background) return 1;
-  const displayed = background.getScaledWidth();
-  if (!(displayed > 0) || !(background.width > 0)) return 1;
-  return background.width / displayed;
 }
 
 export function planExport(canvas: FabricCanvas, scale: number): RasterPlan | null {

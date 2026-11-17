@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
-import { flattenRegion } from "@/utils/flatten";
+import { flattenRegion, nativeMultiplier, planRasterization } from "@/utils/flatten";
+import { CROP_RATIOS, fitRatio, resolveRatio, type CropRatioId } from "@/utils/cropFrame";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { installWorkspaceRenderer } from "@/utils/workspace";
 import {
@@ -107,6 +108,16 @@ function marqueeRegion(canvas: FabricCanvas, rect: Rect) {
 
 const OUTSIDE_PHOTO = "The selection is outside the photo";
 
+/** The scene area inside a crop frame, excluding its dashed stroke. */
+const cropFrameRegion = (rect: Rect) => ({
+  left: rect.left,
+  top: rect.top,
+  width: rect.width * rect.scaleX,
+  height: rect.height * rect.scaleY,
+});
+
+const SIDE_CONTROLS = ["ml", "mr", "mt", "mb"] as const;
+
 export const Canvas = ({
   activeTool,
   activeColor,
@@ -141,6 +152,10 @@ export const Canvas = ({
   const marqueeRef = useRef<Rect | null>(null);
   const marqueeAnimRef = useRef<number | null>(null);
   const [hasMarquee, setHasMarquee] = useState(false);
+  const [cropRatio, setCropRatio] = useState<CropRatioId>("free");
+  const [cropSize, setCropSize] = useState<{ width: number; height: number } | null>(null);
+  /** Locked width÷height of the crop frame, or null when it is free. */
+  const cropRatioRef = useRef<number | null>(null);
   // Image layer that was selected when the marquee tool was entered — the
   // target a "Mask" operation clips to (masking needs both a layer and a region)
   const preMarqueeTargetRef = useRef<FabricImage | null>(null);
@@ -651,6 +666,9 @@ export const Canvas = ({
     canvas.add(cropRect);
     canvas.setActiveObject(cropRect);
     cropRectRef.current = cropRect;
+    cropRatioRef.current = null;
+    setCropRatio("free");
+    updateCropSize();
   };
 
   const removeCropOverlay = (canvas: FabricCanvas) => {
@@ -661,7 +679,77 @@ export const Canvas = ({
       }
     }
     cropRectRef.current = null;
+    cropRatioRef.current = null;
+    setCropSize(null);
   };
+
+  /** Show the crop frame's size in output pixels. */
+  const updateCropSize = useCallback(() => {
+    const canvas = fabricCanvasRef.current;
+    const rect = cropRectRef.current;
+    if (!canvas || !rect) {
+      setCropSize(null);
+      return;
+    }
+    try {
+      // The same plan the crop will rasterize with, so the label never lies.
+      const plan = planRasterization(cropFrameRegion(rect), nativeMultiplier(canvas));
+      setCropSize({ width: plan.outputWidth, height: plan.outputHeight });
+    } catch {
+      setCropSize(null);
+    }
+  }, []);
+
+  /** Reshape the crop frame to a preset ratio, as large as the photo allows. */
+  const chooseCropRatio = useCallback(
+    (id: CropRatioId) => {
+      const canvas = fabricCanvasRef.current;
+      const rect = cropRectRef.current;
+      const option = CROP_RATIOS.find((candidate) => candidate.id === id);
+      if (!canvas || !rect || !option) return;
+      const photo = findBackgroundImage(canvas);
+      photo?.setCoords();
+      const area = photo ? photo.getBoundingRect() : cropFrameRegion(rect);
+      const ratio = resolveRatio(option, area);
+      cropRatioRef.current = ratio;
+      if (ratio !== null) {
+        const frame = fitRatio(area, ratio);
+        rect.set({ ...frame, scaleX: 1, scaleY: 1 });
+      }
+      // A locked ratio scales from the corners only.
+      for (const control of SIDE_CONTROLS) rect.setControlVisible(control, ratio === null);
+      rect.setCoords();
+      canvas.setActiveObject(rect);
+      canvas.requestRenderAll();
+      setCropRatio(id);
+      updateCropSize();
+    },
+    [updateCropSize]
+  );
+
+  // Keep a locked ratio while the frame is scaled, and its size label current.
+  useEffect(() => {
+    if (activeTool !== "crop") return;
+    const canvas = fabricCanvasRef.current;
+    if (!canvas) return;
+    const isFrame = (target: unknown) => !!target && target === cropRectRef.current;
+    const handleScaling = ({ target }: { target: FabricObject }) => {
+      if (!isFrame(target)) return;
+      if (cropRatioRef.current !== null && Math.abs(target.scaleX - target.scaleY) > 1e-9) {
+        target.set({ scaleY: target.scaleX });
+      }
+      updateCropSize();
+    };
+    const handleChange = ({ target }: { target?: FabricObject }) => {
+      if (isFrame(target)) updateCropSize();
+    };
+    canvas.on("object:scaling", handleScaling);
+    canvas.on("object:modified", handleChange);
+    return () => {
+      canvas.off("object:scaling", handleScaling);
+      canvas.off("object:modified", handleChange);
+    };
+  }, [activeTool, updateCropSize]);
 
   // ---------- Apply / cancel crop ----------
   const applyCrop = useCallback(async () => {
@@ -673,7 +761,7 @@ export const Canvas = ({
     setIsRasterizing(true);
     const revision = documentRevisionRef.current;
 
-    const region = cropRect.getBoundingRect();
+    const region = cropFrameRegion(cropRect);
     try {
       // Hide editor chrome during flattening, restoring it even if rendering
       // fails so the user can adjust/retry the crop.
@@ -1107,20 +1195,55 @@ export const Canvas = ({
 
       {/* Crop confirmation controls */}
       {activeTool === "crop" && (
-        <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-popover/95 px-2 py-1.5 shadow-xl backdrop-blur">
-          <Button
-            size="sm"
-            className="h-8"
-            onClick={() => void applyCrop()}
-            disabled={isRasterizing}
+        <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-col items-stretch gap-1.5 rounded-xl border border-border bg-popover/95 p-1.5 shadow-xl backdrop-blur">
+          <div
+            role="radiogroup"
+            aria-label="Crop shape"
+            className="scrollbar-none flex max-w-full gap-1 overflow-x-auto"
           >
-            <Check className="h-4 w-4 mr-1" />
-            Apply crop
-          </Button>
-          <Button size="sm" variant="ghost" className="h-8" onClick={cancelCrop}>
-            <X className="h-4 w-4 mr-1" />
-            Cancel
-          </Button>
+            {CROP_RATIOS.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                role="radio"
+                aria-checked={cropRatio === option.id}
+                title={option.hint}
+                onClick={() => chooseCropRatio(option.id)}
+                className={
+                  "h-7 shrink-0 rounded-md px-2.5 text-xs font-medium tabular-nums transition-colors " +
+                  (cropRatio === option.id
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground")
+                }
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-1.5">
+            <span
+              className="px-1.5 text-xs tabular-nums text-muted-foreground"
+              data-testid="crop-size"
+              aria-live="polite"
+            >
+              {cropSize ? `${cropSize.width} × ${cropSize.height} px` : ""}
+            </span>
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="ghost" className="h-8" onClick={cancelCrop}>
+                <X className="h-4 w-4 mr-1" />
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="h-8"
+                onClick={() => void applyCrop()}
+                disabled={isRasterizing}
+              >
+                <Check className="h-4 w-4 mr-1" />
+                Apply crop
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
