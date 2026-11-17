@@ -1336,3 +1336,44 @@ test("crop presets frame the photo and the label matches the result", async ({ p
   await page.getByRole("button", { name: "Export", exact: true }).click();
   await expect(page.getByTestId("export-dimensions")).toHaveText("1000 × 1000 px");
 });
+
+test("brush types change how strokes are drawn and saved", async ({ page }) => {
+  await uploadImage(page);
+  await page.getByRole("button", { name: "Draw (B)" }).click();
+  const center = await canvasCenter(page);
+  const stroke = async (dy: number) => {
+    await page.mouse.move(center.x - 80, center.y + dy);
+    await page.mouse.down();
+    await page.mouse.move(center.x, center.y + dy + 20, { steps: 6 });
+    await page.mouse.move(center.x + 80, center.y + dy, { steps: 6 });
+    await page.mouse.up();
+  };
+  const paths = async () => (await autosavedObjects(page)).filter((o) => o.type === "Path");
+
+  await page.getByRole("radio", { name: "Highlighter" }).click();
+  await expect(page.getByRole("radio", { name: "Highlighter" })).toHaveAttribute(
+    "aria-checked",
+    "true"
+  );
+  // Too thin to read as a highlighter, so it widens; hardness does not apply.
+  await expect(page.getByText("14px")).toBeVisible();
+  await expect(page.getByRole("slider", { name: "Brush hardness" })).toHaveCount(0);
+  await stroke(-60);
+  await expect.poll(async () => (await paths()).length).toBe(1);
+  const highlight = (await paths())[0]!;
+  expect(highlight.globalCompositeOperation).toBe("multiply");
+  expect(highlight.stroke).toMatch(/^rgba\(\d+, \d+, \d+, 0\.45\)$/);
+
+  await page.getByRole("radio", { name: "Dashed" }).click();
+  await stroke(0);
+  await expect.poll(async () => (await paths()).length).toBe(2);
+  const dashed = (await paths())[1]!;
+  expect(dashed.strokeDashArray).toEqual([35, 28]);
+  expect(dashed.globalCompositeOperation).toBe("source-over");
+
+  await page.getByRole("radio", { name: "Neon" }).click();
+  await stroke(60);
+  await expect.poll(async () => (await paths()).length).toBe(3);
+  const neon = (await paths())[2]! as { shadow?: { blur?: number } | null };
+  expect(neon.shadow?.blur).toBeGreaterThanOrEqual(10);
+});

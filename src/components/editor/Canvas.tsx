@@ -5,7 +5,6 @@ import {
   PencilBrush,
   FabricImage,
   Point,
-  Shadow,
   filters,
 } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
@@ -31,6 +30,7 @@ import {
 import { toast } from "sonner";
 import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
 import { flattenRegion, nativeMultiplier, planRasterization } from "@/utils/flatten";
+import { styleBrush, type BrushKind } from "@/utils/brushes";
 import { CROP_RATIOS, fitRatio, resolveRatio, type CropRatioId } from "@/utils/cropFrame";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { installWorkspaceRenderer } from "@/utils/workspace";
@@ -54,6 +54,7 @@ interface CanvasProps {
   brushWidth: number;
   brushHardness: number;
   brushOpacity: number;
+  brushKind: BrushKind;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -66,12 +67,6 @@ interface CanvasProps {
 
 // A soft brush is faked with a same-color shadow whose blur grows as hardness
 // drops (hardness 100 = crisp edge, 0 = very soft).
-function brushShadow(color: string, hardness: number, width: number): Shadow | null {
-  if (hardness >= 100) return null;
-  const blur = ((100 - hardness) / 100) * width;
-  return new Shadow({ color, blur, offsetX: 0, offsetY: 0 });
-}
-
 const abortError = (): Error => {
   const error = new Error("Canvas operation was cancelled");
   error.name = "AbortError";
@@ -124,6 +119,7 @@ export const Canvas = ({
   brushWidth,
   brushHardness,
   brushOpacity,
+  brushKind,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -147,6 +143,8 @@ export const Canvas = ({
   // Latest brush opacity, read by the path:created handler set up once at init
   const brushOpacityRef = useRef(brushOpacity);
   brushOpacityRef.current = brushOpacity;
+  const brushKindRef = useRef(brushKind);
+  brushKindRef.current = brushKind;
   // Marquee selection: the drawn rect, its animation loop, and whether a
   // committed selection currently exists (drives the floating toolbar)
   const marqueeRef = useRef<Rect | null>(null);
@@ -264,9 +262,19 @@ export const Canvas = ({
     // Brush strokes get the current brush opacity (a whole-stroke cap, like
     // Photoshop's Opacity — set on the path so overlaps within a stroke don't
     // compound). Fires only for free-drawing paths.
-    const applyStrokeOpacity = (e: { path?: { set: (k: string, v: number) => void } }) => {
-      if (e.path && brushOpacityRef.current < 100) {
+    const applyStrokeOpacity = (e: { path?: FabricObject }) => {
+      if (!e.path) return;
+      if (brushOpacityRef.current < 100) {
         e.path.set("opacity", brushOpacityRef.current / 100);
+      }
+      // Highlighter ink darkens what is under it instead of covering it.
+      const brush = canvas.freeDrawingBrush;
+      if (
+        brushKindRef.current === "highlighter" &&
+        brush instanceof PencilBrush &&
+        !(brush instanceof EraserBrush)
+      ) {
+        e.path.set("globalCompositeOperation", "multiply");
       }
     };
     canvas.on("path:created", applyStrokeOpacity as (...args: unknown[]) => void);
@@ -565,9 +573,7 @@ export const Canvas = ({
 
     if (activeTool === "draw") {
       const brush = new PencilBrush(canvas);
-      brush.color = activeColor;
-      brush.width = brushWidth;
-      brush.shadow = brushShadow(activeColor, brushHardness, brushWidth);
+      styleBrush(brush, brushKind, activeColor, brushWidth, brushHardness);
       canvas.freeDrawingBrush = brush;
     } else if (activeTool === "eraser") {
       const eraser = new EraserBrush(canvas);
@@ -615,16 +621,12 @@ export const Canvas = ({
 
     if (canvas.isDrawingMode && canvas.freeDrawingBrush) {
       if (activeTool === "draw") {
-        canvas.freeDrawingBrush.color = activeColor;
-        canvas.freeDrawingBrush.shadow = brushShadow(
-          activeColor,
-          brushHardness,
-          brushWidth
-        );
+        styleBrush(canvas.freeDrawingBrush, brushKind, activeColor, brushWidth, brushHardness);
+      } else {
+        canvas.freeDrawingBrush.width = brushWidth;
       }
-      canvas.freeDrawingBrush.width = brushWidth;
     }
-  }, [activeColor, brushWidth, brushHardness, activeTool]);
+  }, [activeColor, brushWidth, brushHardness, brushKind, activeTool]);
 
   // ---------- Crop helpers ----------
   const addCropOverlay = (canvas: FabricCanvas) => {

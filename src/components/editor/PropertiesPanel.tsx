@@ -19,6 +19,9 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { applyColor } from "@/utils/shapes";
 import { isSticker } from "@/utils/stickers";
+import { BRUSHES, type BrushKind } from "@/utils/brushes";
+import { cn } from "@/lib/utils";
+import { BrushPreview } from "./BrushPreview";
 import { TextControls, type ApplyMode, type TextObject } from "./TextControls";
 import {
   AlignStartVertical,
@@ -34,6 +37,8 @@ interface PropertiesPanelProps {
   onColorChange: (color: string) => void;
   brushWidth: number;
   onBrushWidthChange: (width: number) => void;
+  brushKind: BrushKind;
+  onBrushKindChange: (kind: BrushKind) => void;
   brushHardness: number;
   onBrushHardnessChange: (hardness: number) => void;
   brushOpacity: number;
@@ -120,6 +125,8 @@ export const PropertiesPanel = ({
   onColorChange,
   brushWidth,
   onBrushWidthChange,
+  brushKind,
+  onBrushKindChange,
   brushHardness,
   onBrushHardnessChange,
   brushOpacity,
@@ -454,6 +461,30 @@ export const PropertiesPanel = ({
         {/* Brush */}
         <div className="space-y-3">
           <div>
+            <Label className="mb-2 block text-xs font-medium text-muted-foreground">Brush</Label>
+            <div role="radiogroup" aria-label="Brush type" className="grid grid-cols-4 gap-1.5">
+              {BRUSHES.map((brush) => (
+                <button
+                  key={brush.kind}
+                  type="button"
+                  role="radio"
+                  aria-checked={brushKind === brush.kind}
+                  onClick={() => onBrushKindChange(brush.kind)}
+                  className={cn(
+                    "flex flex-col items-center gap-1 rounded-lg border p-1.5 text-[11px] transition-colors",
+                    brushKind === brush.kind
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  <BrushPreview kind={brush.kind} color={activeColor} />
+                  {brush.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-2">
               <Label className="text-xs font-medium text-muted-foreground">
                 Brush Width
@@ -473,27 +504,29 @@ export const PropertiesPanel = ({
             />
           </div>
 
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <Label className="text-xs font-medium text-muted-foreground">
-                Hardness
-              </Label>
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {brushHardness}%
-              </span>
+          {BRUSHES.find((brush) => brush.kind === brushKind)?.usesHardness !== false && (
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-xs font-medium text-muted-foreground">
+                  Hardness
+                </Label>
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {brushHardness}%
+                </span>
+              </div>
+              <Slider
+                value={[brushHardness]}
+                aria-label="Brush hardness"
+                onValueChange={(v) =>
+                  onBrushHardnessChange(v[0] ?? brushHardness)
+                }
+                min={0}
+                max={100}
+                step={1}
+                className="w-full"
+              />
             </div>
-            <Slider
-              value={[brushHardness]}
-              aria-label="Brush hardness"
-              onValueChange={(v) =>
-                onBrushHardnessChange(v[0] ?? brushHardness)
-              }
-              min={0}
-              max={100}
-              step={1}
-              className="w-full"
-            />
-          </div>
+          )}
 
           <div>
             <div className="flex items-center justify-between mb-2">

@@ -20,6 +20,7 @@ import { useAiActions } from "@/hooks/useAiActions";
 import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
 import { useSmartGuides } from "@/hooks/useSmartGuides";
+import { BRUSHES, type BrushKind } from "@/utils/brushes";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -80,6 +81,12 @@ export const ImageEditor = () => {
   const [brushWidth, setBrushWidth] = useState(3);
   const [brushHardness, setBrushHardness] = useState(100);
   const [brushOpacity, setBrushOpacity] = useState(100);
+  const [brushKind, setBrushKind] = useState<BrushKind>("pen");
+  const handleBrushKindChange = useCallback((kind: BrushKind) => {
+    setBrushKind(kind);
+    const option = BRUSHES.find((candidate) => candidate.kind === kind);
+    if (option) setBrushWidth((width) => Math.max(width, option.minWidth));
+  }, []);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const [documentName, setDocumentName] = useState("edited-image");
   const [fabricCanvas, setFabricCanvas] = useState<FabricCanvas | null>(null);
@@ -713,6 +720,8 @@ export const ImageEditor = () => {
           onBrushHardnessChange={setBrushHardness}
           brushOpacity={brushOpacity}
           onBrushOpacityChange={setBrushOpacity}
+          brushKind={brushKind}
+          onBrushKindChange={handleBrushKindChange}
           fabricCanvas={fabricCanvas}
         />
       </TabsContent>
@@ -776,6 +785,7 @@ export const ImageEditor = () => {
               brushWidth={brushWidth}
               brushHardness={brushHardness}
               brushOpacity={brushOpacity}
+              brushKind={brushKind}
               uploadedImage={uploadedImage}
               initialSnapshot={initialSnapshot}
               onCanvasReady={setFabricCanvas}
