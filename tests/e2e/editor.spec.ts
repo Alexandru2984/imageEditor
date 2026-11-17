@@ -434,10 +434,13 @@ test("a newer clear in another tab blocks a stale pending autosave", async ({
   await expect.poll(() => getAutosaveJson(page)).not.toBeNull();
   await page.waitForTimeout(900);
 
-  await addShape(page);
-  await page.waitForTimeout(50);
+  // Open the confirmation first so a single click lands the clear well
+  // inside the first tab's autosave delay, even on a loaded machine.
   await secondPage.getByRole("button", { name: "New", exact: true }).click();
-  await secondPage.getByRole("button", { name: "Start new" }).click();
+  const startNew = secondPage.getByRole("button", { name: "Start new" });
+  await expect(startNew).toBeVisible();
+  await addShape(page);
+  await startNew.click();
 
   await expect(secondPage.getByText("Upload an Image")).toBeVisible();
   await expect.poll(() => getAutosaveJson(secondPage)).toBeNull();
