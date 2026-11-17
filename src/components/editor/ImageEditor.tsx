@@ -19,6 +19,12 @@ import { useKeyboardShortcuts, type ShortcutActions } from "@/hooks/useKeyboardS
 import { useAiActions } from "@/hooks/useAiActions";
 import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
+import { useSmartGuides } from "@/hooks/useSmartGuides";
+import {
+  SNAP_PREFERENCE_KEY,
+  readBooleanPreference,
+  writeBooleanPreference,
+} from "@/utils/preferences";
 import { CanvasContextMenu } from "./CanvasContextMenu";
 import {
   saveProject,
@@ -214,6 +220,12 @@ export const ImageEditor = () => {
 
   const ai = useAiActions(fabricCanvas);
   useDocumentFonts(fabricCanvas);
+  const [snapping, setSnapping] = useState(() => readBooleanPreference(SNAP_PREFERENCE_KEY, true));
+  const handleSnappingChange = useCallback((enabled: boolean) => {
+    setSnapping(enabled);
+    writeBooleanPreference(SNAP_PREFERENCE_KEY, enabled);
+  }, []);
+  useSmartGuides(fabricCanvas, snapping);
 
   // Offer to continue the last session
   useEffect(() => {
@@ -739,6 +751,8 @@ export const ImageEditor = () => {
         onOpenProject={(file) => void handleOpenProjectFile(file)}
         onNewProject={handleNewProject}
         onShowShortcuts={() => setShortcutsOpen(true)}
+        snapping={snapping}
+        onSnappingChange={handleSnappingChange}
         panel={panel}
         onTogglePanel={togglePanel}
       />

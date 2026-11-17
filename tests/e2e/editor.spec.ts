@@ -1246,3 +1246,67 @@ test("marquee copy and crop use the dragged region", async ({ page }) => {
   expect(w).toBeLessThan(64);
   expect(Math.abs(w! - h!)).toBeLessThanOrEqual(1);
 });
+
+test("smart guides snap a dragged layer to the photo centre", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  const center = await canvasCenter(page);
+
+  const centres = async () => {
+    const objects = await autosavedObjects(page);
+    const photo = objects.find((o) => o.__isBackground)!;
+    const rect = objects.find((o) => o.type === "Rect")!;
+    const mid = (o: Record<string, unknown>, axis: "x" | "y") =>
+      axis === "x"
+        ? (o.left as number) + ((o.width as number) * (o.scaleX as number)) / 2
+        : (o.top as number) + ((o.height as number) * (o.scaleY as number)) / 2;
+    return {
+      dx: mid(rect, "x") - mid(photo, "x"),
+      dy: mid(rect, "y") - mid(photo, "y"),
+      left: rect.left as number,
+    };
+  };
+
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((o) => o.type === "Rect"))
+    .toBe(true);
+
+  /** Drag the selected rectangle away and drop it 3px right, 2px below where it started. */
+  const dragNearCentre = async (modifier?: "Alt") => {
+    const before = (await centres()).left;
+    if (modifier) await page.keyboard.down(modifier);
+    await page.mouse.move(center.x, center.y);
+    await page.mouse.down();
+    await page.mouse.move(center.x + 60, center.y + 40, { steps: 5 });
+    await page.mouse.move(center.x + 3, center.y + 2, { steps: 5 });
+    await page.mouse.up();
+    if (modifier) await page.keyboard.up(modifier);
+    await expect.poll(async () => (await centres()).left).not.toBe(before);
+  };
+
+  // Start from a layer that is not centred.
+  await dragNearCentre("Alt");
+  const offset = await centres();
+  expect(Math.abs(offset.dx)).toBeGreaterThan(0.5);
+
+  // With snapping on, dropping within 6 screen px lands exactly on the centre.
+  await page.mouse.move(center.x + 3, center.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 40, center.y + 30, { steps: 5 });
+  await page.mouse.move(center.x + 1, center.y + 1, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(async () => Math.abs((await centres()).dx)).toBeLessThan(0.01);
+  expect(Math.abs((await centres()).dy)).toBeLessThan(0.01);
+
+  // Turned off from the menu (and remembered), the same drop stays off-centre.
+  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Snap to guides" }).click();
+  await expect(page.getByRole("menuitemcheckbox", { name: "Snap to guides" })).toHaveAttribute(
+    "aria-checked",
+    "false"
+  );
+  await page.keyboard.press("Escape");
+  await dragNearCentre();
+  expect(Math.abs((await centres()).dx)).toBeGreaterThan(0.5);
+  expect(await page.evaluate(() => localStorage.getItem("ie-snap"))).toBe("0");
+});

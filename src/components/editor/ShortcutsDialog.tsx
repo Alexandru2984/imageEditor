@@ -35,6 +35,7 @@ const GROUPS: { title: string; items: [string, string][] }[] = [
       [`${MOD} A`, "Select all"],
       ["Del", "Delete selection"],
       ["Arrows", "Nudge (Shift for 10 px)"],
+      ["Alt drag", "Move without snapping to guides"],
       [`${MOD} ] / ${MOD} [`, "Bring forward, send backward"],
       ["⇧ H / ⇧ V", "Flip horizontal, vertical"],
     ],

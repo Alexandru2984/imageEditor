@@ -7,6 +7,7 @@ import {
   FolderOpen,
   Keyboard,
   Layers,
+  Magnet,
   Loader2,
   Maximize,
   Monitor,
@@ -32,6 +33,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
@@ -78,6 +80,8 @@ interface TopBarProps {
   onOpenProject: (file: File) => void;
   onNewProject: () => void;
   onShowShortcuts: () => void;
+  snapping: boolean;
+  onSnappingChange: (enabled: boolean) => void;
   panel: PanelTab | null;
   onTogglePanel: (tab: PanelTab) => void;
 }
@@ -107,6 +111,8 @@ export const TopBar = ({
   onOpenProject,
   onNewProject,
   onShowShortcuts,
+  snapping,
+  onSnappingChange,
   panel,
   onTogglePanel,
 }: TopBarProps) => {
@@ -391,6 +397,15 @@ export const TopBar = ({
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
+          {hasDocument && (
+            <DropdownMenuCheckboxItem
+              checked={snapping}
+              onCheckedChange={(checked) => onSnappingChange(checked === true)}
+              onSelect={(event) => event.preventDefault()}
+            >
+              <Magnet /> Snap to guides
+            </DropdownMenuCheckboxItem>
+          )}
           {themeSubmenu}
           {!isMobile && (
             <DropdownMenuItem onSelect={onShowShortcuts}>
