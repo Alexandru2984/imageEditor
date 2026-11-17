@@ -24,6 +24,12 @@ graph with lifecycle scripts disabled, verifies registry signatures, and runs
 the audit, lint, unit, typecheck, build and browser E2E gates. Set
 `E2E_CHROMIUM_PATH` when Playwright's own Chromium is not installed.
 
+The audit gate (`scripts/audit.mjs`) fails on any advisory at any
+severity. The one exception is an entry in `scripts/audit-allowlist.json`
+that has a written reason and an expiry date, and it only applies while the
+advisory affects development tooling alone. Advisories in anything shipped to
+browsers can never be allowlisted.
+
 It then stages the build as a new release,
 `releases/<UTC time>-<commit>/`, owned by root and read-only to the Nginx
 worker. Hashed assets from the release being replaced are hard-linked into the

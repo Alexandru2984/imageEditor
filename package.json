@@ -17,7 +17,7 @@
     "test:nginx": "scripts/test-nginx.sh",
     "lint:scripts": "shellcheck scripts/*.sh",
     "brand-assets": "node scripts/generate-brand-assets.mjs",
-    "audit": "npm audit --audit-level=low",
+    "audit": "node scripts/audit.mjs",
     "audit:signatures": "npm audit signatures",
     "check": "npm run lint && npm run test && npm run build",
     "preview": "vite preview"
