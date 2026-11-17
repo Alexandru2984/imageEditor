@@ -382,18 +382,22 @@ test("a newer clear in another tab blocks a stale pending autosave", async ({
   await secondPage.goto("/");
   await uploadImage(page);
   await uploadImage(secondPage);
+  await addShape(page);
 
   // Let both initial snapshots settle so the only pending write below is the
   // deliberately stale edit from the first tab.
-  await expect.poll(() => getAutosaveJson(page)).not.toBeNull();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((object) => object.type === "Rect"))
+    .toBe(true);
   await page.waitForTimeout(900);
 
-  // Open the confirmation first so a single click lands the clear well
-  // inside the first tab's autosave delay, even on a loaded machine.
+  // Everything slow happens first: the confirmation is already open, and the
+  // stale edit is one key press on the selected shape. The clear then lands
+  // well inside the first tab's autosave delay, even on a loaded machine.
   await secondPage.getByRole("button", { name: "New", exact: true }).click();
   const startNew = secondPage.getByRole("button", { name: "Start new" });
   await expect(startNew).toBeVisible();
-  await addShape(page);
+  await page.keyboard.press("Shift+H");
   await startNew.click();
 
   await expect(secondPage.getByText("Upload an Image")).toBeVisible();

@@ -180,8 +180,11 @@ export const ImageEditor = () => {
         if (!written) {
           if (!autosaveConflictShownRef.current) {
             autosaveConflictShownRef.current = true;
+            // One notice at a time: a second conflict refreshes it rather
+            // than stacking an identical copy.
             toast.warning(
-              "A newer autosave exists in another tab. Your next edit will become the latest version."
+              "A newer autosave exists in another tab. Your next edit will become the latest version.",
+              { id: "autosave-conflict" }
             );
           }
           return;
