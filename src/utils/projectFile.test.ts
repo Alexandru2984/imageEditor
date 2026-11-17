@@ -102,6 +102,54 @@ describe("readProjectFile", () => {
     ).resolves.toEqual(snapshot);
   });
 
+  it("accepts every adjustment and look the editor creates", async () => {
+    const snapshot = {
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "Image",
+            filters: [
+              { type: "Vintage", colorsOnly: false },
+              { type: "Vibrance", vibrance: 0.4 },
+              {
+                type: "ColorMatrix",
+                matrix: [1.1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0.9, 0, 0, 0, 0, 0, 1, 0],
+                colorsOnly: true,
+              },
+              { type: "Convolute", opaque: false, matrix: [0, -1, 0, -1, 5, -1, 0, -1, 0] },
+              { type: "Noise", noise: 300 },
+              { type: "Pixelate", blocksize: 12 },
+            ],
+          },
+        ],
+      }),
+      srcs: [],
+    };
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).resolves.toEqual(snapshot);
+  });
+
+  it.each([
+    [{ type: "Pixelate", blocksize: 100_000 }, /unsafe pixelate filter value/],
+    [{ type: "Noise", noise: -5 }, /unsafe noise filter value/],
+    [{ type: "ColorMatrix", matrix: [1, 2, 3] }, /unsafe colormatrix filter value/],
+    [{ type: "Convolute", matrix: Array(9).fill(1e9) }, /unsafe convolute filter value/],
+    [{ type: "Sepia", matrix: Array(20).fill(0) }, /unsupported sepia filter property/],
+    [{ type: "Vintage", colorsOnly: "yes" }, /unsafe vintage filter value/],
+    [{ type: "Gamma", gamma: [1, 1, 1] }, /unsupported filter type: gamma/],
+    [{ type: "Composed", subFilters: [] }, /unsupported filter type: composed/],
+    [{ type: "Brightness", toString: 1 }, /unsupported brightness filter property/],
+  ])("rejects unsafe or unknown filter %#", async (filter, message) => {
+    const snapshot = {
+      json: JSON.stringify({ objects: [{ type: "Image", filters: [filter] }] }),
+      srcs: [],
+    };
+    await expect(
+      readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })))
+    ).rejects.toThrow(message);
+  });
+
   it("rejects filter values that could overload Fabric's render pipeline", async () => {
     const snapshot = {
       json: JSON.stringify({

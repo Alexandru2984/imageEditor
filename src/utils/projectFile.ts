@@ -54,12 +54,47 @@ const ALLOWED_SERIALIZED_TYPES = new Set([
   "clip-path",
 ]);
 
-const FILTER_PARAMETERS = new Map<string, string>([
-  ["brightness", "brightness"],
-  ["contrast", "contrast"],
-  ["saturation", "saturation"],
-  ["blur", "blur"],
-  ["huerotation", "rotation"],
+type FilterParameterRule = (value: unknown) => boolean;
+
+const numberIn =
+  (min: number, max: number): FilterParameterRule =>
+  (value) =>
+    typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+
+const booleanValue: FilterParameterRule = (value) => typeof value === "boolean";
+
+const numberArray =
+  (length: number, min: number, max: number): FilterParameterRule =>
+  (value) =>
+    Array.isArray(value) && value.length === length && value.every(numberIn(min, max));
+
+// Fixed colour-matrix looks serialise only their colorsOnly flag; the matrix
+// itself comes from the class, so a project cannot smuggle one in.
+const LOOK_FILTER: Record<string, FilterParameterRule> = { colorsOnly: booleanValue };
+
+/**
+ * Every filter the editor can create, with each serialised parameter and its
+ * safe range. Anything else (unknown types, extra properties such as shader
+ * sources, out-of-range values) rejects the whole project.
+ */
+const FILTER_RULES = new Map<string, Record<string, FilterParameterRule>>([
+  ["brightness", { brightness: numberIn(-1, 1) }],
+  ["contrast", { contrast: numberIn(-1, 1) }],
+  ["saturation", { saturation: numberIn(-1, 1) }],
+  ["vibrance", { vibrance: numberIn(-1, 1) }],
+  ["blur", { blur: numberIn(0, 1) }],
+  ["huerotation", { rotation: numberIn(-1, 1) }],
+  ["noise", { noise: numberIn(0, 1_000) }],
+  ["pixelate", { blocksize: numberIn(1, 256) }],
+  ["colormatrix", { matrix: numberArray(20, -4, 4), colorsOnly: booleanValue }],
+  ["convolute", { matrix: numberArray(9, -8, 8), opaque: booleanValue }],
+  ["blackwhite", LOOK_FILTER],
+  ["sepia", LOOK_FILTER],
+  ["vintage", LOOK_FILTER],
+  ["kodachrome", LOOK_FILTER],
+  ["technicolor", LOOK_FILTER],
+  ["polaroid", LOOK_FILTER],
+  ["brownie", LOOK_FILTER],
 ]);
 
 const NUMERIC_PROPERTY_LIMITS = new Map<
@@ -117,24 +152,18 @@ function assertSafeStringProperty(key: string, value: unknown): void {
 
 function assertSafeFilter(object: Record<string, unknown>): void {
   const type = typeof object.type === "string" ? object.type.toLowerCase() : "";
-  const parameter = FILTER_PARAMETERS.get(type);
-  if (!parameter) throw new Error(`Project contains unsupported filter type: ${type}`);
+  const rules = FILTER_RULES.get(type);
+  if (!rules) throw new Error(`Project contains unsupported filter type: ${type}`);
 
   for (const key of Object.keys(object)) {
-    if (key !== "type" && key !== parameter) {
+    if (key === "type") continue;
+    const rule = Object.prototype.hasOwnProperty.call(rules, key) ? rules[key] : undefined;
+    if (!rule) {
       throw new Error(`Project contains an unsupported ${type} filter property`);
     }
-  }
-
-  const value = object[parameter];
-  if (
-    value !== undefined &&
-    (typeof value !== "number" || !Number.isFinite(value) || value < -1 || value > 1)
-  ) {
-    throw new Error(`Project contains an unsafe ${type} filter value`);
-  }
-  if (type === "blur" && typeof value === "number" && value < 0) {
-    throw new Error("Project contains an unsafe blur filter value");
+    if (object[key] !== undefined && !rule(object[key])) {
+      throw new Error(`Project contains an unsafe ${type} filter value`);
+    }
   }
 }
 

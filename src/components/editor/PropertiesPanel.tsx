@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type {
   Canvas as FabricCanvas,
-  FabricImage,
   FabricObject,
 } from "fabric";
 import { findBackgroundImage } from "@/utils/viewport";
@@ -10,12 +9,6 @@ import {
   offCanvasEvent,
   HISTORY_RESTORED,
 } from "@/utils/canvasEvents";
-import {
-  applyFilterValues,
-  readFilterValues,
-  DEFAULT_FILTERS,
-  type FilterValues,
-} from "@/utils/imageFilters";
 import {
   isEditorChrome,
   isReadOnlySelection,
@@ -27,7 +20,6 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { applyColor } from "@/utils/shapes";
 import {
-  SlidersHorizontal,
   Bold,
   Italic,
   Underline,
@@ -52,8 +44,6 @@ interface PropertiesPanelProps {
   brushOpacity: number;
   onBrushOpacityChange: (opacity: number) => void;
   fabricCanvas: FabricCanvas | null;
-  /** Which part of the panel to render: object/brush properties or image adjustments. */
-  section: "properties" | "adjust";
 }
 
 const COLOR_SWATCHES = [
@@ -103,16 +93,6 @@ const HexInput = ({
   );
 };
 
-// Blur only makes sense from 0 up; the rest are symmetric around 0
-const FILTER_SLIDERS: { key: keyof FilterValues; label: string; min: number }[] =
-  [
-    { key: "brightness", label: "Brightness", min: -100 },
-    { key: "contrast", label: "Contrast", min: -100 },
-    { key: "saturation", label: "Saturation", min: -100 },
-    { key: "hue", label: "Hue", min: -100 },
-    { key: "blur", label: "Blur", min: 0 },
-  ];
-
 interface SelectedObjectProps {
   fill: string;
   stroke: string;
@@ -150,42 +130,12 @@ export const PropertiesPanel = ({
   brushOpacity,
   onBrushOpacityChange,
   fabricCanvas,
-  section,
 }: PropertiesPanelProps) => {
-  const [filters, setFilters] = useState<FilterValues>(DEFAULT_FILTERS);
-  const [hasTargetImage, setHasTargetImage] = useState(false);
-  const [targetIsSelection, setTargetIsSelection] = useState(false);
-  const [filterTargetReadOnly, setFilterTargetReadOnly] = useState(false);
   const [selectedProps, setSelectedProps] =
     useState<SelectedObjectProps | null>(null);
   const [objectOpacity, setObjectOpacity] = useState(100);
-  const filtersRef = useRef<FilterValues>(DEFAULT_FILTERS);
-  const pendingFilterRef = useRef<{
-    target: FabricImage;
-    values: FilterValues;
-  } | null>(null);
-  const filterTimerRef = useRef<number | null>(null);
   const pendingObjectCommitRef = useRef<FabricObject | null>(null);
   const objectCommitTimerRef = useRef<number | null>(null);
-
-  // Filters target the selected image layer if one is selected, else the
-  // background photo. That's the image the filter sliders read from and write to.
-  const getFilterTarget = useCallback((): FabricImage | undefined => {
-    if (!fabricCanvas) return undefined;
-    const active = fabricCanvas.getActiveObject();
-    if (active && active.type === "image") return active as FabricImage;
-    return findBackgroundImage(fabricCanvas);
-  }, [fabricCanvas]);
-
-  // The background remains adjustable even though it is protected from
-  // transforms. A selected, explicitly locked image layer does not.
-  const isFilterReadOnly = useCallback(
-    (target: FabricImage | undefined): boolean =>
-      !!target &&
-      target === fabricCanvas?.getActiveObject() &&
-      isReadOnlySelection(target),
-    [fabricCanvas]
-  );
 
   const getEditableActiveObject = useCallback(():
     | FabricObject
@@ -238,87 +188,6 @@ export const PropertiesPanel = ({
     [fabricCanvas, flushScheduledObjectCommit]
   );
 
-  const applyFiltersToTarget = useCallback(
-    (target: FabricImage, values: FilterValues): boolean => {
-      if (
-        !fabricCanvas ||
-        !fabricCanvas.getObjects().includes(target) ||
-        isFilterReadOnly(target)
-      ) {
-        return false;
-      }
-
-      const previousFilters = [...(target.filters ?? [])];
-      try {
-        applyFilterValues(target, values);
-        fabricCanvas.renderAll();
-        return true;
-      } catch (error) {
-        console.error("Image filter rendering failed:", error);
-        target.filters = previousFilters;
-        try {
-          target.applyFilters();
-          fabricCanvas.renderAll();
-        } catch (rollbackError) {
-          console.error("Image filter rollback failed:", rollbackError);
-        }
-        const restored = readFilterValues(previousFilters as never);
-        filtersRef.current = restored;
-        setFilters(restored);
-        toast.error("This image is too large for that filter in this browser");
-        return false;
-      }
-    },
-    [fabricCanvas, isFilterReadOnly]
-  );
-
-  const cancelScheduledFilterApply = useCallback(() => {
-    if (filterTimerRef.current !== null) {
-      window.clearTimeout(filterTimerRef.current);
-      filterTimerRef.current = null;
-    }
-    pendingFilterRef.current = null;
-  }, []);
-
-  const flushScheduledFilterApply = useCallback((): FabricImage | null => {
-    if (filterTimerRef.current !== null) {
-      window.clearTimeout(filterTimerRef.current);
-      filterTimerRef.current = null;
-    }
-    const pending = pendingFilterRef.current;
-    pendingFilterRef.current = null;
-    return pending && applyFiltersToTarget(pending.target, pending.values)
-      ? pending.target
-      : null;
-  }, [applyFiltersToTarget]);
-
-  const scheduleFilterApply = useCallback(
-    (target: FabricImage, values: FilterValues) => {
-      pendingFilterRef.current = { target, values };
-      if (filterTimerRef.current !== null) {
-        window.clearTimeout(filterTimerRef.current);
-      }
-      filterTimerRef.current = window.setTimeout(() => {
-        filterTimerRef.current = null;
-        const pending = pendingFilterRef.current;
-        pendingFilterRef.current = null;
-        if (
-          pending &&
-          applyFiltersToTarget(pending.target, pending.values) &&
-          fabricCanvas
-        ) {
-          fabricCanvas.fire("object:modified", { target: pending.target });
-        }
-      }, 75);
-    },
-    [applyFiltersToTarget, fabricCanvas]
-  );
-
-  useEffect(
-    () => () => cancelScheduledFilterApply(),
-    [cancelScheduledFilterApply, fabricCanvas]
-  );
-
   // Slider work is coalesced; applying pixels and recording the history entry
   // happen together so pointer and keyboard event ordering cannot lose edits.
   const commitObjectChange = useCallback(() => {
@@ -332,55 +201,6 @@ export const PropertiesPanel = ({
     flushScheduledObjectCommit,
     getEditableActiveObject,
   ]);
-
-  const commitFilterChange = useCallback(() => {
-    if (!fabricCanvas) return;
-    const target = flushScheduledFilterApply();
-    if (target) fabricCanvas.fire("object:modified", { target });
-  }, [
-    fabricCanvas,
-    flushScheduledFilterApply,
-  ]);
-
-  const setFilter = (key: keyof FilterValues) => (value: number[]) => {
-    const filterValue = value[0];
-    if (filterValue === undefined) return;
-    const target = getFilterTarget();
-    if (!target || isFilterReadOnly(target)) return;
-    const next = { ...filtersRef.current, [key]: filterValue };
-    filtersRef.current = next;
-    setFilters(next);
-    scheduleFilterApply(target, next);
-  };
-
-  // Read the current filter target's values into the sliders. Runs on selection
-  // change and after undo/redo, so the sliders always reflect what's on screen.
-  const syncFiltersFromCanvas = useCallback(() => {
-    cancelScheduledFilterApply();
-    const target = getFilterTarget();
-    setHasTargetImage(!!target);
-    setTargetIsSelection(
-      !!target && target === fabricCanvas?.getActiveObject()
-    );
-    setFilterTargetReadOnly(isFilterReadOnly(target));
-    const next = readFilterValues(target?.filters as never);
-    filtersRef.current = next;
-    setFilters(next);
-  }, [
-    cancelScheduledFilterApply,
-    fabricCanvas,
-    getFilterTarget,
-    isFilterReadOnly,
-  ]);
-
-  useEffect(() => {
-    if (!fabricCanvas) return;
-    syncFiltersFromCanvas();
-    onCanvasEvent(fabricCanvas, HISTORY_RESTORED, syncFiltersFromCanvas);
-    return () => {
-      offCanvasEvent(fabricCanvas, HISTORY_RESTORED, syncFiltersFromCanvas);
-    };
-  }, [fabricCanvas, syncFiltersFromCanvas]);
 
   // Read properties from selected object
   const readSelectedObject = useCallback(() => {
@@ -444,28 +264,23 @@ export const PropertiesPanel = ({
     if (!fabricCanvas) return;
     readSelectedObject();
 
-    const onSelect = () => {
-      readSelectedObject();
-      // Switching selection changes which image the filters target
-      syncFiltersFromCanvas();
-    };
-    const onClear = () => {
-      setSelectedProps(null);
-      syncFiltersFromCanvas();
-    };
+    const onSelect = () => readSelectedObject();
+    const onClear = () => setSelectedProps(null);
 
+    onCanvasEvent(fabricCanvas, HISTORY_RESTORED, onSelect);
     fabricCanvas.on("selection:created", onSelect);
     fabricCanvas.on("selection:updated", onSelect);
     fabricCanvas.on("selection:cleared", onClear);
     fabricCanvas.on("object:modified", onSelect);
 
     return () => {
+      offCanvasEvent(fabricCanvas, HISTORY_RESTORED, onSelect);
       fabricCanvas.off("selection:created", onSelect);
       fabricCanvas.off("selection:updated", onSelect);
       fabricCanvas.off("selection:cleared", onClear);
       fabricCanvas.off("object:modified", onSelect);
     };
-  }, [fabricCanvas, readSelectedObject, syncFiltersFromCanvas]);
+  }, [fabricCanvas, readSelectedObject]);
 
   // Update selected object's fill color
   const handleColorChange = (color: string) => {
@@ -630,8 +445,6 @@ export const PropertiesPanel = ({
   return (
     <ScrollArea className="h-full w-full">
       <div className="space-y-5 p-4">
-        {section === "properties" && (
-          <>
         {/* Color Swatches */}
         <div>
           <div className="mb-2 flex items-center justify-between">
@@ -1036,61 +849,6 @@ export const PropertiesPanel = ({
 
             <Separator />
           </>
-        )}
-          </>
-        )}
-
-        {section === "adjust" && !hasTargetImage && (
-          <div className="flex flex-col items-center gap-2 py-10 text-center">
-            <SlidersHorizontal className="h-6 w-6 text-muted-foreground" />
-            <p className="text-sm font-medium">No image to adjust</p>
-            <p className="max-w-[14rem] text-xs text-muted-foreground">
-              Select an image layer, or deselect everything to adjust the photo.
-            </p>
-          </div>
-        )}
-
-        {/* Image Filters — non-destructive, applied to the selected image
-            layer or, with nothing selected, the background photo */}
-        {section === "adjust" && hasTargetImage && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <Label className="text-xs font-semibold">Image Filters</Label>
-              <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {filterTargetReadOnly
-                  ? "Locked"
-                  : targetIsSelection
-                    ? "Selected"
-                    : "Background"}
-              </span>
-            </div>
-
-            <div className="space-y-3">
-              {FILTER_SLIDERS.map(({ key, label, min }) => (
-                <div key={key}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <Label className="text-xs font-medium text-muted-foreground">
-                      {label}
-                    </Label>
-                    <span className="text-xs text-muted-foreground tabular-nums">
-                      {filters[key]}
-                    </span>
-                  </div>
-                  <Slider
-                    value={[filters[key]]}
-                    aria-label={`${label} filter`}
-                    disabled={filterTargetReadOnly}
-                    onValueChange={setFilter(key)}
-                    onValueCommit={commitFilterChange}
-                    min={min}
-                    max={100}
-                    step={1}
-                    className="w-full"
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
         )}
       </div>
     </ScrollArea>

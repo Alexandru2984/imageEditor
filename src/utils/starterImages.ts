@@ -99,7 +99,7 @@ export function createSampleImage(width = 1600, height = 1000): Promise<File> {
 
   // Sun with a soft glow.
   const sunX = width * 0.64;
-  const sunY = horizon - height * 0.12;
+  const sunY = horizon - height * 0.3;
   const glow = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, height * 0.42);
   glow.addColorStop(0, "rgba(254, 240, 138, 0.85)");
   glow.addColorStop(0.25, "rgba(253, 186, 116, 0.35)");

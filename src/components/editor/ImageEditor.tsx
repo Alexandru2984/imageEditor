@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Canvas as FabricCanvasComponent } from "./Canvas";
 import { Toolbar } from "./Toolbar";
 import { PropertiesPanel } from "./PropertiesPanel";
+import { AdjustPanel } from "./AdjustPanel";
 import { LayersPanel } from "./LayersPanel";
 import { StartScreen } from "./StartScreen";
 import { TopBar } from "./TopBar";
@@ -681,7 +682,6 @@ export const ImageEditor = () => {
       </div>
       <TabsContent value="properties" className="mt-0 min-h-0 flex-1">
         <PropertiesPanel
-          section="properties"
           activeColor={activeColor}
           onColorChange={setActiveColor}
           brushWidth={brushWidth}
@@ -694,18 +694,7 @@ export const ImageEditor = () => {
         />
       </TabsContent>
       <TabsContent value="adjust" className="mt-0 min-h-0 flex-1">
-        <PropertiesPanel
-          section="adjust"
-          activeColor={activeColor}
-          onColorChange={setActiveColor}
-          brushWidth={brushWidth}
-          onBrushWidthChange={setBrushWidth}
-          brushHardness={brushHardness}
-          onBrushHardnessChange={setBrushHardness}
-          brushOpacity={brushOpacity}
-          onBrushOpacityChange={setBrushOpacity}
-          fabricCanvas={fabricCanvas}
-        />
+        <AdjustPanel fabricCanvas={fabricCanvas} />
       </TabsContent>
       <TabsContent value="layers" className="mt-0 min-h-0 flex-1">
         <LayersPanel fabricCanvas={fabricCanvas} />

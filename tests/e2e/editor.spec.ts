@@ -1036,3 +1036,43 @@ test.describe("on a phone", () => {
     await expect(page.getByRole("tab", { name: "Layers" })).toHaveCount(0);
   });
 });
+
+test("presets, auto enhance and compare are undoable and never leak into saves", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  await page.getByRole("tab", { name: "Adjust" }).click();
+  const filterTypes = async () =>
+    ((await autosavedObjects(page)).find((o) => o.type === "Image")?.filters as
+      | Array<{ type: string }>
+      | undefined)?.map((filter) => filter.type) ?? [];
+
+  await page.getByRole("button", { name: "Vintage preset" }).click();
+  await expect(page.getByRole("button", { name: "Vintage preset" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await expect.poll(filterTypes).toEqual(["Vintage", "Contrast", "Noise"]);
+
+  // Holding compare shows the original without touching the saved document.
+  const compare = page.getByRole("button", { name: "Hold to compare with the original" });
+  await compare.hover();
+  await page.mouse.down();
+  await expect(compare).toHaveAttribute("aria-pressed", "true");
+  await page.mouse.up();
+  await expect(compare).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(filterTypes).toEqual(["Vintage", "Contrast", "Noise"]);
+
+  await page.getByRole("button", { name: "Auto" }).click();
+  await expect.poll(filterTypes).not.toContain("Vintage");
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(filterTypes).toEqual(["Vintage", "Contrast", "Noise"]);
+  await expect(page.getByRole("button", { name: "Vintage preset" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+
+  await page.getByRole("button", { name: "Reset adjustments" }).click();
+  await expect.poll(filterTypes).toEqual([]);
+});

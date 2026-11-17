@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
-import { clampZoom, fitToScreen } from "@/utils/viewport";
+import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
 import { flattenRegion } from "@/utils/flatten";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { installWorkspaceRenderer } from "@/utils/workspace";
@@ -85,6 +85,8 @@ export const Canvas = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fabricCanvasRef = useRef<FabricCanvas | null>(null);
+  const onZoomChangeRef = useRef(onZoomChange);
+  onZoomChangeRef.current = onZoomChange;
   const prevToolRef = useRef<Tool>(activeTool);
   const generatedImageControllerRef = useRef<AbortController | null>(null);
   const documentRevisionRef = useRef(0);
@@ -136,9 +138,23 @@ export const Canvas = ({
 
     const { clientWidth, clientHeight } = container;
     if (clientWidth === 0 || clientHeight === 0) return;
+    const previousWidth = canvas.width;
+    const previousHeight = canvas.height;
+    if (previousWidth === clientWidth && previousHeight === clientHeight) return;
 
+    // A fitted view stays fitted (rotating a phone, opening the bottom
+    // sheet); otherwise keep whatever was at the centre of the view there.
+    const wasFitted = isFitted(canvas);
     canvas.setDimensions({ width: clientWidth, height: clientHeight });
-    canvas.renderAll();
+    if (wasFitted) {
+      onZoomChangeRef.current(fitToScreen(canvas));
+    } else {
+      const vpt = [...canvas.viewportTransform] as typeof canvas.viewportTransform;
+      vpt[4] += (clientWidth - previousWidth) / 2;
+      vpt[5] += (clientHeight - previousHeight) / 2;
+      canvas.setViewportTransform(vpt);
+    }
+    canvas.requestRenderAll();
   }, []);
 
   // ---------- Initialize canvas ----------
