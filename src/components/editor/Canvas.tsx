@@ -68,6 +68,33 @@ const abortError = (): Error => {
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
 
+/**
+ * The scene-space area a marquee covers. Read straight from its geometry:
+ * the bounding box would include the dashed stroke and depends on cached
+ * corner coordinates that Fabric only refreshes on setCoords().
+ */
+function marqueeRegion(canvas: FabricCanvas, rect: Rect) {
+  let left = rect.left;
+  let top = rect.top;
+  let right = left + rect.width;
+  let bottom = top + rect.height;
+  // Pixels outside the photo are never exported, so neither copy nor crop
+  // should reach past its edges.
+  const photo = findBackgroundImage(canvas);
+  if (photo) {
+    photo.setCoords();
+    const bounds = photo.getBoundingRect();
+    left = Math.max(left, bounds.left);
+    top = Math.max(top, bounds.top);
+    right = Math.min(right, bounds.left + bounds.width);
+    bottom = Math.min(bottom, bounds.top + bounds.height);
+  }
+  if (right - left < 1 || bottom - top < 1) return null;
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+const OUTSIDE_PHOTO = "The selection is outside the photo";
+
 export const Canvas = ({
   activeTool,
   activeColor,
@@ -787,6 +814,8 @@ export const Canvas = ({
         width: Math.abs(p.x - start.x),
         height: Math.abs(p.y - start.y),
       });
+      // Keep cached corners in sync for anything that hit-tests the marquee.
+      marqueeRef.current.setCoords();
       canvas.requestRenderAll();
     };
 
@@ -821,12 +850,16 @@ export const Canvas = ({
     const canvas = fabricCanvasRef.current;
     const rect = marqueeRef.current;
     if (!canvas || !rect || rasterBusyRef.current) return;
+    const region = marqueeRegion(canvas, rect);
+    if (!region) {
+      toast.error(OUTSIDE_PHOTO);
+      return;
+    }
 
     rasterBusyRef.current = true;
     setIsRasterizing(true);
     const revision = documentRevisionRef.current;
 
-    const region = rect.getBoundingRect();
     try {
       // Hide the overlay so it does not tint the flattened pixels.
       rect.visible = false;
@@ -876,12 +909,16 @@ export const Canvas = ({
     const canvas = fabricCanvasRef.current;
     const rect = marqueeRef.current;
     if (!canvas || !rect || rasterBusyRef.current) return;
+    const region = marqueeRegion(canvas, rect);
+    if (!region) {
+      toast.error(OUTSIDE_PHOTO);
+      return;
+    }
 
     rasterBusyRef.current = true;
     setIsRasterizing(true);
     const revision = documentRevisionRef.current;
 
-    const region = rect.getBoundingRect();
     try {
       rect.visible = false;
       let flattened: ReturnType<typeof flattenRegion>;
@@ -943,7 +980,11 @@ export const Canvas = ({
     const target = preMarqueeTargetRef.current;
     if (!canvas || !rect || !target || rasterBusyRef.current) return;
 
-    const region = rect.getBoundingRect();
+    const region = marqueeRegion(canvas, rect);
+    if (!region) {
+      toast.error(OUTSIDE_PHOTO);
+      return;
+    }
     const clip = new Rect({
       left: region.left,
       top: region.top,

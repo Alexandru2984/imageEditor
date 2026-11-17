@@ -1126,3 +1126,49 @@ test("stickers are added as scalable layers", async ({ page }) => {
   // Stickers are not edited like text.
   await expect(page.getByRole("button", { name: "Meme text style" })).toHaveCount(0);
 });
+
+async function dragMarquee(page: Page, half = 90) {
+  await page.getByRole("button", { name: "Select region (M)" }).click();
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x - half, center.y - half);
+  await page.mouse.down();
+  await page.mouse.move(center.x, center.y, { steps: 4 });
+  await page.mouse.move(center.x + half, center.y + half, { steps: 4 });
+  await page.mouse.up();
+  await expect(page.getByRole("button", { name: "Crop to this" })).toBeVisible();
+}
+
+test("marquee copy and crop use the dragged region", async ({ page }) => {
+  await uploadTransparentPng(page);
+  await dragMarquee(page, 20);
+  await page.getByRole("button", { name: "New layer", exact: true }).click();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).filter((o) => o.type === "Image").length)
+    .toBe(2);
+  const copy = (await autosavedObjects(page)).filter((o) => o.type === "Image")[1]!;
+  const copyWidth = (copy.width as number) * (copy.scaleX as number);
+  const copyHeight = (copy.height as number) * (copy.scaleY as number);
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const photoWidth = (photo.width as number) * (photo.scaleX as number);
+  // A 40px square drag, not a 1px stub and not the whole photo.
+  expect(copyWidth).toBeGreaterThan(5);
+  expect(copyWidth).toBeLessThan(photoWidth / 2);
+  expect(Math.abs(copyWidth - copyHeight)).toBeLessThan(1);
+
+  // A selection hanging past the photo edge is clamped to the photo.
+  await page.getByRole("button", { name: "Select region (M)" }).click();
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x - 10, center.y - 10);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 400, center.y + 300, { steps: 6 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Crop to this" }).click();
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  const dims = await page.getByTestId("export-dimensions").textContent();
+  const [w, h] = (dims ?? "").match(/\d+/g)!.map(Number);
+  // Unclamped, the 410×310 drag would not be square; clamped to the photo's
+  // bottom-right corner it is.
+  expect(w).toBeGreaterThan(5);
+  expect(w).toBeLessThan(64);
+  expect(Math.abs(w! - h!)).toBeLessThanOrEqual(1);
+});
