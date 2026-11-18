@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import {
+  Check,
   Contrast,
   Copy,
   Crop as CropIcon,
@@ -44,6 +45,9 @@ interface SelectionTaskBarProps {
 const HINTS: Partial<Record<Tool, string>> = {
   marquee: "Drag to select a region",
   ellipseMarquee: "Drag to select an ellipse",
+  lasso: "Drag around what to select",
+  polygonLasso: "Tap corner by corner around what to select",
+  magicWand: "Tap a colour to select the area like it",
 };
 
 const failure = (error: unknown, fallback: string) => {
@@ -63,7 +67,7 @@ export function SelectionTaskBar({
   busy,
   onCrop,
 }: SelectionTaskBarProps) {
-  const selection = useSelection(canvas);
+  const { selection, draft } = useSelection(canvas);
   const rectangular = useMemo(() => selection?.mask.isRectangle() ?? false, [selection]);
 
   const current = () => (canvas ? selectionOf(canvas).current() : null);
@@ -132,7 +136,19 @@ export function SelectionTaskBar({
 
   return (
     <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-popover/95 px-2 py-1.5 shadow-xl backdrop-blur">
-      {!selection ? (
+      {draft ? (
+        <>
+          <span className="px-1 text-xs text-muted-foreground">Tap the first corner to close</span>
+          <Button size="sm" className="h-8" onClick={() => draft.finish()}>
+            <Check className="mr-1 h-4 w-4" />
+            Close shape
+          </Button>
+          <Button size="sm" variant="ghost" className="h-8" onClick={() => draft.cancel()}>
+            <X className="mr-1 h-4 w-4" />
+            Cancel
+          </Button>
+        </>
+      ) : !selection ? (
         <span className="px-1 py-1.5 text-xs text-muted-foreground">
           {HINTS[activeTool] ?? "Select a region"}
         </span>

@@ -216,3 +216,39 @@ test("the gradient is picked from the fill tools, its settings on screen", async
   await expectOnScreen(page, options.getByRole("radiogroup", { name: "Gradient colors" }));
   await expectNoSidewaysScroll(page);
 });
+
+test("selections are made with taps, the modes and actions on screen", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff", [{ x: 0, y: 0, width: 200, height: 300, color: "#00aa00" }]);
+  // The lasso group holds the magic wand.
+  await page.getByRole("button", { name: "Lasso (L)" }).tap();
+  await page.getByRole("button", { name: "Lasso (L)" }).tap();
+  await page.getByRole("button", { name: /^Magic wand/ }).tap();
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expectOnScreen(page, options.getByRole("radiogroup", { name: "Selection mode" }));
+  await expectNoSidewaysScroll(page);
+
+  const center = await canvasCenter(page);
+  await page.touchscreen.tap(center.x + 40, center.y);
+  await expectOnScreen(page, page.getByRole("button", { name: "New layer", exact: true }));
+  await expectNoSidewaysScroll(page);
+  await page.getByRole("button", { name: "New layer", exact: true }).tap();
+  // The white half of the photo.
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))?.width)
+    .toBe(200);
+
+  // Corner by corner with the polygonal lasso, closed from the task bar.
+  await page.getByRole("button", { name: "Magic wand (W)" }).tap();
+  await page.getByRole("button", { name: "Magic wand (W)" }).tap();
+  await page.getByRole("button", { name: /^Polygonal lasso/ }).tap();
+  for (const [dx, dy] of [
+    [-40, -40],
+    [40, -40],
+    [0, 40],
+  ]) {
+    await page.touchscreen.tap(center.x + dx!, center.y + dy!);
+  }
+  await expectOnScreen(page, page.getByRole("button", { name: "Close shape" }));
+  await page.getByRole("button", { name: "Close shape" }).tap();
+  await expectOnScreen(page, page.getByRole("button", { name: "Redact" }));
+});

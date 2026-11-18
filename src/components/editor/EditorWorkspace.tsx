@@ -34,11 +34,14 @@ import { DEFAULT_GRADIENT_OPTIONS, type GradientOptions } from "@/raster/gradien
 import {
   isBrushTool,
   isFillTool,
+  isLassoTool,
   isMarqueeTool,
   type BrushTool,
   type FillTool,
+  type LassoTool,
   type MarqueeTool,
 } from "./toolGroups";
+import { DEFAULT_WAND_OPTIONS, type WandOptions } from "@/selection/magicWand";
 import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import {
@@ -142,6 +145,12 @@ export const EditorWorkspace = ({
   const [lastFillTool, setLastFillTool] = useSessionState<FillTool>("lastFillTool", "bucket");
   const [lastMarqueeTool, setLastMarqueeTool] = useSessionState<MarqueeTool>("lastMarqueeTool", "marquee");
   const [selectionMode, setSelectionMode] = useSessionState<SelectionMode>("selectionMode", "replace");
+  const [lastLassoTool, setLastLassoTool] = useSessionState<LassoTool>("lastLassoTool", "lasso");
+  const [wand, setWand] = useSessionState<WandOptions>("wand", DEFAULT_WAND_OPTIONS);
+  const updateWand = useCallback(
+    (change: Partial<WandOptions>) => setWand((current) => ({ ...current, ...change })),
+    [setWand]
+  );
   const updateBucket = useCallback(
     (change: Partial<BucketOptions>) => setBucket((current) => ({ ...current, ...change })),
     [setBucket]
@@ -241,8 +250,9 @@ export const EditorWorkspace = ({
       if (isBrushTool(tool)) setLastBrushTool(tool);
       if (isFillTool(tool)) setLastFillTool(tool);
       if (isMarqueeTool(tool)) setLastMarqueeTool(tool);
+      if (isLassoTool(tool)) setLastLassoTool(tool);
     },
-    [setLastShape, setLastBrushTool, setLastFillTool, setLastMarqueeTool]
+    [setLastShape, setLastBrushTool, setLastFillTool, setLastMarqueeTool, setLastLassoTool]
   );
 
   const handleZoomChange = useCallback((newZoom: number) => {
@@ -467,6 +477,7 @@ export const EditorWorkspace = ({
     lastBrushTool,
     lastFillTool,
     lastMarqueeTool,
+    lastLassoTool,
     undo,
     redo,
     hasUndo,
@@ -662,6 +673,8 @@ export const EditorWorkspace = ({
       onSnappingChange={handleSnappingChange}
       selectionMode={selectionMode}
       onSelectionModeChange={setSelectionMode}
+      wand={wand}
+      onWandChange={updateWand}
     />
   );
 
@@ -760,6 +773,7 @@ export const EditorWorkspace = ({
             lastBrushTool={lastBrushTool}
             lastFillTool={lastFillTool}
             lastMarqueeTool={lastMarqueeTool}
+            lastLassoTool={lastLassoTool}
             fabricCanvas={fabricCanvas}
             onEyedropper={eyedropper.start}
             colors={colorWells(false)}
@@ -778,6 +792,7 @@ export const EditorWorkspace = ({
             bucket={bucket}
             gradient={gradient}
             selectionMode={selectionMode}
+            wand={wand}
             secondaryColor={backgroundColor}
             uploadedImage={uploadedImage}
             initialSnapshot={initialSnapshot}
@@ -847,6 +862,7 @@ export const EditorWorkspace = ({
           lastBrushTool={lastBrushTool}
           lastFillTool={lastFillTool}
           lastMarqueeTool={lastMarqueeTool}
+          lastLassoTool={lastLassoTool}
           fabricCanvas={fabricCanvas}
           onEyedropper={eyedropper.start}
         />

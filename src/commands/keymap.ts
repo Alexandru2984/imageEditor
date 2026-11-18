@@ -72,6 +72,9 @@ export const KEYMAP = {
   textTool: [{ key: "t" }],
   marqueeTool: [{ key: "m" }],
   nextMarqueeTool: [{ key: "m", shift: true }],
+  lassoTool: [{ key: "l" }],
+  nextLassoTool: [{ key: "l", shift: true }],
+  magicWandTool: [{ key: "w" }],
   cropTool: [{ key: "c" }],
   eyedropper: [{ key: "i" }],
 } satisfies Record<string, Shortcut[]>;

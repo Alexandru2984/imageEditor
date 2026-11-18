@@ -2,9 +2,12 @@ import {
   Blend,
   CircleDashed,
   Highlighter,
+  Lasso,
   PaintBucket,
   Paintbrush,
   SquareDashed,
+  WandSparkles,
+  Pentagon,
   type LucideIcon,
 } from "lucide-react";
 import type { Tool } from "@/types/editor";
@@ -85,5 +88,35 @@ export const MARQUEE_TOOLS: GroupedToolDef<MarqueeTool>[] = [
 export const isMarqueeTool = (tool: Tool): tool is MarqueeTool =>
   tool === "marquee" || tool === "ellipseMarquee";
 
+/** The freehand selection tools and the magic wand (L, W). */
+export type LassoTool = "lasso" | "polygonLasso" | "magicWand";
+
+export const LASSO_TOOLS: GroupedToolDef<LassoTool>[] = [
+  {
+    id: "lasso",
+    icon: Lasso,
+    label: "Lasso (L)",
+    name: "Lasso",
+    description: "Drag around what to select",
+  },
+  {
+    id: "polygonLasso",
+    icon: Pentagon,
+    label: "Polygonal lasso (L)",
+    name: "Polygonal lasso",
+    description: "Click corner by corner around what to select",
+  },
+  {
+    id: "magicWand",
+    icon: WandSparkles,
+    label: "Magic wand (W)",
+    name: "Magic wand",
+    description: "Click a colour to select the area like it",
+  },
+];
+
+export const isLassoTool = (tool: Tool): tool is LassoTool =>
+  tool === "lasso" || tool === "polygonLasso" || tool === "magicWand";
+
 /** Tools that draw a pixel selection. */
-export const isSelectionTool = (tool: Tool): boolean => isMarqueeTool(tool);
+export const isSelectionTool = (tool: Tool): boolean => isMarqueeTool(tool) || isLassoTool(tool);

@@ -29,6 +29,12 @@ export type SelectionPreview =
   /** The selection being dragged by whole pixels. */
   | { kind: "move"; dx: number; dy: number };
 
+/** A shape built step by step (the polygonal lasso), finished or dropped from outside. */
+export interface SelectionDraft {
+  finish(): void;
+  cancel(): void;
+}
+
 export function documentGrid(canvas: FabricCanvas): DocumentGrid | null {
   const photo = findBackgroundImage(canvas);
   if (!photo) return null;
@@ -84,6 +90,7 @@ export class SelectionStore {
   private selection: PixelSelection | null = null;
   private last: PixelSelection | null = null;
   private shownPreview: SelectionPreview | null = null;
+  private currentDraft: SelectionDraft | null = null;
   private revision = 0;
   private readonly listeners = new Set<() => void>();
 
@@ -152,6 +159,16 @@ export class SelectionStore {
   setPreview(preview: SelectionPreview | null): void {
     if (preview === null && this.shownPreview === null) return;
     this.shownPreview = preview;
+    this.notify();
+  }
+
+  get draft(): SelectionDraft | null {
+    return this.currentDraft;
+  }
+
+  setDraft(draft: SelectionDraft | null): void {
+    if (draft === this.currentDraft) return;
+    this.currentDraft = draft;
     this.notify();
   }
 

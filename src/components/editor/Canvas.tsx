@@ -34,6 +34,7 @@ import { installSelectionOverlay } from "@/selection/overlay";
 import { OUTSIDE_PHOTO } from "@/selection/actions";
 import { gridBoxToScene, selectionOf } from "@/selection/state";
 import type { SelectionMode } from "@/selection/mask";
+import type { WandOptions } from "@/selection/magicWand";
 import { SelectionTaskBar } from "./SelectionTaskBar";
 import { isSelectionTool } from "./toolGroups";
 import type { PaintOptions } from "@/raster/paintSettings";
@@ -56,6 +57,7 @@ interface CanvasProps {
   gradient: GradientOptions;
   /** How a new selection shape joins the selection. */
   selectionMode: SelectionMode;
+  wand: WandOptions;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -108,6 +110,7 @@ export const Canvas = ({
   bucket,
   gradient,
   selectionMode,
+  wand,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -900,6 +903,7 @@ export const Canvas = ({
     canvasKey: uploadedImage,
     activeTool,
     mode: selectionMode,
+    wand,
     spaceDownRef,
   });
 

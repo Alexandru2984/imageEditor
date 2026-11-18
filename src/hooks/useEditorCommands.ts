@@ -25,6 +25,9 @@ import {
   Blend,
   CircleDashed,
   Combine,
+  Lasso,
+  Pentagon,
+  WandSparkles,
   Contrast,
   Grid2x2,
   Highlighter,
@@ -76,6 +79,7 @@ import {
   isMarqueeTool,
   type BrushTool,
   type FillTool,
+  type LassoTool,
   type MarqueeTool,
 } from "@/components/editor/toolGroups";
 import {
@@ -97,6 +101,7 @@ export interface EditorCommandContext {
   lastBrushTool: BrushTool;
   lastFillTool: FillTool;
   lastMarqueeTool: MarqueeTool;
+  lastLassoTool: LassoTool;
   undo: () => void;
   redo: () => void;
   /** Live checks: a shortcut can arrive before React re-renders. */
@@ -160,6 +165,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     lastBrushTool,
     lastFillTool,
     lastMarqueeTool,
+    lastLassoTool,
     undo,
     redo,
     hasUndo,
@@ -741,6 +747,24 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
       tool("tool.rectSelect", "marquee", "Rectangle select", SquareDashed, undefined, "marquee rectangular"),
       tool("tool.ellipseSelect", "ellipseMarquee", "Ellipse select", CircleDashed, undefined, "marquee elliptical oval circle"),
+      {
+        id: "tool.lasso",
+        label: "Lasso",
+        icon: Lasso,
+        shortcuts: KEYMAP.lassoTool,
+        keywords: "freehand selection",
+        run: () => onToolChange(lastLassoTool === "magicWand" ? "lasso" : lastLassoTool),
+        isChecked: () => activeTool === "lasso" || activeTool === "polygonLasso",
+      },
+      {
+        id: "tool.nextLasso",
+        label: "Switch between Lasso and Polygonal lasso",
+        icon: Lasso,
+        shortcuts: KEYMAP.nextLassoTool,
+        run: () => onToolChange(activeTool === "lasso" ? "polygonLasso" : "lasso"),
+      },
+      tool("tool.polygonLasso", "polygonLasso", "Polygonal lasso", Pentagon, undefined, "polygon selection corners"),
+      tool("tool.magicWand", "magicWand", "Magic wand", WandSparkles, KEYMAP.magicWandTool, "colour color similar selection"),
       tool("tool.crop", "crop", "Crop", Crop, KEYMAP.cropTool, "trim aspect ratio"),
       {
         id: "tool.eyedropper",
@@ -808,6 +832,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     lastBrushTool,
     lastFillTool,
     lastMarqueeTool,
+    lastLassoTool,
     lastShape,
     onToolChange,
     openCommandPalette,

@@ -14,7 +14,10 @@ export type Tool =
   | "text"
   | "crop"
   | "marquee"
-  | "ellipseMarquee";
+  | "ellipseMarquee"
+  | "lasso"
+  | "polygonLasso"
+  | "magicWand";
 
 export interface HistoryEntry {
   json: string;

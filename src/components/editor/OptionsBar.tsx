@@ -11,7 +11,10 @@ import {
   PaintBucket,
   Spline,
   Highlighter,
+  Lasso,
   Paintbrush,
+  Pentagon,
+  WandSparkles,
   Shapes,
   SquareDashed,
   Type,
@@ -33,6 +36,7 @@ import type { BucketOptions } from "@/raster/fill";
 import type { GradientColors, GradientOptions, GradientType } from "@/raster/gradient";
 import type { Tool } from "@/types/editor";
 import type { SelectionMode } from "@/selection/mask";
+import type { WandOptions } from "@/selection/magicWand";
 import { cn } from "@/lib/utils";
 import { isSelectionTool } from "./toolGroups";
 
@@ -70,6 +74,8 @@ interface OptionsBarProps {
   /** How a new selection shape joins the selection. */
   selectionMode: SelectionMode;
   onSelectionModeChange: (mode: SelectionMode) => void;
+  wand: WandOptions;
+  onWandChange: (change: Partial<WandOptions>) => void;
 }
 
 const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }> = {
@@ -102,6 +108,21 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     icon: CircleDashed,
     name: "Ellipse select",
     hint: "Shift adds · Alt subtracts · drag inside to move the selection",
+  },
+  lasso: {
+    icon: Lasso,
+    name: "Lasso",
+    hint: "Drag around what to select · Shift adds · Alt subtracts",
+  },
+  polygonLasso: {
+    icon: Pentagon,
+    name: "Polygonal lasso",
+    hint: "Click the first corner or double-click to close · Backspace undoes a corner",
+  },
+  magicWand: {
+    icon: WandSparkles,
+    name: "Magic wand",
+    hint: "Click a colour · Shift adds · Alt subtracts",
   },
   crop: { icon: Crop, name: "Crop", hint: "Drag the frame · Enter applies · Esc cancels" },
 };
@@ -260,6 +281,8 @@ export function OptionsBar({
   onSnappingChange,
   selectionMode,
   onSelectionModeChange,
+  wand,
+  onWandChange,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
@@ -510,13 +533,44 @@ export function OptionsBar({
     );
   } else if (selecting) {
     options = (
-      <Choice
-        label="Selection mode"
-        value={selectionMode}
-        onChange={onSelectionModeChange}
-        options={SELECTION_MODES}
-        render={(option) => <SelectionModeIcon mode={option.value} />}
-      />
+      <>
+        <Choice
+          label="Selection mode"
+          value={selectionMode}
+          onChange={onSelectionModeChange}
+          options={SELECTION_MODES}
+          render={(option) => <SelectionModeIcon mode={option.value} />}
+        />
+        {activeTool === "magicWand" && (
+          <>
+            <Setting label="Tolerance" value={`${wand.tolerance}`}>
+              <Slider
+                value={[wand.tolerance]}
+                aria-label="Wand tolerance"
+                min={0}
+                max={255}
+                step={1}
+                onValueChange={(value) => onWandChange({ tolerance: value[0] ?? wand.tolerance })}
+                className={sliderClass}
+              />
+            </Setting>
+            <ToggleOption
+              pressed={wand.contiguous}
+              onChange={(contiguous) => onWandChange({ contiguous })}
+              icon={Spline}
+              label="Contiguous"
+              title="Only the connected area, or every similar pixel"
+            />
+            <ToggleOption
+              pressed={wand.sampleAll}
+              onChange={(sampleAll) => onWandChange({ sampleAll })}
+              icon={Layers}
+              label="All layers"
+              title="Judge by everything you see, or by the selected layer"
+            />
+          </>
+        )}
+      </>
     );
   } else if (activeTool === "select") {
     options = (

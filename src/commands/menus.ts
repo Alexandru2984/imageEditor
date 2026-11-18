@@ -73,6 +73,9 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "-",
       "tool.rectSelect",
       "tool.ellipseSelect",
+      "tool.lasso",
+      "tool.polygonLasso",
+      "tool.magicWand",
     ],
   },
   {

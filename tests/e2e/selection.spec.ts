@@ -229,3 +229,122 @@ test("Select › Modify feathers and expands the selection", async ({ page }) =>
   expect(edge[1]![3]).toBeGreaterThan(0);
   expect(edge[1]![3]).toBeLessThan(128);
 });
+
+/** Where a pixel of the photo is on screen. */
+async function photoPoint(page: Page, x: number, y: number) {
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const box = (await page.locator("canvas.upper-canvas").boundingBox())!;
+  const scale = photo.scaleX as number;
+  // The fitted view shows the scene at 100%.
+  return {
+    x: box.x + (photo.left as number) + (x + 0.5) * scale,
+    y: box.y + (photo.top as number) + (y + 0.5) * scale,
+  };
+}
+
+test("the lasso selects the area dragged around", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#123456");
+  await arm(page, "l", "Lasso");
+  const center = await canvasCenter(page);
+  const corners: [number, number][] = [
+    [-60, 50],
+    [0, -60],
+    [60, 50],
+  ];
+  await page.mouse.move(center.x + corners[0]![0], center.y + corners[0]![1]);
+  await page.mouse.down();
+  for (const [dx, dy] of [...corners.slice(1), corners[0]!]) {
+    await page.mouse.move(center.x + dx, center.y + dy, { steps: 10 });
+  }
+  await page.mouse.up();
+
+  await copyLayer(page);
+  const { width, height } = (await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))!;
+  const pixels = (await autosavedLayerPixels(page, "Layer 1", [
+    [2, 2],
+    [Math.floor(width / 2), height - 4],
+  ]))!.pixels;
+  expect(pixels[0]![3]).toBe(0);
+  expect(pixels[1]).toEqual([0x12, 0x34, 0x56, 255]);
+});
+
+test("the polygonal lasso selects corner by corner", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff");
+  await arm(page, "l", "Lasso");
+  await arm(page, "Shift+L", "Polygonal lasso");
+  const center = await canvasCenter(page);
+  const click = (dx: number, dy: number) => page.mouse.click(center.x + dx, center.y + dy);
+
+  // A diamond, with a stray corner taken back on the way.
+  await click(0, -50);
+  await click(50, 0);
+  await click(90, 90);
+  await page.keyboard.press("Backspace");
+  await click(0, 50);
+  await click(-50, 0);
+  await expect(page.getByRole("button", { name: "Close shape" })).toBeVisible();
+  await click(0, -50);
+  await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
+  // Backspace was the polygon's, not a layer delete.
+  expect((await autosavedObjects(page)).some((o) => o.name === "Background")).toBe(true);
+
+  await copyLayer(page);
+  const { width, height } = (await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))!;
+  expect(Math.abs(width - height)).toBeLessThanOrEqual(2);
+  const pixels = (await autosavedLayerPixels(page, "Layer 1", [
+    [3, 3],
+    [Math.floor(width / 2), Math.floor(height / 2)],
+  ]))!.pixels;
+  expect(pixels[0]![3]).toBe(0);
+  expect(pixels[1]![3]).toBe(255);
+
+  // Enter closes too; Escape drops an unfinished shape.
+  await page.keyboard.press("Escape");
+  await arm(page, "l", "Polygonal lasso");
+  await click(-40, -40);
+  await click(40, -40);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("button", { name: "Close shape" })).toHaveCount(0);
+  await click(-40, -40);
+  await click(40, -40);
+  await click(40, 40);
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
+});
+
+test("the magic wand selects similar colours, connected or everywhere", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff", [
+    { x: 40, y: 40, width: 120, height: 90, color: "#ff0000" },
+    { x: 250, y: 150, width: 100, height: 100, color: "#ff0000" },
+  ]);
+  await arm(page, "w", "Magic wand");
+  const inRed = await photoPoint(page, 100, 80);
+  await page.mouse.click(inRed.x, inRed.y);
+  await copyLayer(page);
+  expect(await autosavedLayerPixels(page, "Layer 1", [[0, 0]])).toMatchObject({ width: 120, height: 90 });
+
+  await page.keyboard.press("Escape");
+  await arm(page, "w", "Magic wand");
+  await page.getByRole("button", { name: "Contiguous" }).click();
+  await page.mouse.click(inRed.x, inRed.y);
+  // Shift-click adds the white too: everything.
+  const inWhite = await photoPoint(page, 10, 10);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(inWhite.x, inWhite.y);
+  await page.keyboard.up("Shift");
+  await copyLayer(page, "Layer 2");
+  expect(await autosavedLayerPixels(page, "Layer 2", [[0, 0]])).toMatchObject({ width: 400, height: 300 });
+
+  // Both red areas, and nothing between them.
+  await page.keyboard.press("Escape");
+  await arm(page, "w", "Magic wand");
+  await page.mouse.click(inRed.x, inRed.y);
+  await copyLayer(page, "Layer 3");
+  const both = (await autosavedLayerPixels(page, "Layer 3", [
+    [5, 5],
+    [150, 5],
+  ]))!;
+  expect(both).toMatchObject({ width: 310, height: 210 });
+  expect(both.pixels[0]).toEqual([255, 0, 0, 255]);
+  expect(both.pixels[1]![3]).toBe(0);
+});

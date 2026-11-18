@@ -26,9 +26,11 @@ import { SHAPE_TOOLS } from "./shapeTools";
 import {
   BRUSH_TOOLS,
   FILL_TOOLS,
+  LASSO_TOOLS,
   MARQUEE_TOOLS,
   type BrushTool,
   type FillTool,
+  type LassoTool,
   type MarqueeTool,
 } from "./toolGroups";
 import { ToolGroupButton } from "./ToolGroupButton";
@@ -45,6 +47,8 @@ interface ToolbarProps {
   lastFillTool: FillTool;
   /** The tool the selection button (and the M key) arms. */
   lastMarqueeTool: MarqueeTool;
+  /** The tool the lasso button arms. */
+  lastLassoTool: LassoTool;
   fabricCanvas: FabricCanvas | null;
   orientation: "vertical" | "horizontal";
   onEyedropper: () => void;
@@ -73,6 +77,7 @@ export const Toolbar = ({
   lastBrushTool,
   lastFillTool,
   lastMarqueeTool,
+  lastLassoTool,
   fabricCanvas,
   orientation,
   onEyedropper,
@@ -315,6 +320,14 @@ export const Toolbar = ({
       <ToolGroupButton
         tools={MARQUEE_TOOLS}
         current={lastMarqueeTool}
+        activeTool={activeTool}
+        onToolChange={onToolChange}
+        className={buttonSize}
+        side={tooltipSide}
+      />
+      <ToolGroupButton
+        tools={LASSO_TOOLS}
+        current={lastLassoTool}
         activeTool={activeTool}
         onToolChange={onToolChange}
         className={buttonSize}
