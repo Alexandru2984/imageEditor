@@ -15,6 +15,7 @@ import { OptionsBar } from "./OptionsBar";
 import { ColorWells } from "./ColorWells";
 import { ExportDialog } from "./ExportDialog";
 import { ShortcutsDialog } from "./ShortcutsDialog";
+import { CommandPalette } from "./CommandPalette";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -138,6 +139,7 @@ export const EditorWorkspace = ({
   );
   const [exportOpen, setExportOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [discardAction, setDiscardAction] = useState<DiscardAction | null>(null);
 
@@ -391,6 +393,7 @@ export const EditorWorkspace = ({
   );
   const openPanel = useCallback((tab: PanelTab) => setPanel(tab), [setPanel]);
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
+  const openCommandPalette = useCallback(() => setPaletteOpen(true), []);
   const requestNew = useCallback(() => setDiscardAction("new"), []);
   const requestOpenImage = useCallback(() => setDiscardAction("openImage"), []);
   const requestOpenProject = useCallback(() => setDiscardAction("openProject"), []);
@@ -447,6 +450,7 @@ export const EditorWorkspace = ({
     adjustBrush,
     swapColors,
     resetColors,
+    openCommandPalette,
   });
   const commandList = useMemo(() => Object.values(commands), [commands]);
   useKeyboardShortcuts({ canvas: fabricCanvas, commands: commandList });
@@ -785,6 +789,7 @@ export const EditorWorkspace = ({
         defaultName={documentName}
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} commands={commands} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}
         enabled={activeTool === "select"}

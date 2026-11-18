@@ -52,6 +52,7 @@ function editorCommands(): CommandMap {
     adjustBrush: noop,
     swapColors: noop,
     resetColors: noop,
+    openCommandPalette: noop,
   };
   let commands: CommandMap = {};
   const Probe = () => {

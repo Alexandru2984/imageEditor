@@ -1021,6 +1021,51 @@ test("X swaps the foreground and background colours, D restores black and white"
     .toBe("#00ff00");
 });
 
+test("Ctrl+K finds and runs any command by name", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  const palette = page.getByRole("dialog", { name: "Command search" });
+  const search = palette.getByRole("combobox", { name: "Search commands" });
+  const rectangle = async () =>
+    (await autosavedObjects(page)).find((object) => object.type === "Rect");
+
+  await page.keyboard.press("Control+k");
+  await expect(search).toBeFocused();
+  await search.fill("flip vert");
+  await expect(palette.getByRole("option").first()).toContainText("Flip vertical");
+  await page.keyboard.press("Enter");
+  await expect(palette).toHaveCount(0);
+  await expect.poll(async () => (await rectangle())?.flipY).toBe(true);
+
+  // Arrow keys move through the matches.
+  const zoom = page.getByRole("button", { name: "Zoom level" });
+  const before = await zoom.textContent();
+  await page.keyboard.press("Control+k");
+  await search.fill("zoom");
+  await page.keyboard.press("ArrowDown");
+  await expect(palette.getByRole("option", { selected: true })).toContainText("Zoom out");
+  await page.keyboard.press("Enter");
+  await expect(zoom).not.toHaveText(before ?? "");
+
+  // What can't run now is listed but does nothing.
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+k");
+  await search.fill("paste");
+  await expect(palette.getByRole("option").first()).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Enter");
+  await expect(palette).toBeVisible();
+  await search.fill("nothing like this");
+  await expect(palette.getByText("No commands match")).toBeVisible();
+
+  // A command that asks first gets the focus once the palette closes.
+  await search.fill("new");
+  await page.keyboard.press("Enter");
+  const confirm = page.getByRole("alertdialog", { name: "Start a new project?" });
+  await expect(confirm).toBeVisible();
+  await expect(confirm.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await page.keyboard.press("Escape");
+});
+
 test("arrow keys on a focused slider don't also move the layer", async ({ page }) => {
   await uploadImage(page);
   await addShape(page);

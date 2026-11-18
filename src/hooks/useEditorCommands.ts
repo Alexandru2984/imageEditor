@@ -30,6 +30,7 @@ import {
   Save,
   Scaling,
   Scissors,
+  Search,
   Shapes,
   SlidersHorizontal,
   Sparkles,
@@ -96,6 +97,7 @@ export interface EditorCommandContext {
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
   swapColors: () => void;
   resetColors: () => void;
+  openCommandPalette: () => void;
 }
 
 /** Whether a document layer (not editor chrome) is selected. */
@@ -143,6 +145,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     adjustBrush,
     swapColors,
     resetColors,
+    openCommandPalette,
   } = context;
   // The AI actions object is rebuilt on every render; its parts are stable.
   const { isProcessing: aiBusy, removeBackground, extractSubject } = ai;
@@ -484,6 +487,14 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
 
       // ---------- Help ----------
       {
+        id: "help.commandPalette",
+        label: "Search commands…",
+        icon: Search,
+        shortcuts: KEYMAP.commandPalette,
+        run: openCommandPalette,
+        keywords: "find palette run",
+      },
+      {
         id: "help.shortcuts",
         label: "Keyboard shortcuts",
         icon: Keyboard,
@@ -579,6 +590,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     hasUndo,
     lastShape,
     onToolChange,
+    openCommandPalette,
     openPanel,
     panel,
     paste,

@@ -161,3 +161,17 @@ test("brush settings sit above the tools only while drawing", async ({ page }) =
   await page.getByRole("button", { name: "Select (V)" }).tap();
   await expect(options).toHaveCount(0);
 });
+
+test("the command search opens from the menu and fits the phone", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "Help", exact: true }).tap();
+  await page.getByRole("menuitem", { name: /^Search commands/ }).tap();
+  const palette = page.getByRole("dialog", { name: "Command search" });
+  await expectOnScreen(page, palette.getByRole("combobox", { name: "Search commands" }));
+  await palette.getByRole("combobox").fill("layers panel");
+  await palette.getByRole("option", { name: /Layers panel/ }).tap();
+  await expect(palette).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Layers", selected: true })).toBeVisible();
+  await expectNoSidewaysScroll(page);
+});

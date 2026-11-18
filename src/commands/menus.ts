@@ -80,6 +80,6 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
   },
   {
     label: "Help",
-    items: ["help.shortcuts"],
+    items: ["help.commandPalette", "help.shortcuts"],
   },
 ];
