@@ -27,6 +27,7 @@ import {
   Highlighter,
   Layers2,
   Merge,
+  PaintBucket,
   Paintbrush,
   SquarePlus,
   Pipette,
@@ -598,6 +599,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
       tool("tool.draw", "draw", "Marker", Highlighter, undefined, "draw pen highlighter neon dashed strokes"),
       tool("tool.eraser", "eraser", "Eraser", Eraser, KEYMAP.eraserTool),
+      tool("tool.bucket", "bucket", "Paint bucket", PaintBucket, KEYMAP.bucketTool, "fill flood colour color"),
       {
         id: "tool.shape",
         label: "Shape",

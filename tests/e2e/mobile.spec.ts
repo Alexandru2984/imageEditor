@@ -192,3 +192,16 @@ test("a finger paints with the brush on a new pixel layer", async ({ page }) => 
   // No stray handles or menus open; the canvas keeps the screen.
   await expectNoSidewaysScroll(page);
 });
+
+test("the paint bucket fills with a tap, its settings on screen", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  await page.getByRole("button", { name: "Paint bucket (G)" }).tap();
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expectOnScreen(page, options.getByRole("slider", { name: "Fill tolerance" }));
+  await expectNoSidewaysScroll(page);
+  const center = await canvasCenter(page);
+  await page.touchscreen.tap(center.x, center.y);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[10, 10]]))?.pixels[0]?.[3])
+    .toBe(255);
+});

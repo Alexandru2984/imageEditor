@@ -27,6 +27,7 @@ const TOOL_IDS = [
   "tool.crop",
   "tool.brush",
   "tool.nextBrush",
+  "tool.bucket",
   "tool.eraser",
   "tool.shape",
   "tool.nextShape",

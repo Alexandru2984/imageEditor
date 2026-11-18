@@ -13,6 +13,7 @@ import {
   sceneToLayerPixel,
 } from "@/raster/pixelLayer";
 import { StrokePainter } from "@/raster/painter";
+import { bucketFill, type BucketOptions } from "@/raster/fill";
 import type { PaintOptions } from "@/raster/paintSettings";
 import type { StrokePoint } from "@/raster/stroke";
 import { ensureLayerId, type EditorFabricObject } from "@/utils/editorObjects";
@@ -26,6 +27,7 @@ interface UsePaintToolOptions {
   activeTool: Tool;
   color: string;
   paint: PaintOptions;
+  bucket: BucketOptions;
   spaceDownRef: MutableRefObject<boolean>;
 }
 
@@ -50,11 +52,14 @@ function pressureOf(event: Event): number {
   return pointer.pointerType === "pen" && pointer.pressure > 0 ? pointer.pressure : 1;
 }
 
+const PIXEL_TOOLS: ReadonlySet<Tool> = new Set<Tool>(["brush", "eraser", "bucket"]);
+
 /**
- * Pixel painting for the Brush, and for the Eraser when the layer being
- * worked on is a pixel layer. Tools act on the selected layer; with none
- * selected they continue on the last painted layer, and the Brush otherwise
- * starts a new layer, as Photoshop paints on the active layer.
+ * Pixel painting for the Brush and the Paint bucket, and for the Eraser when
+ * the layer being worked on is a pixel layer. Tools act on the selected
+ * layer; with none selected they continue on the last painted layer, and the
+ * Brush and bucket otherwise start a new layer, as Photoshop paints on the
+ * active layer.
  */
 export function usePaintTool({
   canvasRef,
@@ -62,10 +67,11 @@ export function usePaintTool({
   activeTool,
   color,
   paint,
+  bucket,
   spaceDownRef,
 }: UsePaintToolOptions): void {
-  const settingsRef = useRef({ color, paint });
-  settingsRef.current = { color, paint };
+  const settingsRef = useRef({ color, paint, bucket });
+  settingsRef.current = { color, paint, bucket };
   /** The layer the tools paint on, kept across tool switches. */
   const targetIdRef = useRef<string | null>(null);
   // A layer from a previous document never carries over.
@@ -76,8 +82,9 @@ export function usePaintTool({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    if (activeTool !== "brush" && activeTool !== "eraser") return;
+    if (!PIXEL_TOOLS.has(activeTool)) return;
     const erasing = activeTool === "eraser";
+    const filling = activeTool === "bucket";
 
     const currentTarget = (): FabricImage | null => {
       const layer = findLayer(canvas, targetIdRef.current);
@@ -125,7 +132,7 @@ export function usePaintTool({
 
     const drawOutline = () => {
       // The vector eraser draws its own trail on the same layer.
-      if (canvas.isDrawingMode) return;
+      if (canvas.isDrawingMode || filling) return;
       const top = canvas.contextTop;
       canvas.clearContext(top);
       if (!outline) return;
@@ -161,23 +168,59 @@ export function usePaintTool({
       return { ...sceneToLayerPixel(layer, scene), pressure: pressureOf(event) };
     };
 
-    const startStroke = (event: PointerEvent | MouseEvent | TouchEvent) => {
-      let layer = currentTarget();
-      let createdLayer = false;
+    /** The layer to work on, made on the spot when there is none. */
+    const resolveTarget = (): { layer: FabricImage; created: boolean } | null => {
+      const layer = currentTarget();
       if (layer && !layer.visible) {
         toast.error("Show the layer before painting on it");
+        return null;
+      }
+      if (layer) return { layer, created: isPendingLayer(layer) };
+      if (erasing) return null;
+      const created = createPendingLayer(canvas);
+      if (!created) {
+        toast.error("Open a photo before painting");
+        return null;
+      }
+      targetIdRef.current = ensureLayerId(created);
+      return { layer: created, created: true };
+    };
+
+    const commit = (layer: FabricImage) => {
+      void commitPixelEdit(canvas, layer)
+        .then((committed) => {
+          if (!committed || released || canvasRef.current !== canvas) return;
+          if (targetIdRef.current === (layer as EditorFabricObject).__layerId) selectTarget();
+        })
+        .catch((error) => {
+          console.error("Could not save the painted layer:", error);
+          toast.error("That change could not be saved");
+        });
+    };
+
+    const fillAt = (event: Event) => {
+      const target = resolveTarget();
+      if (!target) return;
+      const { color: fillColor, bucket: options } = settingsRef.current;
+      let filled = false;
+      try {
+        filled = bucketFill(canvas, target.layer, canvas.getScenePoint(event as PointerEvent), fillColor, options);
+      } catch (error) {
+        console.error("Paint bucket failed:", error);
+        toast.error(error instanceof Error ? error.message : "Could not fill there");
+      }
+      if (!filled) {
+        if (target.created) discardPendingLayer(canvas, target.layer);
         return;
       }
-      if (!layer) {
-        if (erasing) return;
-        layer = createPendingLayer(canvas);
-        if (!layer) {
-          toast.error("Open a photo before painting");
-          return;
-        }
-        createdLayer = true;
-        targetIdRef.current = ensureLayerId(layer);
-      }
+      refreshPixelLayer(target.layer, canvas);
+      commit(target.layer);
+    };
+
+    const startStroke = (event: PointerEvent | MouseEvent | TouchEvent) => {
+      const target = resolveTarget();
+      if (!target) return;
+      const { layer } = target;
       const { paint: options, color: paintColor } = settingsRef.current;
       const session = beginPixelEdit(layer);
       // Sizes are in image pixels; this layer may be stored at another scale.
@@ -192,7 +235,7 @@ export function usePaintTool({
         // A second finger turns the stroke into a pinch; it must be undone.
         cancellable: (event as PointerEvent).pointerType === "touch",
       });
-      stroke = { layer, painter, createdLayer: createdLayer || isPendingLayer(layer), frame: null };
+      stroke = { layer, painter, createdLayer: target.created, frame: null };
       const point = layerPoint(layer, event);
       const previousEnd = lastPoints.get(layer);
       if (event.shiftKey && previousEnd) painter.add(previousEnd);
@@ -209,15 +252,7 @@ export function usePaintTool({
       refreshPixelLayer(current.layer, canvas);
       const end = current.painter.lastPoint;
       if (end) lastPoints.set(current.layer, end);
-      void commitPixelEdit(canvas, current.layer)
-        .then((committed) => {
-          if (!committed || released || canvasRef.current !== canvas) return;
-          if (targetIdRef.current === (current.layer as EditorFabricObject).__layerId) selectTarget();
-        })
-        .catch((error) => {
-          console.error("Could not save the painted layer:", error);
-          toast.error("That stroke could not be saved");
-        });
+      commit(current.layer);
     };
 
     const cancelStroke = () => {
@@ -237,7 +272,8 @@ export function usePaintTool({
       if (spaceDownRef.current || stroke) return;
       if ("button" in event && event.button !== 0) return;
       if (erasing && canvas.isDrawingMode) return;
-      startStroke(event);
+      if (filling) fillAt(event);
+      else startStroke(event);
     };
 
     const onMove = (opt: PointerInfo) => {

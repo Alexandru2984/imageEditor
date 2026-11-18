@@ -29,6 +29,7 @@ import { useDocumentFonts } from "@/hooks/useDocumentFonts";
 import { useSmartGuides } from "@/hooks/useSmartGuides";
 import { BRUSHES, stepBrushHardness, stepBrushWidth, type BrushKind } from "@/utils/brushes";
 import { DEFAULT_PAINT_OPTIONS, stepPaintSize, type PaintOptions } from "@/raster/paintSettings";
+import { DEFAULT_BUCKET_OPTIONS, type BucketOptions } from "@/raster/fill";
 import { isBrushTool, type BrushTool } from "./brushTools";
 import {
   SNAP_PREFERENCE_KEY,
@@ -122,6 +123,11 @@ export const EditorWorkspace = ({
   const [lastShape, setLastShape] = useSessionState<ShapeKind>("lastShape", "rectangle");
   const [lastBrushTool, setLastBrushTool] = useSessionState<BrushTool>("lastBrushTool", "brush");
   const [paint, setPaint] = useSessionState<PaintOptions>("paint", DEFAULT_PAINT_OPTIONS);
+  const [bucket, setBucket] = useSessionState<BucketOptions>("bucket", DEFAULT_BUCKET_OPTIONS);
+  const updateBucket = useCallback(
+    (change: Partial<BucketOptions>) => setBucket((current) => ({ ...current, ...change })),
+    [setBucket]
+  );
   const updatePaint = useCallback(
     (change: Partial<PaintOptions>) => setPaint((current) => ({ ...current, ...change })),
     [setPaint]
@@ -623,6 +629,8 @@ export const EditorWorkspace = ({
       onBrushOpacityChange={setBrushOpacity}
       paint={paint}
       onPaintChange={updatePaint}
+      bucket={bucket}
+      onBucketChange={updateBucket}
       snapping={snapping}
       onSnappingChange={handleSnappingChange}
     />
@@ -736,6 +744,7 @@ export const EditorWorkspace = ({
             brushOpacity={brushOpacity}
             brushKind={brushKind}
             paint={paint}
+            bucket={bucket}
             uploadedImage={uploadedImage}
             initialSnapshot={initialSnapshot}
             onCanvasReady={setFabricCanvas}

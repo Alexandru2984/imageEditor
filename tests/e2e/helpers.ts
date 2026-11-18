@@ -74,19 +74,37 @@ export async function chooseMenu(page: Page, menu: string, item: string) {
 
 export const TOP_IMAGE = "__top_image__";
 
-/** Open a solid-colour photo of the given size. */
-export async function uploadSolidImage(page: Page, width: number, height: number, color = "#ffffff") {
+export interface PaintedRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+}
+
+/** Open a solid-colour photo of the given size, with rectangles painted on it. */
+export async function uploadSolidImage(
+  page: Page,
+  width: number,
+  height: number,
+  color = "#ffffff",
+  rects: PaintedRect[] = []
+) {
   const base64 = await page.evaluate(
-    ({ width, height, color }) => {
+    ({ width, height, color, rects }) => {
       const canvas = document.createElement("canvas");
       canvas.width = width;
       canvas.height = height;
       const context = canvas.getContext("2d")!;
       context.fillStyle = color;
       context.fillRect(0, 0, width, height);
+      for (const rect of rects) {
+        context.fillStyle = rect.color;
+        context.fillRect(rect.x, rect.y, rect.width, rect.height);
+      }
       return canvas.toDataURL("image/png").split(",")[1]!;
     },
-    { width, height, color }
+    { width, height, color, rects }
   );
   await page.getByTestId("image-input").setInputFiles({
     name: "solid.png",

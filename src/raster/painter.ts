@@ -32,7 +32,7 @@ function createCanvas(width: number, height: number) {
   return { element, context };
 }
 
-function hexToRgb(color: string): [number, number, number] {
+export function hexToRgb(color: string): [number, number, number] {
   const match = /^#?([0-9a-f]{6})$/i.exec(color.trim());
   if (!match) return [0, 0, 0];
   const value = parseInt(match[1]!, 16);

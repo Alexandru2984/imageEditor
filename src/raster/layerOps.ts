@@ -128,7 +128,7 @@ function sceneBox(object: FabricObject): Box {
 }
 
 /** The area the layers cover, on whole pixels of the document. */
-function mergeRegion(canvas: FabricCanvas, layers: FabricObject[], multiplier: number): Box {
+export function documentPixelRegion(canvas: FabricCanvas, layers: FabricObject[], multiplier: number): Box {
   const union = unionBoxes(layers.map(sceneBox))!;
   const photo = findBackgroundImage(canvas);
   const corner = photo ? photo.getBoundingRect() : { left: 0, top: 0 };
@@ -148,7 +148,7 @@ export async function runMerge(canvas: FabricCanvas, plan: MergePlan): Promise<L
     base.setCoords();
     // Merging into the photo keeps the photo's frame; anything outside it is
     // cut off, as with Photoshop's background layer.
-    const region = intoPhoto ? base.getBoundingRect() : mergeRegion(canvas, plan.layers, multiplier);
+    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, plan.layers, multiplier);
 
     // The bottom layer's opacity and blend mode stay settings of the result
     // instead of being baked into its pixels, as Photoshop merges.

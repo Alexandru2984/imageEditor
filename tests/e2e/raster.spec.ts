@@ -249,3 +249,53 @@ test("flattening a rotated photo keeps all of it, upright", async ({ page }) => 
   expectColor(flat?.pixels[0], [168, 85, 247, 255]);
   expect(flat?.pixels[1]).toEqual([255, 255, 255, 255]);
 });
+
+test("the paint bucket fills the clicked area on a new layer, one undo step per click", async ({
+  page,
+}) => {
+  // White with a black band down the middle: two white areas apart.
+  await uploadSolidImage(page, 400, 300, "#ffffff", [
+    { x: 180, y: 0, width: 40, height: 300, color: "#000000" },
+  ]);
+  await arm(page, "g", "Paint bucket");
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expect(options.getByRole("button", { name: "Contiguous" })).toHaveAttribute("aria-pressed", "true");
+
+  // Left of the band, which spans 40 of the photo's 400 pixels.
+  const center = await canvasCenter(page);
+  const leftArea = { x: center.x - 120, y: center.y };
+  await page.mouse.click(leftArea.x, leftArea.y);
+  await expect.poll(() => layerNames(page)).toContain("Layer 1");
+  const filled = await autosavedLayerPixels(page, "Layer 1", [
+    [20, 20],
+    [170, 290],
+    [200, 150],
+    [300, 150],
+  ]);
+  expectColor(filled?.pixels[0], [168, 85, 247, 255], 0);
+  expectColor(filled?.pixels[1], [168, 85, 247, 255], 0);
+  // Neither the band nor the white area beyond it.
+  expect(filled?.pixels[2]?.[3]).toBe(0);
+  expect(filled?.pixels[3]?.[3]).toBe(0);
+
+  // One undo takes the fill, and the layer it made, away.
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => layerNames(page)).not.toContain("Layer 1");
+
+  // Not contiguous: every white pixel, on both sides of the band.
+  await options.getByRole("button", { name: "Contiguous" }).click();
+  await page.mouse.click(leftArea.x, leftArea.y);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[300, 150]]))?.pixels[0]?.[3])
+    .toBe(255);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0]?.[3]).toBe(0);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => layerNames(page)).not.toContain("Layer 1");
+
+  // Judged by the empty layer alone, the whole layer is one area.
+  await options.getByRole("button", { name: "All layers" }).click();
+  await page.mouse.click(leftArea.x, leftArea.y);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0]?.[3])
+    .toBe(255);
+});

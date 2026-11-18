@@ -2,8 +2,11 @@ import type { ReactNode } from "react";
 import {
   Crop,
   Eraser,
+  Layers,
   Magnet,
   MousePointer2,
+  PaintBucket,
+  Spline,
   Highlighter,
   Paintbrush,
   Shapes,
@@ -23,6 +26,7 @@ import {
   sliderToPaintSize,
   type PaintOptions,
 } from "@/raster/paintSettings";
+import type { BucketOptions } from "@/raster/fill";
 import type { Tool } from "@/types/editor";
 import { cn } from "@/lib/utils";
 
@@ -49,6 +53,8 @@ interface OptionsBarProps {
   /** Pixel brush and eraser. */
   paint: PaintOptions;
   onPaintChange: (change: Partial<PaintOptions>) => void;
+  bucket: BucketOptions;
+  onBucketChange: (change: Partial<BucketOptions>) => void;
   snapping: boolean;
   onSnappingChange: (enabled: boolean) => void;
 }
@@ -65,6 +71,7 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     hint: "Paints on the selected pixel layer, or on a new one · Shift-click draws a line",
   },
   draw: { icon: Highlighter, name: "Marker", hint: "" },
+  bucket: { icon: PaintBucket, name: "Paint bucket", hint: "" },
   eraser: {
     icon: Eraser,
     name: "Eraser",
@@ -79,6 +86,38 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   },
   crop: { icon: Crop, name: "Crop", hint: "Drag the frame · Enter applies · Esc cancels" },
 };
+
+function ToggleOption({
+  pressed,
+  onChange,
+  icon: Icon,
+  label,
+  title,
+}: {
+  pressed: boolean;
+  onChange: (pressed: boolean) => void;
+  icon: LucideIcon;
+  label: string;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      title={title}
+      onClick={() => onChange(!pressed)}
+      className={cn(
+        "flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors [&_svg]:size-3.5",
+        pressed
+          ? "border-primary bg-primary/10 text-foreground"
+          : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+      )}
+    >
+      <Icon />
+      {label}
+    </button>
+  );
+}
 
 function Setting({
   label,
@@ -118,12 +157,18 @@ export function OptionsBar({
   onBrushOpacityChange,
   paint,
   onPaintChange,
+  bucket,
+  onBucketChange,
   snapping,
   onSnappingChange,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
-  const painting = activeTool === "draw" || activeTool === "brush" || activeTool === "eraser";
+  const painting =
+    activeTool === "draw" ||
+    activeTool === "brush" ||
+    activeTool === "eraser" ||
+    activeTool === "bucket";
   const brushOption = BRUSHES.find((option) => option.kind === brush.kind);
   const sliderClass = compact ? "w-16" : "w-20 xl:w-28";
 
@@ -184,6 +229,47 @@ export function OptionsBar({
         {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
         {percentSetting("Opacity", "opacity", 1)}
         {percentSetting("Flow", "flow", 1)}
+      </>
+    );
+  } else if (activeTool === "bucket") {
+    options = (
+      <>
+        <Setting label="Tolerance" value={`${bucket.tolerance}`}>
+          <Slider
+            value={[bucket.tolerance]}
+            aria-label="Fill tolerance"
+            min={0}
+            max={255}
+            step={1}
+            onValueChange={(value) => onBucketChange({ tolerance: value[0] ?? bucket.tolerance })}
+            className={sliderClass}
+          />
+        </Setting>
+        <Setting label="Opacity" value={`${bucket.opacity}%`}>
+          <Slider
+            value={[bucket.opacity]}
+            aria-label="Fill opacity"
+            min={1}
+            max={100}
+            step={1}
+            onValueChange={(value) => onBucketChange({ opacity: value[0] ?? bucket.opacity })}
+            className={sliderClass}
+          />
+        </Setting>
+        <ToggleOption
+          pressed={bucket.contiguous}
+          onChange={(contiguous) => onBucketChange({ contiguous })}
+          icon={Spline}
+          label="Contiguous"
+          title="Fill only the area connected to the click"
+        />
+        <ToggleOption
+          pressed={bucket.sampleAll}
+          onChange={(sampleAll) => onBucketChange({ sampleAll })}
+          icon={Layers}
+          label="All layers"
+          title="Find the area from everything visible, not only this layer"
+        />
       </>
     );
   } else if (activeTool === "draw") {
@@ -269,20 +355,12 @@ export function OptionsBar({
     );
   } else if (activeTool === "select") {
     options = (
-      <button
-        type="button"
-        aria-pressed={snapping}
-        onClick={() => onSnappingChange(!snapping)}
-        className={cn(
-          "flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors [&_svg]:size-3.5",
-          snapping
-            ? "border-primary bg-primary/10 text-foreground"
-            : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
-        )}
-      >
-        <Magnet />
-        Snap to guides
-      </button>
+      <ToggleOption
+        pressed={snapping}
+        onChange={onSnappingChange}
+        icon={Magnet}
+        label="Snap to guides"
+      />
     );
   }
 

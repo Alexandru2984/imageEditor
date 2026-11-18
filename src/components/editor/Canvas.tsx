@@ -48,6 +48,7 @@ import type { FabricObject } from "fabric";
 import { useShapeTool } from "@/hooks/useShapeTool";
 import { usePaintTool } from "@/hooks/usePaintTool";
 import type { PaintOptions } from "@/raster/paintSettings";
+import type { BucketOptions } from "@/raster/fill";
 import { findBackgroundImage } from "@/utils/viewport";
 
 interface CanvasProps {
@@ -59,6 +60,7 @@ interface CanvasProps {
   brushKind: BrushKind;
   /** Pixel brush and eraser settings (sizes in image pixels). */
   paint: PaintOptions;
+  bucket: BucketOptions;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -134,6 +136,7 @@ export const Canvas = ({
   brushOpacity,
   brushKind,
   paint,
+  bucket,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -1190,6 +1193,7 @@ export const Canvas = ({
     activeTool,
     color: activeColor,
     paint,
+    bucket,
     spaceDownRef,
   });
 

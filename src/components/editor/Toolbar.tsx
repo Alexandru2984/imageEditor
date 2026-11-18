@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MousePointer2,
+  PaintBucket,
   Eraser,
   Type,
   Crop,
@@ -46,6 +47,7 @@ type ToolDef = { id: Tool; icon: typeof MousePointer2; label: string };
 
 const SELECT_TOOL: ToolDef = { id: "select", icon: MousePointer2, label: "Select (V)" };
 const ERASER_TOOL: ToolDef = { id: "eraser", icon: Eraser, label: "Eraser (E)" };
+const BUCKET_TOOL: ToolDef = { id: "bucket", icon: PaintBucket, label: "Paint bucket (G)" };
 
 
 const SECONDARY_TOOLS: ToolDef[] = [
@@ -310,6 +312,7 @@ export const Toolbar = ({
         side={tooltipSide}
       />
       {renderTool(ERASER_TOOL)}
+      {renderTool(BUCKET_TOOL)}
       {separator}
       {shapesButton}
       {SECONDARY_TOOLS.map(renderTool)}

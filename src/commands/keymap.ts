@@ -61,6 +61,7 @@ export const KEYMAP = {
   brushTool: [{ key: "b" }],
   nextBrushTool: [{ key: "b", shift: true }],
   eraserTool: [{ key: "e" }],
+  bucketTool: [{ key: "g" }],
   shapeTool: [{ key: "u" }],
   nextShape: [{ key: "u", shift: true }],
   textTool: [{ key: "t" }],
