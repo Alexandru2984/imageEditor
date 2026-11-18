@@ -6,6 +6,8 @@ import { extractSubjectDataURL } from "@/utils/cutout";
 import { findBackgroundImage } from "@/utils/viewport";
 import { markBackgroundObject, type EditorFabricObject } from "@/utils/editorObjects";
 import { isAbortError } from "@/utils/abort";
+import { selectSubject as findSubject } from "@/selection/subject";
+import { selectionOf } from "@/selection/state";
 
 const abortIfNeeded = (signal: AbortSignal): void => {
   if (!signal.aborted) return;
@@ -19,6 +21,8 @@ export interface AiActions {
   processingMessage: string | null;
   removeBackground: () => Promise<void>;
   extractSubject: () => Promise<void>;
+  /** Select › Subject; resolves whether a selection was made. */
+  selectSubject: () => Promise<boolean>;
   cancel: () => void;
 }
 
@@ -38,8 +42,8 @@ export function useAiActions(canvas: FabricCanvas | null): AiActions {
   const run = useCallback(
     async (
       label: string,
-      job: (signal: AbortSignal, onProgress: (message: string) => void) => Promise<string>
-    ) => {
+      job: (signal: AbortSignal, onProgress: (message: string) => void) => Promise<string | null>
+    ): Promise<boolean> => {
       controllerRef.current?.abort();
       const controller = new AbortController();
       controllerRef.current = controller;
@@ -53,7 +57,9 @@ export function useAiActions(canvas: FabricCanvas | null): AiActions {
           setProcessingMessage(message);
           toast.loading(message, { id: loadingToast });
         });
+        if (success === null) return false;
         toast.success(success);
+        return true;
       } catch (error) {
         if (!controller.signal.aborted && !isAbortError(error)) {
           console.error(`${label} failed:`, error);
@@ -61,6 +67,7 @@ export function useAiActions(canvas: FabricCanvas | null): AiActions {
             error instanceof Error ? error.message.slice(0, 240) : `${label} failed. Please try again.`
           );
         }
+        return false;
       } finally {
         toast.dismiss(loadingToast);
         if (controllerRef.current === controller) {
@@ -125,7 +132,20 @@ export function useAiActions(canvas: FabricCanvas | null): AiActions {
     });
   }, [canvas, run]);
 
+  const selectSubject = useCallback(async () => {
+    if (!canvas) return false;
+    return run("Selecting the subject", async (signal, onProgress) => {
+      const found = await findSubject(canvas, { signal, onProgress });
+      abortIfNeeded(signal);
+      // The document changed while the model looked at it.
+      if (!found) return null;
+      if (found.mask.isEmpty()) throw new Error("No subject was found");
+      selectionOf(canvas).set(found.mask, found.grid);
+      return "Subject selected";
+    });
+  }, [canvas, run]);
+
   const cancel = useCallback(() => controllerRef.current?.abort(), []);
 
-  return { isProcessing, processingMessage, removeBackground, extractSubject, cancel };
+  return { isProcessing, processingMessage, removeBackground, extractSubject, selectSubject, cancel };
 }

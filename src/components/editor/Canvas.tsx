@@ -58,6 +58,9 @@ interface CanvasProps {
   /** How a new selection shape joins the selection. */
   selectionMode: SelectionMode;
   wand: WandOptions;
+  /** Select › Subject, offered while nothing is selected. */
+  onSelectSubject: () => void;
+  aiBusy: boolean;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -111,6 +114,8 @@ export const Canvas = ({
   gradient,
   selectionMode,
   wand,
+  onSelectSubject,
+  aiBusy,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -1014,6 +1019,8 @@ export const Canvas = ({
           runRaster={runRaster}
           busy={isRasterizing}
           onCrop={() => void cropToSelection()}
+          onSelectSubject={onSelectSubject}
+          aiBusy={aiBusy}
         />
       )}
     </div>

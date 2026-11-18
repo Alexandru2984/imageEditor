@@ -348,3 +348,33 @@ test("the magic wand selects similar colours, connected or everywhere", async ({
   expect(both.pixels[0]).toEqual([255, 0, 0, 255]);
   expect(both.pixels[1]![3]).toBe(0);
 });
+
+test("Select subject is offered while nothing is selected", async ({ page }) => {
+  await uploadSolidImage(page, 200, 100);
+  await arm(page, "m", "Rectangle select");
+  await expect(page.getByRole("button", { name: "Select subject" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Select", exact: true }).click();
+  await expect(menuItem(page, "Subject")).toBeEnabled();
+  await page.keyboard.press("Escape");
+});
+
+test("Select subject selects the subject with the on-device model", async ({ page }) => {
+  test.skip(process.env.RUN_AI_E2E !== "1", "Set RUN_AI_E2E=1 for the network- and compute-heavy model check");
+  test.setTimeout(5 * 60_000);
+  // The sample photo: mountains and a sun under an empty sky.
+  await page.getByText("Try a sample photo").click();
+  await expect.poll(async () => (await autosavedObjects(page)).length).toBeGreaterThan(0);
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+
+  await chooseMenu(page, "Select", "Subject");
+  await expect(page.getByRole("button", { name: "Redact" })).toBeVisible({ timeout: 4 * 60_000 });
+  // The selection's actions are at hand.
+  await expect(page.getByRole("button", { name: "Rectangle select (M)" })).toHaveAttribute("aria-pressed", "true");
+  await copyLayer(page);
+  const copy = (await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))!;
+  // The landscape, without the sky above it.
+  expect(copy.width).toBeGreaterThan((photo.width as number) * 0.8);
+  expect(copy.height).toBeLessThan((photo.height as number) * 0.9);
+  const bottom = (await autosavedLayerPixels(page, "Layer 1", [[Math.floor(copy.width / 2), copy.height - 40]]))!;
+  expect(bottom.pixels[0]![3]).toBeGreaterThan(200);
+});

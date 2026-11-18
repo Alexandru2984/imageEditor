@@ -1,7 +1,7 @@
 import type { FabricImage } from "fabric";
 import { removeBackground, blobToDataURL } from "./backgroundRemoval";
 
-const MAX_SEGMENTATION_DIMENSION = 1024;
+export const MAX_SEGMENTATION_DIMENSION = 1024;
 
 interface ExtractSubjectOptions {
   onProgress?: (message: string) => void;

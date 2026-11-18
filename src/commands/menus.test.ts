@@ -44,6 +44,7 @@ function editorCommands(): CommandMap {
       processingMessage: null,
       removeBackground: async () => {},
       extractSubject: async () => {},
+      selectSubject: async () => false,
       cancel: noop,
     },
     pickColor: noop,

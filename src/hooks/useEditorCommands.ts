@@ -77,6 +77,7 @@ import {
   isBrushTool,
   isFillTool,
   isMarqueeTool,
+  isSelectionTool,
   type BrushTool,
   type FillTool,
   type LassoTool,
@@ -202,7 +203,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openCommandPalette,
   } = context;
   // The AI actions object is rebuilt on every render; its parts are stable.
-  const { isProcessing: aiBusy, removeBackground, extractSubject } = ai;
+  const { isProcessing: aiBusy, removeBackground, extractSubject, selectSubject } = ai;
 
   return useMemo(() => {
     const selected = () => hasSelection(canvas);
@@ -543,6 +544,19 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         keywords: "invert selection",
       },
       {
+        id: "select.subject",
+        label: "Subject",
+        icon: Sparkles,
+        run: () => {
+          void selectSubject().then((selected) => {
+            // Show the selection's actions.
+            if (selected && !isSelectionTool(activeTool)) onToolChange(lastMarqueeTool);
+          });
+        },
+        isEnabled: aiIdle,
+        keywords: "ai person object select subject",
+      },
+      {
         id: "select.allLayers",
         label: "All layers",
         icon: MousePointerSquareDashed,
@@ -825,6 +839,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     duplicate,
     exportImage,
     extractSubject,
+    selectSubject,
     fitOnScreen,
     flip,
     hasRedo,

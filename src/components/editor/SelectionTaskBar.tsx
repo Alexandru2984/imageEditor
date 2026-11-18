@@ -9,6 +9,7 @@ import {
   EyeOff,
   Grid3x3,
   Square as SquareIcon,
+  Sparkles,
   SquareDashedBottom,
   X,
 } from "lucide-react";
@@ -40,6 +41,8 @@ interface SelectionTaskBarProps {
   runRaster: (task: () => Promise<void>) => Promise<void>;
   busy: boolean;
   onCrop: () => void;
+  onSelectSubject: () => void;
+  aiBusy: boolean;
 }
 
 const HINTS: Partial<Record<Tool, string>> = {
@@ -66,6 +69,8 @@ export function SelectionTaskBar({
   runRaster,
   busy,
   onCrop,
+  onSelectSubject,
+  aiBusy,
 }: SelectionTaskBarProps) {
   const { selection, draft } = useSelection(canvas);
   const rectangular = useMemo(() => selection?.mask.isRectangle() ?? false, [selection]);
@@ -149,9 +154,15 @@ export function SelectionTaskBar({
           </Button>
         </>
       ) : !selection ? (
-        <span className="px-1 py-1.5 text-xs text-muted-foreground">
-          {HINTS[activeTool] ?? "Select a region"}
-        </span>
+        <>
+          <span className="px-1 py-1.5 text-xs text-muted-foreground">
+            {HINTS[activeTool] ?? "Select a region"}
+          </span>
+          <Button size="sm" variant="ghost" className="h-8" onClick={onSelectSubject} disabled={aiBusy}>
+            <Sparkles className="mr-1 h-4 w-4" />
+            Select subject
+          </Button>
+        </>
       ) : (
         <>
           <Button size="sm" className="h-8" onClick={() => void copy()} disabled={busy}>

@@ -793,6 +793,8 @@ export const EditorWorkspace = ({
             gradient={gradient}
             selectionMode={selectionMode}
             wand={wand}
+            onSelectSubject={() => void ai.selectSubject()}
+            aiBusy={ai.isProcessing}
             secondaryColor={backgroundColor}
             uploadedImage={uploadedImage}
             initialSnapshot={initialSnapshot}
