@@ -1,4 +1,4 @@
-import { util, type Canvas as FabricCanvas, type FabricImage, type FabricObject, type TMat2D } from "fabric";
+import { Point, util, type Canvas as FabricCanvas, type FabricImage, type FabricObject, type TMat2D } from "fabric";
 import { isEditorChrome } from "@/utils/editorObjects";
 import { nativeMultiplier, renderObjectsRegion } from "@/utils/flatten";
 import { floodFillMask } from "./floodFill";
@@ -109,4 +109,46 @@ export function bucketFill(
   } finally {
     releaseSurface(element);
   }
+}
+
+/**
+ * Paint bucket on pixels of their own, such as a layer mask: the area around
+ * a scene point is found in those pixels alone and filled with `color`.
+ */
+export function bucketFillPixels(
+  layer: FabricImage,
+  point: { x: number; y: number },
+  color: string,
+  options: BucketOptions
+): boolean {
+  const { surface, context } = beginPixelEdit(layer);
+  const seed = util.transformPoint(new Point(point.x, point.y), sceneToLayerMatrix(layer));
+  const { width, height } = surface;
+  const image = context.getImageData(0, 0, width, height);
+  const area = floodFillMask(image.data, width, height, seed.x, seed.y, options);
+  if (!area) return false;
+  const [red, green, blue] = hexToRgb(color);
+  const alpha = Math.round((255 * options.opacity) / 100);
+  const data = image.data;
+  for (let index = 0; index < area.length; index += 1) {
+    const offset = index * 4;
+    if (area[index]) {
+      data[offset] = red;
+      data[offset + 1] = green;
+      data[offset + 2] = blue;
+      data[offset + 3] = alpha;
+    } else {
+      data[offset + 3] = 0;
+    }
+  }
+  const paint = document.createElement("canvas");
+  paint.width = width;
+  paint.height = height;
+  try {
+    paint.getContext("2d")?.putImageData(image, 0, 0);
+    context.drawImage(paint, 0, 0);
+  } finally {
+    releaseSurface(paint);
+  }
+  return true;
 }

@@ -16,6 +16,7 @@ import {
   releaseSurface,
   surfaceToImage,
 } from "./pixelLayer";
+import { hasLayerMask } from "./layerMask";
 import { growBox, snapToPixelGrid, unionBoxes, type Box } from "./regions";
 
 /**
@@ -105,7 +106,8 @@ export function planRasterize(canvas: FabricCanvas): MergePlan | Refusal {
     layer instanceof FabricImage &&
     layer.filters.length === 0 &&
     !layer.clipPath &&
-    !layer.shadow
+    !layer.shadow &&
+    !hasLayerMask(layer)
   ) {
     return "This layer is already pixels";
   }

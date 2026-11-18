@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import {
   Check,
@@ -26,10 +25,9 @@ import { useSelection } from "@/hooks/useSelection";
 import {
   blackOutSelection,
   copySelectionToLayer,
-  maskTarget,
-  maskToSelection,
   type RedactEffect,
 } from "@/selection/actions";
+import { addLayerMask, hasLayerMask, maskLayer, maskTargetOf } from "@/raster/layerMask";
 import { selectionOf } from "@/selection/state";
 import type { Tool } from "@/types/editor";
 
@@ -73,7 +71,6 @@ export function SelectionTaskBar({
   aiBusy,
 }: SelectionTaskBarProps) {
   const { selection, draft } = useSelection(canvas);
-  const rectangular = useMemo(() => selection?.mask.isRectangle() ?? false, [selection]);
 
   const current = () => (canvas ? selectionOf(canvas).current() : null);
 
@@ -110,22 +107,25 @@ export function SelectionTaskBar({
       }
     });
 
-  const mask = () => {
-    const chosen = current();
-    const target = canvas ? maskTarget(canvas) : null;
-    if (!canvas || !chosen) return;
-    if (!target) {
-      toast.error("Select an image layer to mask");
-      return;
-    }
-    try {
-      maskToSelection(canvas, chosen, target);
-      selectionOf(canvas).set(null);
-      onToolChange("select");
-    } catch (error) {
-      failure(error, "Could not mask the layer");
-    }
-  };
+  /** A layer mask from the selection on the selected layer (or the photo). */
+  const mask = () =>
+    runRaster(async () => {
+      const chosen = current();
+      if (!canvas || !chosen) return;
+      const layer = maskLayer(canvas);
+      if (typeof layer === "string") {
+        toast.error(layer);
+        return;
+      }
+      try {
+        if (!(await addLayerMask(canvas, layer, { selection: chosen }))) return;
+        selectionOf(canvas).set(null);
+        maskTargetOf(canvas).set(layer);
+        onToolChange("select");
+      } catch (error) {
+        failure(error, "Could not mask the layer");
+      }
+    });
 
   const invert = () => {
     const chosen = current();
@@ -137,7 +137,8 @@ export function SelectionTaskBar({
     if (canvas) selectionOf(canvas).set(null);
   };
 
-  const canMask = !!canvas && rectangular && maskTarget(canvas) !== null;
+  const maskable = canvas ? maskLayer(canvas) : null;
+  const canMask = !!maskable && typeof maskable !== "string" && !hasLayerMask(maskable);
 
   return (
     <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-popover/95 px-2 py-1.5 shadow-xl backdrop-blur">
@@ -170,7 +171,7 @@ export function SelectionTaskBar({
             New layer
           </Button>
           {canMask && (
-            <Button size="sm" variant="ghost" className="h-8" onClick={mask} disabled={busy}>
+            <Button size="sm" variant="ghost" className="h-8" onClick={() => void mask()} disabled={busy}>
               <SquareDashedBottom className="mr-1 h-4 w-4" />
               Mask
             </Button>

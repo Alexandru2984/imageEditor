@@ -22,6 +22,7 @@ export const KEYMAP = {
 
   duplicate: [{ key: "j", mod: true }],
   layerViaCut: [{ key: "j", mod: true, shift: true }],
+  editLayerMask: [{ key: "\\", mod: true }],
   // Ctrl+Shift+N is the browser's private window; Photoshop's no-dialog
   // variant adds Alt.
   newLayer: [{ key: "n", mod: true, shift: true, alt: true }],

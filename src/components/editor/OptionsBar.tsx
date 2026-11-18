@@ -18,6 +18,8 @@ import {
   Shapes,
   SquareDashed,
   Type,
+  CircleDot,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
@@ -76,6 +78,9 @@ interface OptionsBarProps {
   onSelectionModeChange: (mode: SelectionMode) => void;
   wand: WandOptions;
   onWandChange: (change: Partial<WandOptions>) => void;
+  /** The layer whose mask the pixel tools paint on, if any. */
+  maskLayerName?: string | null;
+  onLeaveMask?: () => void;
 }
 
 const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }> = {
@@ -283,6 +288,8 @@ export function OptionsBar({
   onSelectionModeChange,
   wand,
   onWandChange,
+  maskLayerName,
+  onLeaveMask,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
@@ -609,6 +616,19 @@ export function OptionsBar({
           {colors}
           <Separator orientation="vertical" className="h-6" />
         </>
+      )}
+      {maskLayerName && painting && activeTool !== "draw" && (
+        <button
+          type="button"
+          onClick={onLeaveMask}
+          aria-label="Stop painting on the layer mask"
+          title={`Painting on the mask of ${maskLayerName}: black hides, white shows. Click to paint on the layer itself.`}
+          className="flex h-7 shrink-0 items-center gap-1 rounded-full border border-primary/40 bg-primary/10 px-2.5 text-xs text-foreground hover:bg-primary/20"
+        >
+          <CircleDot className="h-3.5 w-3.5 text-primary" />
+          Layer mask
+          <X className="h-3 w-3 text-muted-foreground" />
+        </button>
       )}
       {options}
       {!compact && info.hint && (

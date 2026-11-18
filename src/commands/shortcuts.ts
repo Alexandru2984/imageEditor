@@ -35,6 +35,7 @@ export function normalizedKey(event: Pick<KeyboardEvent, "key" | "code">): strin
   if (code === "BracketLeft") return "[";
   if (code === "BracketRight") return "]";
   if (code === "Semicolon") return ";";
+  if (code === "Backslash") return "\\";
   if (/^[a-z]$/i.test(key)) return key.toLowerCase();
   if (/^[0-9]$/.test(key)) return key;
   const letter = /^Key([A-Z])$/.exec(code);

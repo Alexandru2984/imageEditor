@@ -30,6 +30,35 @@ interface EditSession {
 
 const sessions = new WeakMap<FabricImage, EditSession>();
 
+/** A part of a surface, in its pixels. */
+export interface PixelRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/**
+ * Pixels that belong to a layer without being one, such as its mask: they are
+ * painted like a layer, but the layer is what the document holds and records.
+ */
+export interface PixelOwner {
+  owner: FabricObject;
+  /** A surface was made from the current pixels; it shows the same thing. */
+  began(surface: HTMLCanvasElement): void;
+  /** The surface changed, in `rect` or everywhere. */
+  changed(rect?: PixelRect): void;
+  /** The surface was encoded into `element`, which replaces it. */
+  committed(element: HTMLImageElement): void;
+}
+
+const owners = new WeakMap<FabricImage, PixelOwner>();
+
+/** Tie pixels that are not on the canvas to the layer they belong to. */
+export function linkPixelOwner(image: FabricImage, owner: PixelOwner): void {
+  owners.set(image, owner);
+}
+
 const originalElement = (image: FabricImage): CanvasImageSource =>
   (image as unknown as { _originalElement?: CanvasImageSource })._originalElement ??
   image.getElement();
@@ -93,17 +122,23 @@ export function beginPixelEdit(image: FabricImage): EditSession {
   const session: EditSession = { surface, context, generation: 1, pending: false };
   sessions.set(image, session);
   showSurface(image, surface);
+  owners.get(image)?.began(surface);
   return session;
 }
 
-/** Redraw the layer after its surface changed. */
-export function refreshPixelLayer(image: FabricImage, canvas: FabricCanvas): void {
+/** Redraw the layer after its surface changed (in `rect`, or anywhere). */
+export function refreshPixelLayer(image: FabricImage, canvas: FabricCanvas, rect?: PixelRect): void {
   if (image.filters.length > 0) {
     // The filter backend caches the source texture by key.
     image.removeTexture(image.cacheKey);
     image.applyFilters();
   }
   image.dirty = true;
+  const link = owners.get(image);
+  if (link) {
+    link.changed(rect);
+    link.owner.dirty = true;
+  }
   canvas.requestRenderAll();
 }
 
@@ -145,11 +180,13 @@ export async function commitPixelEdit(canvas: FabricCanvas, image: FabricImage):
   if (!session) return false;
   const generation = session.generation;
   const element = await surfaceToImage(session.surface);
+  const link = owners.get(image);
+  const owner = link?.owner ?? image;
   const current =
     sessions.get(image) === session &&
     session.generation === generation &&
     originalElement(image) === session.surface &&
-    canvas.getObjects().includes(image);
+    canvas.getObjects().includes(owner);
   if (!current) return false;
 
   sessions.delete(image);
@@ -162,8 +199,10 @@ export async function commitPixelEdit(canvas: FabricCanvas, image: FabricImage):
   image.setElement(element, { width: image.width, height: image.height });
   image.dirty = true;
   releaseSurface(session.surface);
+  link?.committed(element);
+  owner.dirty = true;
   canvas.requestRenderAll();
-  canvas.fire("object:modified", { target: image });
+  canvas.fire("object:modified", { target: owner });
   return true;
 }
 

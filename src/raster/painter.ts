@@ -1,4 +1,5 @@
 import { DabSpacer, tipGradientStops, type StrokePoint } from "./stroke";
+import type { PixelRect } from "./pixelLayer";
 
 export interface PaintSettings {
   /** Tip diameter in layer pixels. */
@@ -21,12 +22,7 @@ export interface PaintSettings {
   clip?: HTMLCanvasElement | null;
 }
 
-interface Rect {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-}
+type Rect = PixelRect;
 
 function createCanvas(width: number, height: number) {
   const element = document.createElement("canvas");
@@ -137,12 +133,12 @@ export class StrokePainter {
       : rect;
   }
 
-  /** Bring the surface up to date; false when nothing changed since last time. */
-  flush(): boolean {
+  /** Bring the surface up to date; the part that changed, or null for none. */
+  flush(): PixelRect | null {
     const rect = this.dirty;
-    if (!rect) return false;
+    if (!rect) return null;
     this.dirty = null;
-    if (!this.base || !this.buffer) return true;
+    if (!this.base || !this.buffer) return rect;
     const { left, top } = rect;
     const width = rect.right - rect.left;
     const height = rect.bottom - rect.top;
@@ -154,7 +150,7 @@ export class StrokePainter {
     target.globalCompositeOperation = this.settings.erase ? "destination-out" : "source-over";
     target.drawImage(this.clippedStroke(rect) ?? this.buffer.canvas, left, top, width, height, left, top, width, height);
     target.restore();
-    return true;
+    return rect;
   }
 
   /** The stroke within `rect`, faded by the clip, at the same coordinates. */
@@ -192,9 +188,11 @@ export class StrokePainter {
   }
 
   /** Final flush; frees the stroke's working memory. */
-  finish(): void {
-    this.flush();
+  /** Paint what is left and let go; returns what the last flush changed. */
+  finish(): PixelRect | null {
+    const painted = this.flush();
     this.release();
+    return painted;
   }
 
   private release(): void {

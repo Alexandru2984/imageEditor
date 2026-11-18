@@ -9,9 +9,7 @@ import {
 import {
   ensureLayerId,
   findBackgroundImage,
-  isBackgroundObject,
   isEditorChrome,
-  isObjectLocked,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
 import { renderObjectsRegion } from "@/utils/flatten";
@@ -21,7 +19,7 @@ import { gridBoxToScene, type PixelSelection } from "./state";
 
 /**
  * What can be done with a pixel selection: copy it to a layer (Layer via
- * Copy), redact it, or clip a layer to it. Each change is one undo step.
+ * Copy) or redact it. Each change is one undo step.
  */
 
 export const OUTSIDE_PHOTO = "The selection is outside the photo";
@@ -224,26 +222,4 @@ export async function blackOutSelection(canvas: FabricCanvas, selection: PixelSe
   canvas.setActiveObject(redaction);
   canvas.requestRenderAll();
   return redaction;
-}
-
-/** The image layer a mask from the selection would clip, if any. */
-export function maskTarget(canvas: FabricCanvas): FabricImage | null {
-  const active = canvas.getActiveObject();
-  return active instanceof FabricImage && !isBackgroundObject(active) && !isObjectLocked(active)
-    ? active
-    : null;
-}
-
-/**
- * Clip a layer to a rectangular selection without touching its pixels (the
- * clip can be released from the Properties panel).
- */
-export function maskToSelection(canvas: FabricCanvas, selection: PixelSelection, target: FabricImage): void {
-  const box = selection.mask.bounds();
-  if (!box) throw new Error(OUTSIDE_PHOTO);
-  if (!selection.mask.isRectangle()) throw new Error("Only a rectangular selection can mask a layer for now");
-  target.clipPath = new Rect({ ...gridBoxToScene(selection.grid, box), absolutePositioned: true });
-  canvas.setActiveObject(target);
-  canvas.fire("object:modified", { target });
-  canvas.requestRenderAll();
 }

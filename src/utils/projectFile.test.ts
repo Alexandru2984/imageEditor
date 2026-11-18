@@ -294,6 +294,34 @@ describe("readProjectFile", () => {
     ).rejects.toThrow(/unsafe text value/);
   });
 
+  it("accepts a layer mask whose image is an inline data image", async () => {
+    const snapshot = {
+      json: '{"objects":[{"type":"image","src":"__snapshot_src_0","layerMask":{"src":"__snapshot_src_1","enabled":false}}]}',
+      srcs: [PNG_DATA_URL, PNG_DATA_URL.replace("AAAAEklEQVR4", "AAAAEklEQVR5")],
+    };
+    const file = fileOf(JSON.stringify({ version: 1, snapshot }));
+    await expect(readProjectFile(file)).resolves.toEqual(snapshot);
+  });
+
+  it("rejects layer masks that point outside or carry anything else", async () => {
+    const masks = [
+      '{"src":"https://evil.example/mask.png","enabled":true}',
+      '{"src":"__snapshot_src_0","enabled":"yes"}',
+      '{"src":"__snapshot_src_0","enabled":true,"onload":"x"}',
+      '{"enabled":true}',
+      '"__snapshot_src_0"',
+      "null",
+    ];
+    for (const mask of masks) {
+      const snapshot = {
+        json: `{"objects":[{"type":"image","src":"__snapshot_src_0","layerMask":${mask}}]}`,
+        srcs: [PNG_DATA_URL],
+      };
+      const file = fileOf(JSON.stringify({ snapshot }));
+      await expect(readProjectFile(file), mask).rejects.toThrow();
+    }
+  });
+
   it("rejects an extracted src pointing at an external URL", async () => {
     const snapshot = {
       json: '{"objects":[{"type":"image","src":"__snapshot_src_0"}]}',

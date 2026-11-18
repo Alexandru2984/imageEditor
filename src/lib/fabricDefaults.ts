@@ -1,4 +1,5 @@
 import { FabricImage, FabricObject } from "fabric";
+import { installLayerMasks } from "@/raster/layerMask";
 
 /**
  * Fabric 7 changed the default object origin from left/top to center. Every
@@ -14,6 +15,8 @@ export function applyFabricDefaults(): void {
   // A click picks the layer whose pixels are under it, as Photoshop's
   // auto-select does, rather than whichever layer's box is on top.
   FabricImage.ownDefaults.perPixelTargetFind = true;
+  // Images draw through their layer masks.
+  installLayerMasks();
 }
 
 applyFabricDefaults();

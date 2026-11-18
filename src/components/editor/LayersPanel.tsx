@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useMaskTarget } from "@/hooks/useMaskTarget";
 import {
   Eye,
   EyeOff,
@@ -15,8 +16,9 @@ import {
   Image as ImageIcon,
   MoveRight,
   Layers,
+  CircleDot,
 } from "lucide-react";
-import type { Canvas as FabricCanvas, FabricObject } from "fabric";
+import { FabricImage, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
@@ -41,6 +43,12 @@ import {
   setObjectLocked,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
+import {
+  hasLayerMask,
+  layerMaskThumbnail,
+  maskTargetOf,
+  setLayerMaskEnabled,
+} from "@/raster/layerMask";
 
 type EditorObject = EditorFabricObject;
 
@@ -52,11 +60,15 @@ interface LayerItem {
   locked: boolean;
   isBackground: boolean;
   thumbnail: string;
+  /** The layer mask, when the layer has one. */
+  mask: { thumbnail: string; enabled: boolean } | null;
   fabricObject: EditorObject;
 }
 
 interface LayersPanelProps {
   fabricCanvas: FabricCanvas | null;
+  /** Layer › Layer mask › Add layer mask. */
+  onAddMask?: () => void;
 }
 
 // Generating a Fabric data URL is a real canvas render. Keep previews for the
@@ -123,8 +135,10 @@ const getLayerName = (obj: EditorObject, index: number): string => {
   }
 };
 
-export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
+export const LayersPanel = ({ fabricCanvas, onAddMask }: LayersPanelProps) => {
   const [layers, setLayers] = useState<LayerItem[]>([]);
+  // Which layer's mask the paint tools work on.
+  const maskTargetLayer = useMaskTarget(fabricCanvas);
   const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -160,6 +174,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
         locked: isBackground || isObjectLocked(obj),
         isBackground,
         thumbnail: "",
+        mask: hasLayerMask(obj) ? { thumbnail: layerMaskThumbnail(obj), enabled: obj.layerMask.enabled } : null,
         fabricObject: obj,
       });
       if (!isBackground) counter += 1;
@@ -364,6 +379,19 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
     setSelectedLayerId(layer.id);
   };
 
+  /** Click a thumbnail to paint on the layer or its mask; Shift+click turns the mask off. */
+  const handleThumbnail = (layer: LayerItem, mask: boolean, event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (!fabricCanvas) return;
+    const object = layer.fabricObject;
+    if (mask && event.shiftKey && hasLayerMask(object)) {
+      setLayerMaskEnabled(fabricCanvas, object, !object.layerMask.enabled);
+      return;
+    }
+    handleSelectLayer(layer);
+    maskTargetOf(fabricCanvas).set(mask ? object : null);
+  };
+
   const handleToggleVisibility = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!fabricCanvas) return;
@@ -468,6 +496,20 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
               {selectedOpacity}
             </span>
           </div>
+          {onAddMask &&
+            selectedLayer.fabricObject instanceof FabricImage &&
+            !isObjectLocked(selectedLayer.fabricObject) &&
+            !selectedLayer.mask && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 w-full gap-1.5 text-xs"
+                onClick={onAddMask}
+              >
+                <CircleDot className="h-3.5 w-3.5" />
+                Add layer mask
+              </Button>
+            )}
         </div>
       )}
 
@@ -518,7 +560,15 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                 >
                   {/* Thumbnail with a checkerboard so transparency reads */}
                   <div
-                    className="h-7 w-7 shrink-0 rounded border border-border bg-[length:8px_8px] bg-[position:0_0,4px_4px] flex items-center justify-center overflow-hidden"
+                    role={layer.mask ? "button" : undefined}
+                    aria-label={layer.mask ? `Paint on ${layer.name}` : undefined}
+                    aria-pressed={layer.mask ? maskTargetLayer !== layer.fabricObject : undefined}
+                    onClick={layer.mask ? (event) => handleThumbnail(layer, false, event) : undefined}
+                    className={`h-7 w-7 shrink-0 rounded border bg-[length:8px_8px] bg-[position:0_0,4px_4px] flex items-center justify-center overflow-hidden ${
+                      layer.mask && isSelected && maskTargetLayer !== layer.fabricObject
+                        ? "border-primary ring-1 ring-primary"
+                        : "border-border"
+                    }`}
                     style={{
                       backgroundImage:
                         "linear-gradient(45deg,hsl(var(--muted)) 25%,transparent 25%,transparent 75%,hsl(var(--muted)) 75%),linear-gradient(45deg,hsl(var(--muted)) 25%,transparent 25%,transparent 75%,hsl(var(--muted)) 75%)",
@@ -535,6 +585,35 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                       <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
                     )}
                   </div>
+
+                  {layer.mask && (
+                    <button
+                      type="button"
+                      aria-label={`${layer.name} layer mask`}
+                      aria-pressed={maskTargetLayer === layer.fabricObject}
+                      title="Click to paint on the mask · Shift+click to turn it off"
+                      onClick={(event) => handleThumbnail(layer, true, event)}
+                      className={`relative -ml-1 h-7 w-7 shrink-0 overflow-hidden rounded border bg-black ${
+                        maskTargetLayer === layer.fabricObject
+                          ? "border-primary ring-1 ring-primary"
+                          : "border-border"
+                      }`}
+                    >
+                      {layer.mask.thumbnail && (
+                        <img
+                          src={layer.mask.thumbnail}
+                          alt=""
+                          className="h-full w-full object-contain"
+                          draggable={false}
+                        />
+                      )}
+                      {!layer.mask.enabled && (
+                        <svg viewBox="0 0 28 28" className="absolute inset-0 h-full w-full text-red-500" aria-hidden>
+                          <path d="M4 4 24 24M24 4 4 24" stroke="currentColor" strokeWidth="2.5" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
 
                   {renamingId === layer.id ? (
                     <input

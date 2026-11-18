@@ -46,6 +46,8 @@ import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import { copySource, selectionLayer } from "@/selection/actions";
 import { selectionOf } from "@/selection/state";
+import { useMaskTarget } from "@/hooks/useMaskTarget";
+import { maskTargetOf } from "@/raster/layerMask";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -473,6 +475,10 @@ export const EditorWorkspace = ({
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const [selectionModification, setSelectionModification] = useState<SelectionModification | null>(null);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
+  const maskTargetLayer = useMaskTarget(fabricCanvas);
+  const leaveMask = useCallback(() => {
+    if (fabricCanvas) maskTargetOf(fabricCanvas).set(null);
+  }, [fabricCanvas]);
   const paintColors = useMemo(
     () => ({ foreground: activeColor, background: backgroundColor }),
     [activeColor, backgroundColor]
@@ -660,7 +666,7 @@ export const EditorWorkspace = ({
         <AdjustPanel fabricCanvas={fabricCanvas} />
       </TabsContent>
       <TabsContent value="layers" className="mt-0 min-h-0 flex-1">
-        <LayersPanel fabricCanvas={fabricCanvas} />
+        <LayersPanel fabricCanvas={fabricCanvas} onAddMask={commands["layer.mask.add"]?.run} />
       </TabsContent>
     </Tabs>
   );
@@ -705,6 +711,8 @@ export const EditorWorkspace = ({
       onSelectionModeChange={setSelectionMode}
       wand={wand}
       onWandChange={updateWand}
+      maskLayerName={maskTargetLayer ? (maskTargetLayer as EditorFabricObject).name ?? "the layer" : null}
+      onLeaveMask={leaveMask}
     />
   );
 

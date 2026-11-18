@@ -398,6 +398,19 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
           throw new Error(`Project contains an unsafe ${key}`);
         }
       }
+      if (key === "layerMask") {
+        // { src, enabled }; src is checked like any image source below.
+        if (
+          !child ||
+          typeof child !== "object" ||
+          Array.isArray(child) ||
+          !hasOnlyKeys(child as Record<string, unknown>, ["src", "enabled"]) ||
+          typeof (child as Record<string, unknown>).src !== "string" ||
+          typeof (child as Record<string, unknown>).enabled !== "boolean"
+        ) {
+          throw new Error("Project contains an invalid layer mask");
+        }
+      }
       if (key === "src") {
         if (typeof child !== "string") {
           throw new Error("Project contains an invalid image source");

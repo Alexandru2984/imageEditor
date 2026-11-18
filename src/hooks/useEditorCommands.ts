@@ -43,6 +43,7 @@ import {
   Save,
   Scaling,
   Scissors,
+  CircleDot,
   Search,
   Shapes,
   SlidersHorizontal,
@@ -73,6 +74,18 @@ import { Mask } from "@/selection/mask";
 import { documentGrid, selectionOf, type PixelSelection } from "@/selection/state";
 import { copySelectionToLayer } from "@/selection/actions";
 import { clearTarget, editPixels, paintTarget } from "@/selection/edits";
+import {
+  addLayerMask,
+  applyLayerMask,
+  deleteLayerMask,
+  hasLayerMask,
+  invertLayerMask,
+  maskLayer,
+  maskTargetOf,
+  setLayerMaskEnabled,
+  type MaskContent,
+  type MaskedImage,
+} from "@/raster/layerMask";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
@@ -237,6 +250,42 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         return;
       }
       void editPixels(canvas, target, pixelSelection(), { kind: "fill", color }).catch(reportFailure);
+    };
+
+    /** The layer mask commands' layer, when they can act on it. */
+    const maskedLayer = (): MaskedImage | null => {
+      if (!canvas) return null;
+      const layer = maskLayer(canvas);
+      return typeof layer === "string" ? null : layer;
+    };
+    const withMaskLayer = (run: (canvas: FabricCanvas, layer: MaskedImage) => unknown) => () => {
+      if (!canvas) return;
+      const layer = maskLayer(canvas);
+      if (typeof layer === "string") {
+        toast.error(layer);
+        return;
+      }
+      void Promise.resolve()
+        .then(() => run(canvas, layer))
+        .catch(reportFailure);
+    };
+    /** Give the layer a mask and paint on it next, as Photoshop does. */
+    const createMask = (content: () => MaskContent | null) =>
+      withMaskLayer(async (canvas, layer) => {
+        const chosen = content();
+        if (!chosen) return;
+        if (!(await addLayerMask(canvas, layer, chosen))) return;
+        // The selection became the mask.
+        if (typeof chosen !== "string") selectionOf(canvas).set(null);
+        maskTargetOf(canvas).set(layer);
+      });
+    const canAddMask = () => {
+      const layer = maskedLayer();
+      return !!layer && !hasLayerMask(layer);
+    };
+    const withMask = () => {
+      const layer = maskedLayer();
+      return layer && hasLayerMask(layer) ? layer : null;
     };
 
     /** New layer via Copy (Ctrl+J) or via Cut (Ctrl+Shift+J) from the selection. */
@@ -531,6 +580,99 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => layerViaSelection(false),
         isEnabled: () => !!pixelSelection(),
         keywords: "selection copy pixels",
+      },
+      {
+        id: "layer.mask.add",
+        label: "Add layer mask",
+        icon: CircleDot,
+        // From the selection when there is one, as Photoshop does.
+        run: createMask(() => {
+          const selection = pixelSelection();
+          return selection ? { selection } : "reveal";
+        }),
+        isEnabled: canAddMask,
+        keywords: "mask hide reveal non-destructive",
+      },
+      {
+        id: "layer.mask.revealAll",
+        label: "Reveal all",
+        run: createMask(() => "reveal"),
+        isEnabled: canAddMask,
+        keywords: "layer mask white",
+      },
+      {
+        id: "layer.mask.hideAll",
+        label: "Hide all",
+        run: createMask(() => "hide"),
+        isEnabled: canAddMask,
+        keywords: "layer mask black",
+      },
+      {
+        id: "layer.mask.revealSelection",
+        label: "Reveal selection",
+        run: createMask(() => {
+          const selection = pixelSelection();
+          return selection ? { selection } : null;
+        }),
+        isEnabled: () => canAddMask() && !!pixelSelection(),
+        keywords: "layer mask from selection",
+      },
+      {
+        id: "layer.mask.hideSelection",
+        label: "Hide selection",
+        run: createMask(() => {
+          const selection = pixelSelection();
+          return selection ? { selection, hide: true } : null;
+        }),
+        isEnabled: () => canAddMask() && !!pixelSelection(),
+        keywords: "layer mask from selection",
+      },
+      {
+        id: "layer.mask.edit",
+        label: "Edit layer mask",
+        shortcuts: KEYMAP.editLayerMask,
+        toggle: true,
+        isChecked: () => !!canvas && maskTargetOf(canvas).isTarget(withMask()),
+        run: () => {
+          const layer = withMask();
+          if (!canvas || !layer) return;
+          const target = maskTargetOf(canvas);
+          target.set(target.isTarget(layer) ? null : layer);
+        },
+        isEnabled: () => !!withMask(),
+        keywords: "paint on mask target",
+      },
+      {
+        id: "layer.mask.disable",
+        label: "Disable layer mask",
+        toggle: true,
+        isChecked: () => withMask()?.layerMask?.enabled === false,
+        run: withMaskLayer((canvas, layer) => {
+          if (hasLayerMask(layer)) setLayerMaskEnabled(canvas, layer, !layer.layerMask.enabled);
+        }),
+        isEnabled: () => !!withMask(),
+        keywords: "turn off mask show whole layer",
+      },
+      {
+        id: "layer.mask.invert",
+        label: "Invert layer mask",
+        run: withMaskLayer((canvas, layer) => invertLayerMask(canvas, layer)),
+        isEnabled: () => !!withMask(),
+        keywords: "swap shown hidden",
+      },
+      {
+        id: "layer.mask.apply",
+        label: "Apply layer mask",
+        run: withMaskLayer((canvas, layer) => applyLayerMask(canvas, layer)),
+        isEnabled: () => !!withMask(),
+        keywords: "bake erase hidden pixels",
+      },
+      {
+        id: "layer.mask.delete",
+        label: "Delete layer mask",
+        run: withMaskLayer((canvas, layer) => deleteLayerMask(canvas, layer)),
+        isEnabled: () => !!withMask(),
+        keywords: "remove mask",
       },
       {
         id: "layer.viaCut",
