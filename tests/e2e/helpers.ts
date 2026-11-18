@@ -71,3 +71,91 @@ export async function chooseMenu(page: Page, menu: string, item: string) {
   // The menu animates out; wait so it no longer covers what it opened.
   await expect(page.getByRole("menu")).toHaveCount(0);
 }
+
+export const TOP_IMAGE = "__top_image__";
+
+/** Open a solid-colour photo of the given size. */
+export async function uploadSolidImage(page: Page, width: number, height: number, color = "#ffffff") {
+  const base64 = await page.evaluate(
+    ({ width, height, color }) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d")!;
+      context.fillStyle = color;
+      context.fillRect(0, 0, width, height);
+      return canvas.toDataURL("image/png").split(",")[1]!;
+    },
+    { width, height, color }
+  );
+  await page.getByTestId("image-input").setInputFiles({
+    name: "solid.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(base64, "base64"),
+  });
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+}
+
+/**
+ * RGBA values of an autosaved image layer at the given pixel positions, or
+ * null while no such layer has been saved. `name` picks the layer by its saved
+ * name; TOP_IMAGE picks the topmost image layer.
+ */
+export async function autosavedLayerPixels(
+  page: Page,
+  name: string,
+  points: [number, number][]
+): Promise<{ width: number; height: number; pixels: number[][] } | null> {
+  return page.evaluate(
+    async ({ name, points }) => {
+      const value = await new Promise<{ snapshot?: { json?: string; srcs?: string[] } } | undefined>(
+        (resolve, reject) => {
+          const open = indexedDB.open("image-editor", 1);
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const db = open.result;
+            if (!db.objectStoreNames.contains("projects")) {
+              db.close();
+              resolve(undefined);
+              return;
+            }
+            const request = db.transaction("projects", "readonly").objectStore("projects").get("autosave");
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+              resolve(request.result);
+              db.close();
+            };
+          };
+        }
+      );
+      const json = value?.snapshot?.json;
+      if (!json) return null;
+      const objects = (JSON.parse(json).objects ?? []) as Array<{
+        name?: string;
+        src?: string;
+        type?: string;
+      }>;
+      const layer =
+        name === "__top_image__"
+          ? objects.filter((object) => object.type?.toLowerCase() === "image").at(-1)
+          : objects.find((object) => object.name === name);
+      const placeholder = /^__snapshot_src_(\d+)$/.exec(layer?.src ?? "");
+      const src = placeholder ? value?.snapshot?.srcs?.[Number(placeholder[1])] : layer?.src;
+      if (!src) return null;
+      const image = new Image();
+      image.src = src;
+      await image.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d")!;
+      context.drawImage(image, 0, 0);
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        pixels: points.map(([x, y]) => Array.from(context.getImageData(x, y, 1, 1).data)),
+      };
+    },
+    { name, points }
+  );
+}

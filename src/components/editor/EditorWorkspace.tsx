@@ -28,6 +28,8 @@ import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
 import { useSmartGuides } from "@/hooks/useSmartGuides";
 import { BRUSHES, stepBrushHardness, stepBrushWidth, type BrushKind } from "@/utils/brushes";
+import { DEFAULT_PAINT_OPTIONS, stepPaintSize, type PaintOptions } from "@/raster/paintSettings";
+import { isBrushTool, type BrushTool } from "./brushTools";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -118,6 +120,12 @@ export const EditorWorkspace = ({
 }: EditorWorkspaceProps) => {
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [lastShape, setLastShape] = useSessionState<ShapeKind>("lastShape", "rectangle");
+  const [lastBrushTool, setLastBrushTool] = useSessionState<BrushTool>("lastBrushTool", "brush");
+  const [paint, setPaint] = useSessionState<PaintOptions>("paint", DEFAULT_PAINT_OPTIONS);
+  const updatePaint = useCallback(
+    (change: Partial<PaintOptions>) => setPaint((current) => ({ ...current, ...change })),
+    [setPaint]
+  );
   const [activeColor, setActiveColor] = useSessionState("activeColor", "#a855f7");
   const [backgroundColor, setBackgroundColor] = useSessionState("backgroundColor", "#ffffff");
   const [brushWidth, setBrushWidth] = useSessionState("brushWidth", 3);
@@ -206,8 +214,9 @@ export const EditorWorkspace = ({
     (tool: Tool) => {
       setActiveTool(tool);
       if (isShapeKind(tool)) setLastShape(tool);
+      if (isBrushTool(tool)) setLastBrushTool(tool);
     },
-    [setLastShape]
+    [setLastShape, setLastBrushTool]
   );
 
   const handleZoomChange = useCallback((newZoom: number) => {
@@ -281,10 +290,20 @@ export const EditorWorkspace = ({
   }, [setActiveColor, setBackgroundColor]);
   const adjustBrush = useCallback(
     (setting: "width" | "hardness", direction: 1 | -1) => {
-      if (setting === "width") setBrushWidth((width) => stepBrushWidth(width, direction));
-      else setBrushHardness((hardness) => stepBrushHardness(hardness, direction));
+      // The marker keeps its own settings; the pixel tools share theirs.
+      if (activeTool === "draw") {
+        if (setting === "width") setBrushWidth((width) => stepBrushWidth(width, direction));
+        else setBrushHardness((hardness) => stepBrushHardness(hardness, direction));
+      } else if (setting === "width") {
+        setPaint((current) => ({ ...current, size: stepPaintSize(current.size, direction) }));
+      } else {
+        setPaint((current) => ({
+          ...current,
+          hardness: stepBrushHardness(current.hardness, direction),
+        }));
+      }
     },
-    [setBrushWidth, setBrushHardness]
+    [activeTool, setBrushWidth, setBrushHardness, setPaint]
   );
 
   const handleRotate = useCallback(
@@ -418,6 +437,7 @@ export const EditorWorkspace = ({
     activeTool,
     onToolChange: handleToolChange,
     lastShape,
+    lastBrushTool,
     undo,
     redo,
     hasUndo,
@@ -601,6 +621,8 @@ export const EditorWorkspace = ({
       onBrushWidthChange={setBrushWidth}
       onBrushHardnessChange={setBrushHardness}
       onBrushOpacityChange={setBrushOpacity}
+      paint={paint}
+      onPaintChange={updatePaint}
       snapping={snapping}
       onSnappingChange={handleSnappingChange}
     />
@@ -698,6 +720,7 @@ export const EditorWorkspace = ({
             activeTool={activeTool}
             onToolChange={handleToolChange}
             lastShape={lastShape}
+            lastBrushTool={lastBrushTool}
             fabricCanvas={fabricCanvas}
             onEyedropper={eyedropper.start}
             colors={colorWells(false)}
@@ -712,6 +735,7 @@ export const EditorWorkspace = ({
             brushHardness={brushHardness}
             brushOpacity={brushOpacity}
             brushKind={brushKind}
+            paint={paint}
             uploadedImage={uploadedImage}
             initialSnapshot={initialSnapshot}
             onCanvasReady={setFabricCanvas}
@@ -777,6 +801,7 @@ export const EditorWorkspace = ({
           activeTool={activeTool}
           onToolChange={handleToolChange}
           lastShape={lastShape}
+          lastBrushTool={lastBrushTool}
           fabricCanvas={fabricCanvas}
           onEyedropper={eyedropper.start}
         />

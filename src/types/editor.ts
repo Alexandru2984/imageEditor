@@ -1,5 +1,6 @@
 export type Tool =
   | "select"
+  | "brush"
   | "draw"
   | "eraser"
   | "rectangle"

@@ -46,6 +46,8 @@ import {
 import type { Tool } from "@/types/editor";
 import type { FabricObject } from "fabric";
 import { useShapeTool } from "@/hooks/useShapeTool";
+import { usePaintTool } from "@/hooks/usePaintTool";
+import type { PaintOptions } from "@/raster/paintSettings";
 import { findBackgroundImage } from "@/utils/viewport";
 
 interface CanvasProps {
@@ -55,6 +57,8 @@ interface CanvasProps {
   brushHardness: number;
   brushOpacity: number;
   brushKind: BrushKind;
+  /** Pixel brush and eraser settings (sizes in image pixels). */
+  paint: PaintOptions;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -113,6 +117,15 @@ const cropFrameRegion = (rect: Rect) => ({
 
 const SIDE_CONTROLS = ["ml", "mr", "mt", "mb"] as const;
 
+/** The eraser's size is in image pixels; its vector brush works in scene units. */
+const eraserSceneWidth = (canvas: FabricCanvas, size: number): number => {
+  try {
+    return Math.max(1, size / nativeMultiplier(canvas));
+  } catch {
+    return size;
+  }
+};
+
 export const Canvas = ({
   activeTool,
   activeColor,
@@ -120,6 +133,7 @@ export const Canvas = ({
   brushHardness,
   brushOpacity,
   brushKind,
+  paint,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -577,7 +591,7 @@ export const Canvas = ({
       canvas.freeDrawingBrush = brush;
     } else if (activeTool === "eraser") {
       const eraser = new EraserBrush(canvas);
-      eraser.width = brushWidth;
+      eraser.width = eraserSceneWidth(canvas, paint.size);
       eraser.on("end", (e) => {
         e.preventDefault();
         void eraser
@@ -623,10 +637,10 @@ export const Canvas = ({
       if (activeTool === "draw") {
         styleBrush(canvas.freeDrawingBrush, brushKind, activeColor, brushWidth, brushHardness);
       } else {
-        canvas.freeDrawingBrush.width = brushWidth;
+        canvas.freeDrawingBrush.width = eraserSceneWidth(canvas, paint.size);
       }
     }
-  }, [activeColor, brushWidth, brushHardness, brushKind, activeTool]);
+  }, [activeColor, brushWidth, brushHardness, brushKind, activeTool, paint.size]);
 
   // ---------- Crop helpers ----------
   const addCropOverlay = (canvas: FabricCanvas) => {
@@ -1167,6 +1181,15 @@ export const Canvas = ({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [activeTool, cancelMarquee]);
+
+  usePaintTool({
+    canvasRef: fabricCanvasRef,
+    canvasKey: uploadedImage,
+    activeTool,
+    color: activeColor,
+    paint,
+    spaceDownRef,
+  });
 
   useShapeTool({
     canvasRef: fabricCanvasRef,

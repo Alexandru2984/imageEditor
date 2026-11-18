@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { PNG_BASE64, autosavedObjects, canvasCenter } from "./helpers";
+import { PNG_BASE64, autosavedLayerPixels, autosavedObjects, canvasCenter, uploadSolidImage } from "./helpers";
 
 // Runs in the "mobile" project (a touch phone, see playwright.config.ts).
 
@@ -148,16 +148,21 @@ test("the menu reaches every command on the phone, on screen", async ({ page }) 
   await expect(page.getByRole("tab", { name: "Layers", selected: true })).toBeVisible();
 });
 
-test("brush settings sit above the tools only while drawing", async ({ page }) => {
+test("brush settings sit above the tools only while painting", async ({ page }) => {
   await openPhoto(page);
   const options = page.getByRole("group", { name: "Tool options" });
   await expect(options).toHaveCount(0);
-  await page.getByRole("button", { name: "Draw (B)" }).tap();
-  await expectOnScreen(page, options.getByRole("slider", { name: "Brush width" }));
-  await expect(options.getByRole("radio", { name: "Neon" })).toBeVisible();
+  await page.getByRole("button", { name: "Brush (B)" }).tap();
+  await expectOnScreen(page, options.getByRole("slider", { name: "Brush size" }));
   await expectOnScreen(page, options.getByRole("group", { name: "Colors" }));
   await expectNoSidewaysScroll(page);
-  await page.screenshot({ path: "test-results/mobile-options.png" });
+
+  // Tapping the armed Brush offers the Marker, with its stroke styles.
+  await page.getByRole("button", { name: "Brush (B)" }).tap();
+  await page.getByRole("button", { name: /^Marker/ }).tap();
+  await expect(options.getByRole("radio", { name: "Neon" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Marker (B)" })).toHaveAttribute("aria-pressed", "true");
+
   await page.getByRole("button", { name: "Select (V)" }).tap();
   await expect(options).toHaveCount(0);
 });
@@ -173,5 +178,17 @@ test("the command search opens from the menu and fits the phone", async ({ page 
   await palette.getByRole("option", { name: /Layers panel/ }).tap();
   await expect(palette).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Layers", selected: true })).toBeVisible();
+  await expectNoSidewaysScroll(page);
+});
+
+test("a finger paints with the brush on a new pixel layer", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  await page.getByRole("button", { name: "Brush (B)" }).tap();
+  const center = await canvasCenter(page);
+  await page.touchscreen.tap(center.x, center.y);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0]?.[3])
+    .toBe(255);
+  // No stray handles or menus open; the canvas keeps the screen.
   await expectNoSidewaysScroll(page);
 });

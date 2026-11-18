@@ -53,7 +53,8 @@ export const KEYMAP = {
   defaultColors: [{ key: "d" }],
 
   selectTool: [{ key: "v" }],
-  drawTool: [{ key: "b" }],
+  brushTool: [{ key: "b" }],
+  nextBrushTool: [{ key: "b", shift: true }],
   eraserTool: [{ key: "e" }],
   shapeTool: [{ key: "u" }],
   nextShape: [{ key: "u", shift: true }],

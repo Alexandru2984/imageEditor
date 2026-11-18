@@ -803,6 +803,15 @@ test("saves a re-editable project file", async ({ page }) => {
   await expect(page.getByText("Remove BG")).toBeVisible();
 });
 
+/** The vector Marker shares the Brush slot: B arms the slot, Shift+B switches. */
+async function armMarker(page: Page) {
+  const options = page.getByRole("group", { name: "Tool options" });
+  await page.keyboard.press("b");
+  await expect(options).toContainText(/Brush|Marker/);
+  if (!(await options.textContent())?.includes("Marker")) await page.keyboard.press("Shift+B");
+  await expect(options).toContainText("Marker");
+}
+
 test("drawing and erasing remain compatible with saved projects", async ({
   page,
 }) => {
@@ -816,7 +825,7 @@ test("drawing and erasing remain compatible with saved projects", async ({
   const centerX = box!.x + box!.width / 2;
   const centerY = box!.y + box!.height / 2;
 
-  await page.getByRole("button", { name: "Draw (B)" }).click();
+  await armMarker(page);
   await page.mouse.move(centerX - 60, centerY);
   await page.mouse.down();
   await page.mouse.move(centerX + 60, centerY, { steps: 8 });
@@ -968,21 +977,29 @@ test("the options bar follows the tool, and [ ] set the brush", async ({ page })
   const options = page.getByRole("group", { name: "Tool options" });
   await expect(options).toContainText("Move");
 
+  // The pixel brush: sizes in image pixels, Photoshop's steps.
   await page.keyboard.press("b");
   await expect(options).toContainText("Brush");
-  await expect(options.getByText("3px")).toBeVisible();
+  await expect(options.getByText("30px")).toBeVisible();
   await page.keyboard.press("]");
   await page.keyboard.press("]");
-  await expect(options.getByText("5px")).toBeVisible();
+  await expect(options.getByText("50px")).toBeVisible();
   await page.keyboard.press("[");
-  await expect(options.getByText("4px")).toBeVisible();
+  await expect(options.getByText("40px")).toBeVisible();
   await page.keyboard.press("Shift+BracketLeft");
   await expect(options.getByText("75%")).toBeVisible();
 
-  // The eraser has a size and nothing else.
+  // The eraser shares the pixel brush's settings.
   await page.keyboard.press("e");
-  await expect(options.getByRole("slider", { name: "Brush width" })).toBeVisible();
-  await expect(options.getByRole("slider", { name: "Brush hardness" })).toHaveCount(0);
+  await expect(options.getByText("40px")).toBeVisible();
+  await expect(options.getByRole("slider", { name: "Brush flow" })).toBeVisible();
+
+  // The marker keeps its own.
+  await armMarker(page);
+  await expect(options.getByRole("radiogroup", { name: "Brush type" })).toBeVisible();
+  await expect(options.getByText("3px")).toBeVisible();
+  await page.keyboard.press("]");
+  await expect(options.getByText("4px")).toBeVisible();
 
   // Shapes are picked from the bar too.
   await page.keyboard.press("u");
@@ -1010,7 +1027,7 @@ test("X swaps the foreground and background colours, D restores black and white"
   // The brush paints with the foreground colour.
   await background.fill("#00ff00");
   await page.keyboard.press("x");
-  await page.keyboard.press("b");
+  await armMarker(page);
   const center = await canvasCenter(page);
   await page.mouse.move(center.x - 60, center.y);
   await page.mouse.down();
@@ -1446,7 +1463,7 @@ test("crop presets frame the photo and the label matches the result", async ({ p
 
 test("brush types change how strokes are drawn and saved", async ({ page }) => {
   await uploadImage(page);
-  await page.getByRole("button", { name: "Draw (B)" }).click();
+  await armMarker(page);
   const center = await canvasCenter(page);
   const stroke = async (dy: number) => {
     await page.mouse.move(center.x - 80, center.y + dy);

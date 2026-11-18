@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MousePointer2,
-  Pencil,
   Eraser,
   Type,
   Crop,
@@ -25,12 +24,17 @@ import { isShapeKind, type ShapeKind } from "@/utils/shapes";
 import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
 import { cn } from "@/lib/utils";
 import { SHAPE_TOOLS } from "./shapeTools";
+import { BRUSH_TOOLS, type BrushTool } from "./brushTools";
+import { ToolGroupButton } from "./ToolGroupButton";
+import { ACTIVE_TOOL_CLASS, IDLE_TOOL_CLASS } from "./toolStyles";
 
 interface ToolbarProps {
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
   /** The shape the Shapes button (and the U key) arms. */
   lastShape: ShapeKind;
+  /** The tool the Brush button (and the B key) arms. */
+  lastBrushTool: BrushTool;
   fabricCanvas: FabricCanvas | null;
   orientation: "vertical" | "horizontal";
   onEyedropper: () => void;
@@ -40,11 +44,8 @@ interface ToolbarProps {
 
 type ToolDef = { id: Tool; icon: typeof MousePointer2; label: string };
 
-const PRIMARY_TOOLS: ToolDef[] = [
-  { id: "select", icon: MousePointer2, label: "Select (V)" },
-  { id: "draw", icon: Pencil, label: "Draw (B)" },
-  { id: "eraser", icon: Eraser, label: "Eraser (E)" },
-];
+const SELECT_TOOL: ToolDef = { id: "select", icon: MousePointer2, label: "Select (V)" };
+const ERASER_TOOL: ToolDef = { id: "eraser", icon: Eraser, label: "Eraser (E)" };
 
 
 const SECONDARY_TOOLS: ToolDef[] = [
@@ -53,14 +54,14 @@ const SECONDARY_TOOLS: ToolDef[] = [
   { id: "crop", icon: Crop, label: "Crop (C)" },
 ];
 
-const ACTIVE_CLASS =
-  "bg-primary text-primary-foreground shadow-md shadow-primary/25 hover:bg-primary hover:text-primary-foreground";
-const IDLE_CLASS = "text-muted-foreground hover:text-foreground";
+const ACTIVE_CLASS = ACTIVE_TOOL_CLASS;
+const IDLE_CLASS = IDLE_TOOL_CLASS;
 
 export const Toolbar = ({
   activeTool,
   onToolChange,
   lastShape,
+  lastBrushTool,
   fabricCanvas,
   orientation,
   onEyedropper,
@@ -299,7 +300,16 @@ export const Toolbar = ({
           : "flex w-full items-center gap-1 overflow-x-auto border-t border-border px-2 pb-[max(0.375rem,env(safe-area-inset-bottom))] pt-1.5"
       )}
     >
-      {PRIMARY_TOOLS.map(renderTool)}
+      {renderTool(SELECT_TOOL)}
+      <ToolGroupButton
+        tools={BRUSH_TOOLS}
+        current={lastBrushTool}
+        activeTool={activeTool}
+        onToolChange={onToolChange}
+        className={buttonSize}
+        side={tooltipSide}
+      />
+      {renderTool(ERASER_TOOL)}
       {separator}
       {shapesButton}
       {SECONDARY_TOOLS.map(renderTool)}

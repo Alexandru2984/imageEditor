@@ -4,7 +4,8 @@ import {
   Eraser,
   Magnet,
   MousePointer2,
-  Pencil,
+  Highlighter,
+  Paintbrush,
   Shapes,
   SquareDashed,
   Type,
@@ -16,6 +17,12 @@ import { BrushPreview } from "./BrushPreview";
 import { SHAPE_TOOLS } from "./shapeTools";
 import { BRUSHES, BRUSH_WIDTH_MAX, BRUSH_WIDTH_MIN, type BrushKind } from "@/utils/brushes";
 import { isShapeKind } from "@/utils/shapes";
+import {
+  PAINT_SLIDER_STEPS,
+  paintSizeToSlider,
+  sliderToPaintSize,
+  type PaintOptions,
+} from "@/raster/paintSettings";
 import type { Tool } from "@/types/editor";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +46,9 @@ interface OptionsBarProps {
   onBrushWidthChange: (width: number) => void;
   onBrushHardnessChange: (hardness: number) => void;
   onBrushOpacityChange: (opacity: number) => void;
+  /** Pixel brush and eraser. */
+  paint: PaintOptions;
+  onPaintChange: (change: Partial<PaintOptions>) => void;
   snapping: boolean;
   onSnappingChange: (enabled: boolean) => void;
 }
@@ -49,8 +59,17 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     name: "Move",
     hint: "Shift-click adds layers to the selection · Alt-drag moves without snapping",
   },
-  draw: { icon: Pencil, name: "Brush", hint: "" },
-  eraser: { icon: Eraser, name: "Eraser", hint: "The photo and locked layers are protected" },
+  brush: {
+    icon: Paintbrush,
+    name: "Brush",
+    hint: "Paints on the selected pixel layer, or on a new one · Shift-click draws a line",
+  },
+  draw: { icon: Highlighter, name: "Marker", hint: "" },
+  eraser: {
+    icon: Eraser,
+    name: "Eraser",
+    hint: "Erases pixels on the selected layer, otherwise drawings · The photo is protected",
+  },
   shape: { icon: Shapes, name: "Shape", hint: "Click to place a shape, or drag to size it" },
   text: { icon: Type, name: "Text", hint: "Click to add text · Double-click a text layer to edit it" },
   marquee: {
@@ -97,12 +116,14 @@ export function OptionsBar({
   onBrushWidthChange,
   onBrushHardnessChange,
   onBrushOpacityChange,
+  paint,
+  onPaintChange,
   snapping,
   onSnappingChange,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
-  const painting = activeTool === "draw" || activeTool === "eraser";
+  const painting = activeTool === "draw" || activeTool === "brush" || activeTool === "eraser";
   const brushOption = BRUSHES.find((option) => option.kind === brush.kind);
   const sliderClass = compact ? "w-16" : "w-20 xl:w-28";
 
@@ -123,8 +144,49 @@ export function OptionsBar({
     </Setting>
   );
 
+  const percentSetting = (
+    label: string,
+    key: "hardness" | "opacity" | "flow",
+    min: number,
+    keys?: string
+  ) => (
+    <Setting label={label} value={`${paint[key]}%`} keys={keys}>
+      <Slider
+        value={[paint[key]]}
+        aria-label={`Brush ${key}`}
+        min={min}
+        max={100}
+        step={1}
+        onValueChange={(value) => onPaintChange({ [key]: value[0] ?? paint[key] })}
+        className={sliderClass}
+      />
+    </Setting>
+  );
+
   let options: ReactNode = null;
-  if (activeTool === "draw") {
+  if (activeTool === "brush" || activeTool === "eraser") {
+    options = (
+      <>
+        <Setting label="Size" value={`${paint.size}px`} keys="[ and ] change the size">
+          <Slider
+            value={[paintSizeToSlider(paint.size)]}
+            aria-label="Brush size"
+            aria-valuetext={`${paint.size} pixels`}
+            min={0}
+            max={PAINT_SLIDER_STEPS}
+            step={1}
+            onValueChange={(value) =>
+              onPaintChange({ size: sliderToPaintSize(value[0] ?? paintSizeToSlider(paint.size)) })
+            }
+            className={sliderClass}
+          />
+        </Setting>
+        {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
+        {percentSetting("Opacity", "opacity", 1)}
+        {percentSetting("Flow", "flow", 1)}
+      </>
+    );
+  } else if (activeTool === "draw") {
     options = (
       <>
         <div role="radiogroup" aria-label="Brush type" className="flex shrink-0 items-center gap-1">
@@ -181,8 +243,6 @@ export function OptionsBar({
         </Setting>
       </>
     );
-  } else if (activeTool === "eraser") {
-    options = widthSetting;
   } else if (shape) {
     options = (
       <div role="radiogroup" aria-label="Shape" className="flex shrink-0 items-center gap-1">

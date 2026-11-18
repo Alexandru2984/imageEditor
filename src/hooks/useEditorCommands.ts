@@ -22,7 +22,8 @@ import {
   Maximize,
   MousePointer2,
   MousePointerSquareDashed,
-  Pencil,
+  Highlighter,
+  Paintbrush,
   Pipette,
   Redo2,
   RotateCcw,
@@ -57,12 +58,14 @@ import { isEditorChrome, removeSelectedObjects } from "@/utils/editorObjects";
 import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
 import type { PanelTab, Tool } from "@/types/editor";
+import { isBrushTool, type BrushTool } from "@/components/editor/brushTools";
 
 export interface EditorCommandContext {
   canvas: FabricCanvas | null;
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
   lastShape: ShapeKind;
+  lastBrushTool: BrushTool;
   undo: () => void;
   redo: () => void;
   /** Live checks: a shortcut can arrive before React re-renders. */
@@ -113,6 +116,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     activeTool,
     onToolChange,
     lastShape,
+    lastBrushTool,
     undo,
     redo,
     hasUndo,
@@ -504,7 +508,23 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
 
       // ---------- Tools ----------
       tool("tool.select", "select", "Select and move", MousePointer2, KEYMAP.selectTool, "move"),
-      tool("tool.draw", "draw", "Draw", Pencil, KEYMAP.drawTool, "brush pen paint"),
+      {
+        id: "tool.brush",
+        label: "Brush",
+        icon: Paintbrush,
+        shortcuts: KEYMAP.brushTool,
+        keywords: "paint pixels",
+        run: () => onToolChange(lastBrushTool),
+        isChecked: () => isBrushTool(activeTool),
+      },
+      {
+        id: "tool.nextBrush",
+        label: "Switch between Brush and Marker",
+        icon: Paintbrush,
+        shortcuts: KEYMAP.nextBrushTool,
+        run: () => onToolChange(activeTool === "brush" ? "draw" : activeTool === "draw" ? "brush" : lastBrushTool),
+      },
+      tool("tool.draw", "draw", "Marker", Highlighter, undefined, "draw pen highlighter neon dashed strokes"),
       tool("tool.eraser", "eraser", "Eraser", Eraser, KEYMAP.eraserTool),
       {
         id: "tool.shape",
@@ -535,7 +555,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
     ];
 
-    const painting = () => activeTool === "draw" || activeTool === "eraser";
+    const painting = () => isBrushTool(activeTool) || activeTool === "eraser";
     const brushKey = (
       id: string,
       label: string,
@@ -548,7 +568,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       shortcuts,
       repeat: true,
       run: () => adjustBrush(setting, direction),
-      isEnabled: setting === "width" ? painting : () => activeTool === "draw",
+      isEnabled: painting,
     });
     list.push(
       {
@@ -588,6 +608,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     flip,
     hasRedo,
     hasUndo,
+    lastBrushTool,
     lastShape,
     onToolChange,
     openCommandPalette,
