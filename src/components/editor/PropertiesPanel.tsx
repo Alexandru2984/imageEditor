@@ -382,6 +382,8 @@ export const PropertiesPanel = ({
       selectedProps?.type === "text" ||
       selectedProps?.type === "textbox") &&
     !isSticker({ fontFamily: selectedProps?.fontFamily });
+  // Pixels have no fill or stroke of their own.
+  const isImageObject = selectedProps?.type === "image";
 
   return (
     <ScrollArea className="h-full w-full">
@@ -485,6 +487,7 @@ export const PropertiesPanel = ({
               </div>
 
               {/* Fill */}
+              {!isImageObject && (
               <div className="mb-3">
                 <Label className="text-xs font-medium text-muted-foreground mb-1.5 block">
                   Fill
@@ -504,9 +507,10 @@ export const PropertiesPanel = ({
                   </span>
                 </div>
               </div>
+              )}
 
               {/* Text layers use the Outline effect instead */}
-              {!isTextObject && (
+              {!isTextObject && !isImageObject && (
                 <>
               {/* Stroke */}
               <div className="mb-3">

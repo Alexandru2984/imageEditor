@@ -434,7 +434,9 @@ test("locked image layers stay visible, protected, and persist", async ({
     page.getByRole("button", { name: "Unlock Image 1" })
   ).toBeVisible();
   await page.getByRole("tab", { name: "Properties" }).click();
-  await expect(page.getByLabel("Object fill color")).toBeDisabled();
+  await expect(page.getByRole("slider", { name: "Object opacity" })).toHaveAttribute("data-disabled", "");
+  // An image layer has no fill or stroke to set.
+  await expect(page.getByLabel("Object fill color")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Align left" })).toBeDisabled();
   await page.getByRole("tab", { name: "Adjust" }).click();
   await expect(
