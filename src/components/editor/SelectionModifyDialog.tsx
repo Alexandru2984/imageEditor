@@ -11,8 +11,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { selectionOf } from "@/selection/state";
+import { paintTarget, strokeSelection, type StrokeLocation } from "@/selection/edits";
+import { cn } from "@/lib/utils";
 
-export type SelectionModification = "feather" | "expand" | "contract";
+export type SelectionModification = "feather" | "expand" | "contract" | "stroke";
+
+const STROKE_LOCATIONS: { value: StrokeLocation; label: string }[] = [
+  { value: "inside", label: "Inside" },
+  { value: "center", label: "Centre" },
+  { value: "outside", label: "Outside" },
+];
 
 const MODIFICATIONS: Record<
   SelectionModification,
@@ -42,20 +50,34 @@ const MODIFICATIONS: Record<
     max: 500,
     initial: 5,
   },
+  stroke: {
+    title: "Stroke",
+    description: "Paint a line along the selection's edge in the foreground colour.",
+    label: "Width",
+    min: 1,
+    max: 250,
+    initial: 4,
+  },
 };
 
 interface SelectionModifyDialogProps {
   canvas: FabricCanvas | null;
   /** The modification being set up, or null when the dialog is closed. */
   modification: SelectionModification | null;
+  /** The foreground colour a stroke is painted in. */
+  strokeColor: string;
   onClose: () => void;
 }
 
-/** Select › Modify: Feather, Expand and Contract, by a number of pixels. */
-export function SelectionModifyDialog({ canvas, modification, onClose }: SelectionModifyDialogProps) {
+/**
+ * Select › Modify (Feather, Expand, Contract) and Edit › Stroke, each by a
+ * number of pixels.
+ */
+export function SelectionModifyDialog({ canvas, modification, strokeColor, onClose }: SelectionModifyDialogProps) {
   const inputId = useId();
   const settings = modification ? MODIFICATIONS[modification] : null;
   const [value, setValue] = useState("");
+  const [location, setLocation] = useState<StrokeLocation>("center");
   // Each opening starts from the last amount used for that modification.
   const [remembered, setRemembered] = useState<Partial<Record<SelectionModification, number>>>({});
   useEffect(() => {
@@ -75,6 +97,20 @@ export function SelectionModifyDialog({ canvas, modification, onClose }: Selecti
     const selection = store.current();
     if (!selection) {
       toast.error("Make a selection first");
+      onClose();
+      return;
+    }
+    if (modification === "stroke") {
+      const target = paintTarget(canvas);
+      if (typeof target === "string") {
+        toast.error(target);
+      } else {
+        void strokeSelection(canvas, target, selection, strokeColor, Math.round(amount), location).catch((error) => {
+          console.error("Stroke failed:", error);
+          toast.error("The stroke could not be painted");
+        });
+      }
+      setRemembered((current) => ({ ...current, stroke: amount }));
       onClose();
       return;
     }
@@ -119,6 +155,28 @@ export function SelectionModifyDialog({ canvas, modification, onClose }: Selecti
               />
               <span className="text-sm text-muted-foreground">pixels</span>
             </div>
+            {modification === "stroke" && (
+              <div role="radiogroup" aria-label="Stroke location" className="flex items-center gap-1">
+                <span className="mr-2 text-sm">Location</span>
+                {STROKE_LOCATIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="radio"
+                    aria-checked={location === option.value}
+                    onClick={() => setLocation(option.value)}
+                    className={cn(
+                      "h-8 rounded-md border px-2.5 text-xs transition-colors",
+                      location === option.value
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={onClose}>
                 Cancel

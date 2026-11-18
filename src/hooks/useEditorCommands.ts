@@ -70,7 +70,9 @@ import { isEditorChrome, removeSelectedObjects } from "@/utils/editorObjects";
 import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
 import { Mask } from "@/selection/mask";
-import { documentGrid, selectionOf } from "@/selection/state";
+import { documentGrid, selectionOf, type PixelSelection } from "@/selection/state";
+import { copySelectionToLayer } from "@/selection/actions";
+import { clearTarget, editPixels, paintTarget } from "@/selection/edits";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
@@ -138,6 +140,10 @@ export interface EditorCommandContext {
   /** [ ] and Shift+[ ]: brush size and hardness. */
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
   swapColors: () => void;
+  /** Foreground and background colours, for Edit › Fill. */
+  colors: { foreground: string; background: string };
+  /** Edit › Stroke's dialog. */
+  strokeSelection: () => void;
   resetColors: () => void;
   openCommandPalette: () => void;
 }
@@ -199,6 +205,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     modifySelection,
     adjustBrush,
     swapColors,
+    colors,
+    strokeSelection,
     resetColors,
     openCommandPalette,
   } = context;
@@ -208,6 +216,45 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
   return useMemo(() => {
     const selected = () => hasSelection(canvas);
     const pixelSelection = () => (canvas ? selectionOf(canvas).current() : null);
+
+    /** Delete with a selection: clear its pixels on the layer (or the photo). */
+    const clearPixels = (selection: PixelSelection) => {
+      if (!canvas) return;
+      const target = clearTarget(canvas);
+      if (typeof target === "string") {
+        toast.error(target);
+        return;
+      }
+      void editPixels(canvas, target, selection, { kind: "clear" }).catch(reportFailure);
+    };
+
+    /** Edit › Fill: the selection, or the whole layer, in a colour. */
+    const fillPixels = (color: string) => {
+      if (!canvas) return;
+      const target = paintTarget(canvas);
+      if (typeof target === "string") {
+        toast.error(target);
+        return;
+      }
+      void editPixels(canvas, target, pixelSelection(), { kind: "fill", color }).catch(reportFailure);
+    };
+
+    /** New layer via Copy (Ctrl+J) or via Cut (Ctrl+Shift+J) from the selection. */
+    const layerViaSelection = (cut: boolean) => {
+      const selection = pixelSelection();
+      if (!canvas || !selection) return;
+      const source = cut ? clearTarget(canvas) : null;
+      if (typeof source === "string") {
+        toast.error(source);
+        return;
+      }
+      void (async () => {
+        const result = await copySelectionToLayer(canvas, selection);
+        if (!result) return;
+        selectionOf(canvas).set(null);
+        if (source) await editPixels(canvas, source, selection, { kind: "clear" }, { select: false });
+      })().catch(reportFailure);
+    };
     const aiIdle = () => !aiBusy;
 
     const removeSelection = (): number => {
@@ -341,12 +388,31 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         icon: Scissors,
         shortcuts: KEYMAP.cut,
         run: () => {
+          const selection = pixelSelection();
+          if (!selection) {
+            copy();
+            removeSelection();
+            return;
+          }
+          const target = canvas ? clearTarget(canvas) : null;
+          if (typeof target === "string") {
+            toast.error(target);
+            return;
+          }
+          // The copy reads the pixels before they are cleared.
           copy();
-          removeSelection();
+          clearPixels(selection);
         },
-        isEnabled: selected,
+        isEnabled: () => selected() || !!pixelSelection(),
       },
-      { id: "edit.copy", label: "Copy", icon: Copy, shortcuts: KEYMAP.copy, run: copy, isEnabled: selected },
+      {
+        id: "edit.copy",
+        label: "Copy",
+        icon: Copy,
+        shortcuts: KEYMAP.copy,
+        run: copy,
+        isEnabled: () => selected() || !!pixelSelection(),
+      },
       {
         id: "edit.paste",
         label: "Paste",
@@ -361,8 +427,36 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         label: "Delete",
         icon: Trash2,
         shortcuts: KEYMAP.delete,
-        run: () => void removeSelection(),
-        isEnabled: selected,
+        run: () => {
+          const selection = pixelSelection();
+          if (selection) clearPixels(selection);
+          else removeSelection();
+        },
+        isEnabled: () => selected() || !!pixelSelection(),
+      },
+      {
+        id: "edit.fillForeground",
+        label: "Fill with foreground colour",
+        icon: PaintBucket,
+        shortcuts: KEYMAP.fillForeground,
+        run: () => fillPixels(colors.foreground),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "fill selection color paint",
+      },
+      {
+        id: "edit.fillBackground",
+        label: "Fill with background colour",
+        shortcuts: KEYMAP.fillBackground,
+        run: () => fillPixels(colors.background),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "fill selection color paint",
+      },
+      {
+        id: "edit.stroke",
+        label: "Stroke…",
+        run: strokeSelection,
+        isEnabled: () => !!pixelSelection(),
+        keywords: "outline border selection edge",
       },
 
       // ---------- Image ----------
@@ -419,9 +513,33 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         label: "Duplicate layer",
         icon: CopyPlus,
         shortcuts: KEYMAP.duplicate,
-        run: duplicate,
-        isEnabled: selected,
+        // With a pixel selection, Ctrl+J is New layer via copy.
+        run: () => {
+          if (pixelSelection()) layerViaSelection(false);
+          else duplicate();
+        },
+        isEnabled: () => selected() || !!pixelSelection(),
         keywords: "copy clone",
+      },
+      {
+        id: "layer.viaCopy",
+        label: "New layer via copy",
+        icon: CopyPlus,
+        shortcuts: KEYMAP.duplicate,
+        // Ctrl+J itself runs layer.duplicate, which copies a selection.
+        shortcutsDisplayOnly: true,
+        run: () => layerViaSelection(false),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "selection copy pixels",
+      },
+      {
+        id: "layer.viaCut",
+        label: "New layer via cut",
+        icon: Scissors,
+        shortcuts: KEYMAP.layerViaCut,
+        run: () => layerViaSelection(true),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "selection cut pixels",
       },
       {
         id: "layer.new",
@@ -869,6 +987,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     modifySelection,
     snapping,
     swapColors,
+    colors,
+    strokeSelection,
     togglePanel,
     undo,
     zoomIn,

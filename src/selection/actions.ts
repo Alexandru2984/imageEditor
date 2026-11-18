@@ -129,7 +129,44 @@ export async function copySelectionToLayer(
 ): Promise<CopyResult | null> {
   const source = effect ? null : copySource(canvas);
   if (!effect && !source) throw new Error("Open a photo first");
+  const copy = await selectionLayer(canvas, selection, source);
+  const { layer } = copy;
+  const objects = canvas.getObjects();
+  if (source && !objects.includes(source)) return null;
 
+  const named = layer as FabricImage & EditorFabricObject;
+  if (effect) {
+    // Blocks scale with the copy so a face stays unreadable at any size.
+    const side = Math.max(layer.width, layer.height);
+    layer.filters = [
+      effect === "pixelate"
+        ? new filters.Pixelate({ blocksize: Math.min(64, Math.max(8, Math.round(side / 14))) })
+        : new filters.Blur({ blur: 0.6 }),
+    ];
+    layer.applyFilters();
+    named.name = effect === "pixelate" ? "Pixelated" : "Blurred";
+  } else {
+    named.name = nextLayerName(canvas);
+  }
+
+  canvas.discardActiveObject();
+  if (source) canvas.insertAt(objects.indexOf(source) + 1, layer);
+  else canvas.add(layer);
+  canvas.setActiveObject(layer);
+  canvas.requestRenderAll();
+  return copy;
+}
+
+/**
+ * The selected pixels of `source` (or of everything seen, without one) as an
+ * image layer in their place, not yet added to the document. The copy keeps
+ * the source's opacity and blending.
+ */
+export async function selectionLayer(
+  canvas: FabricCanvas,
+  selection: PixelSelection,
+  source: FabricObject | null
+): Promise<CopyResult> {
   let rendered: RenderedSelection;
   if (source) {
     // The pixels themselves; the copy keeps the layer's opacity and blending.
@@ -149,30 +186,7 @@ export async function copySelectionToLayer(
   }
 
   const layer = await layerFromRender(rendered);
-  const objects = canvas.getObjects();
-  if (source && !objects.includes(source)) return null;
-
-  const named = layer as FabricImage & EditorFabricObject;
-  if (effect) {
-    // Blocks scale with the copy so a face stays unreadable at any size.
-    const side = Math.max(layer.width, layer.height);
-    layer.filters = [
-      effect === "pixelate"
-        ? new filters.Pixelate({ blocksize: Math.min(64, Math.max(8, Math.round(side / 14))) })
-        : new filters.Blur({ blur: 0.6 }),
-    ];
-    layer.applyFilters();
-    named.name = effect === "pixelate" ? "Pixelated" : "Blurred";
-  } else {
-    named.name = nextLayerName(canvas);
-    layer.set({ opacity: source!.opacity, globalCompositeOperation: source!.globalCompositeOperation });
-  }
-
-  canvas.discardActiveObject();
-  if (source) canvas.insertAt(objects.indexOf(source) + 1, layer);
-  else canvas.add(layer);
-  canvas.setActiveObject(layer);
-  canvas.requestRenderAll();
+  if (source) layer.set({ opacity: source.opacity, globalCompositeOperation: source.globalCompositeOperation });
   return { layer, limited: rendered.limited };
 }
 

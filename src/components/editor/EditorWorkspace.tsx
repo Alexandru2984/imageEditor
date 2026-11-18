@@ -44,6 +44,8 @@ import {
 import { DEFAULT_WAND_OPTIONS, type WandOptions } from "@/selection/magicWand";
 import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
+import { copySource, selectionLayer } from "@/selection/actions";
+import { selectionOf } from "@/selection/state";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -55,7 +57,8 @@ import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { isAbortError } from "@/utils/abort";
 import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
-import { isEditorChrome, isReadOnlySelection } from "@/utils/editorObjects";
+import { isEditorChrome, isReadOnlySelection, type EditorFabricObject } from "@/utils/editorObjects";
+import { nextLayerName } from "@/raster/pixelLayer";
 import { applyColor, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import {
   addImageLayer,
@@ -390,6 +393,20 @@ export const EditorWorkspace = ({
 
   const handleCopy = useCallback(() => {
     if (!fabricCanvas) return;
+    const pixels = selectionOf(fabricCanvas).current();
+    if (pixels) {
+      // The selected pixels of the selected layer (or the photo), read now.
+      void selectionLayer(fabricCanvas, pixels, copySource(fabricCanvas))
+        .then(({ layer }) => {
+          clipboardRef.current = { objects: [layer], pastes: 0 };
+          toast.success("Selection copied", { id: "layer-clipboard", duration: 1500 });
+        })
+        .catch((error) => {
+          console.error("Copy failed:", error);
+          toast.error("The selection could not be copied");
+        });
+      return;
+    }
     void copySelection(fabricCanvas)
       .then((objects) => {
         if (objects.length === 0) return;
@@ -411,6 +428,12 @@ export const EditorWorkspace = ({
     if (!canvas || !clipboard) return false;
     clipboard.pastes += 1;
     const copies = await cloneObjects(clipboard.objects);
+    // Copied pixels have no layer name yet; they become "Layer N".
+    let number = Number(/\d+$/.exec(nextLayerName(canvas))?.[0] ?? 1);
+    for (const copy of copies) {
+      const layer = copy as EditorFabricObject;
+      if (!layer.name) layer.name = `Layer ${number++}`;
+    }
     placeCopies(canvas, copies, (16 * clipboard.pastes) / (canvas.getZoom() || 1));
     return copies.length > 0;
   }, [fabricCanvas]);
@@ -449,6 +472,11 @@ export const EditorWorkspace = ({
   const openPanel = useCallback((tab: PanelTab) => setPanel(tab), [setPanel]);
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const [selectionModification, setSelectionModification] = useState<SelectionModification | null>(null);
+  const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
+  const paintColors = useMemo(
+    () => ({ foreground: activeColor, background: backgroundColor }),
+    [activeColor, backgroundColor]
+  );
   const openCommandPalette = useCallback(() => setPaletteOpen(true), []);
   const requestNew = useCallback(() => setDiscardAction("new"), []);
   const requestOpenImage = useCallback(() => setDiscardAction("openImage"), []);
@@ -508,6 +536,8 @@ export const EditorWorkspace = ({
     openPanel,
     showShortcuts,
     modifySelection: setSelectionModification,
+    strokeSelection: openStrokeDialog,
+    colors: paintColors,
     adjustBrush,
     swapColors,
     resetColors,
@@ -880,6 +910,7 @@ export const EditorWorkspace = ({
       <SelectionModifyDialog
         canvas={fabricCanvas}
         modification={selectionModification}
+        strokeColor={activeColor}
         onClose={() => setSelectionModification(null)}
       />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />

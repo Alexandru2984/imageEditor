@@ -17,7 +17,19 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
   },
   {
     label: "Edit",
-    items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete"],
+    items: [
+      "edit.undo",
+      "edit.redo",
+      "-",
+      "edit.cut",
+      "edit.copy",
+      "edit.paste",
+      "edit.delete",
+      "-",
+      "edit.fillForeground",
+      "edit.fillBackground",
+      "edit.stroke",
+    ],
   },
   {
     label: "Image",
@@ -39,6 +51,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "layer.new",
       "file.placeImage",
       "layer.duplicate",
+      "layer.viaCopy",
+      "layer.viaCut",
       "-",
       {
         label: "Arrange",

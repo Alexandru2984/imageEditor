@@ -433,3 +433,91 @@ test("painting, filling and gradients stay inside the selection", async ({ page 
   expect(after[0]![3]).toBe(0);
   expect(after[1]![3]).toBe(0);
 });
+
+/** The photo's pixels as autosaved. */
+const photoPixels = (page: Page, points: [number, number][]) => autosavedLayerPixels(page, "Background", points);
+
+test("Delete clears the selected pixels; Ctrl+J and Ctrl+Shift+J copy or cut them", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ff0000");
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const scale = photo.scaleX as number;
+  const inside = Math.round(200 - 30 / scale);
+  const outside = Math.round(200 + 30 / scale);
+  const selectLeftBox = async () => {
+    await arm(page, "m", "Rectangle select");
+    await drag(page, [-60, -40], [0, 40]);
+    await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
+  };
+
+  await selectLeftBox();
+  await page.keyboard.press("Delete");
+  await expect.poll(async () => (await photoPixels(page, [[inside, 150]]))?.pixels[0]?.[3]).toBe(0);
+  expect((await photoPixels(page, [[outside, 150]]))!.pixels[0]![3]).toBe(255);
+  // The photo itself stays, and one undo brings the pixels back.
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await photoPixels(page, [[inside, 150]]))?.pixels[0]?.[3]).toBe(255);
+
+  // Ctrl+J: a copy on a new layer, the photo untouched.
+  await page.keyboard.press("Control+j");
+  await expect.poll(async () => (await autosavedObjects(page)).some((o) => o.name === "Layer 1")).toBe(true);
+  expect((await photoPixels(page, [[inside, 150]]))!.pixels[0]![3]).toBe(255);
+  await expect(page.getByText("Drag to select a region")).toBeVisible();
+
+  // Ctrl+Shift+J from the photo: the pixels move to a new layer.
+  await page.getByRole("button", { name: "Select (V)" }).click();
+  await page.keyboard.press("Escape");
+  await selectLeftBox();
+  await page.keyboard.press("Control+Shift+j");
+  await expect.poll(async () => (await autosavedObjects(page)).some((o) => o.name === "Layer 2")).toBe(true);
+  await expect.poll(async () => (await photoPixels(page, [[inside, 150]]))?.pixels[0]?.[3]).toBe(0);
+  const cut = (await autosavedLayerPixels(page, "Layer 2", [[2, 2]]))!;
+  expect(cut.pixels[0]).toEqual([255, 0, 0, 255]);
+});
+
+test("copying a selection pastes its pixels as a new layer", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#0000ff");
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-40, -40], [40, 40]);
+  await page.keyboard.press("Control+c");
+  await expect(page.getByText("Selection copied")).toBeVisible();
+  const images = async () => (await autosavedObjects(page)).filter((o) => o.type === "Image");
+  await page.evaluate(() => {
+    document.dispatchEvent(new ClipboardEvent("paste", { clipboardData: new DataTransfer() }));
+  });
+  await expect.poll(async () => (await images()).length).toBe(2);
+  const pasted = (await images())[1]!;
+  expect(pasted.name).toBe("Layer 1");
+  const full = (await images())[0]!;
+  expect((pasted.width as number) * (pasted.scaleX as number)).toBeLessThan(
+    ((full.width as number) * (full.scaleX as number)) / 3
+  );
+});
+
+test("Edit › Fill and Stroke paint the selection on a new layer", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff");
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const scale = photo.scaleX as number;
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-60, -40], [60, 40]);
+
+  // Alt+Backspace fills with the foreground colour, on a new layer.
+  await page.keyboard.press("Alt+Backspace");
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0])
+    .toEqual([168, 85, 247, 255]);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[200, Math.round(150 - 60 / scale)]]))!.pixels[0]![3]).toBe(0);
+
+  // A 6px stroke inside the edge of the same selection, on the same layer,
+  // in the background colour after swapping.
+  await page.keyboard.press("x");
+  await chooseMenu(page, "Edit", "Stroke…");
+  const dialog = page.getByRole("dialog", { name: "Stroke" });
+  await dialog.getByLabel("Width").fill("6");
+  await dialog.getByRole("radio", { name: "Inside" }).click();
+  await dialog.getByRole("button", { name: "OK" }).click();
+  const top = Math.round(150 - 40 / scale);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, top + 2]]))?.pixels[0])
+    .toEqual([255, 255, 255, 255]);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))!.pixels[0]).toEqual([168, 85, 247, 255]);
+});

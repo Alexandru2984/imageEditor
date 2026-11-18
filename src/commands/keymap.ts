@@ -17,8 +17,11 @@ export const KEYMAP = {
   // Pasting is driven by the browser's paste event (it carries images).
   paste: [{ key: "v", mod: true }],
   delete: [{ key: "Delete" }, { key: "Backspace" }],
+  fillForeground: [{ key: "Backspace", alt: true }],
+  fillBackground: [{ key: "Backspace", mod: true }],
 
   duplicate: [{ key: "j", mod: true }],
+  layerViaCut: [{ key: "j", mod: true, shift: true }],
   // Ctrl+Shift+N is the browser's private window; Photoshop's no-dialog
   // variant adds Alt.
   newLayer: [{ key: "n", mod: true, shift: true, alt: true }],

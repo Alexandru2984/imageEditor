@@ -57,6 +57,8 @@ function editorCommands(): CommandMap {
     modifySelection: noop,
     adjustBrush: noop,
     swapColors: noop,
+    colors: { foreground: "#000000", background: "#ffffff" },
+    strokeSelection: noop,
     resetColors: noop,
     openCommandPalette: noop,
   };
@@ -90,14 +92,22 @@ describe("editor menus", () => {
   it("give every command its own keys", () => {
     const owners = new Map<string, string>();
     const clashes: string[] = [];
-    for (const command of Object.values(commands)) {
+    // A key that is only shown may echo one that runs: "New layer via copy"
+    // shows Ctrl+J, which Duplicate layer runs for it with a selection.
+    const ordered = Object.values(commands).sort(
+      (a, b) => Number(!!a.shortcutsDisplayOnly) - Number(!!b.shortcutsDisplayOnly)
+    );
+    const runs = (id: string) => commands[id]?.shortcutsDisplayOnly !== true;
+    for (const command of ordered) {
       for (const shortcut of command.shortcuts ?? []) {
         // Keys like "+" match with or without Shift, so Shift isn't part of them.
         const shift = shortcut.key.length === 1 && /[?+=-]/.test(shortcut.key) ? "" : !!shortcut.shift;
         const signature = `${!!shortcut.mod}|${!!shortcut.alt}|${shift}|${shortcut.key.toLowerCase()}`;
         const owner = owners.get(signature);
-        if (owner && owner !== command.id) clashes.push(`${owner} / ${command.id}: ${signature}`);
-        owners.set(signature, command.id);
+        if (owner && owner !== command.id && !(command.shortcutsDisplayOnly && runs(owner))) {
+          clashes.push(`${owner} / ${command.id}: ${signature}`);
+        }
+        if (!owner) owners.set(signature, command.id);
       }
     }
     expect(clashes).toEqual([]);
