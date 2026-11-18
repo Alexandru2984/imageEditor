@@ -22,8 +22,13 @@ import {
   Maximize,
   MousePointer2,
   MousePointerSquareDashed,
+  Combine,
+  Grid2x2,
   Highlighter,
+  Layers2,
+  Merge,
   Paintbrush,
+  SquarePlus,
   Pipette,
   Redo2,
   RotateCcw,
@@ -59,6 +64,16 @@ import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
 import type { PanelTab, Tool } from "@/types/editor";
 import { isBrushTool, type BrushTool } from "@/components/editor/brushTools";
+import {
+  addEmptyLayer,
+  planFlatten,
+  planMergeDown,
+  planMergeVisible,
+  planRasterize,
+  runMerge,
+  type MergePlan,
+  type Refusal,
+} from "@/raster/layerOps";
 
 export interface EditorCommandContext {
   canvas: FabricCanvas | null;
@@ -108,6 +123,14 @@ const hasSelection = (canvas: FabricCanvas | null): boolean => {
   const active = canvas?.getActiveObject();
   return !!active && !isEditorChrome(active);
 };
+
+const reportFailure = (error: unknown) => {
+  console.error("Layer command failed:", error);
+  toast.error(error instanceof Error ? error.message : "That did not work");
+};
+
+/** Why each layer command cannot run right now, or what it would merge. */
+type LayerPlanner = (canvas: FabricCanvas) => MergePlan | Refusal;
 
 /** Every command the editor offers, keyed by id. */
 export function useEditorCommands(context: EditorCommandContext): CommandMap {
@@ -189,6 +212,39 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       keywords,
       run: () => onToolChange(target),
       isChecked: () => activeTool === target,
+    });
+
+    // Layer commands are disabled while they cannot run; if the document
+    // changes between the check and the run, the refusal is explained.
+    const layerOp = (
+      id: string,
+      label: string,
+      icon: Command["icon"],
+      planner: LayerPlanner,
+      shortcuts: Command["shortcuts"],
+      keywords: string
+    ): Command => ({
+      id,
+      label,
+      icon,
+      shortcuts,
+      keywords,
+      run: () => {
+        if (!canvas) return;
+        const plan = planner(canvas);
+        if (typeof plan === "string") {
+          toast.error(plan);
+          return;
+        }
+        runMerge(canvas, plan)
+          .then((result) => {
+            if (result?.limited) {
+              toast.warning("The result was rendered at a lower resolution to stay within browser limits");
+            }
+          })
+          .catch(reportFailure);
+      },
+      isEnabled: () => !!canvas && typeof planner(canvas) !== "string",
     });
 
     const nextShape = (): ShapeKind => {
@@ -338,6 +394,22 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         isEnabled: selected,
         keywords: "copy clone",
       },
+      {
+        id: "layer.new",
+        label: "New layer",
+        icon: SquarePlus,
+        shortcuts: KEYMAP.newLayer,
+        keywords: "empty transparent pixel blank",
+        run: () => {
+          if (!canvas) return;
+          addEmptyLayer(canvas).catch(reportFailure);
+        },
+        isEnabled: () => !!canvas,
+      },
+      layerOp("layer.rasterize", "Rasterize layer", Grid2x2, planRasterize, undefined, "pixels convert text shape bake"),
+      layerOp("layer.mergeDown", "Merge down", Merge, planMergeDown, KEYMAP.mergeDown, "merge layers combine"),
+      layerOp("layer.mergeVisible", "Merge visible", Combine, planMergeVisible, KEYMAP.mergeVisible, "merge all combine"),
+      layerOp("layer.flatten", "Flatten image", Layers2, planFlatten, undefined, "merge all background"),
       {
         id: "layer.bringToFront",
         label: "Bring to front",

@@ -36,6 +36,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
   {
     label: "Layer",
     items: [
+      "layer.new",
       "file.placeImage",
       "layer.duplicate",
       "-",
@@ -49,6 +50,11 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
         ],
       },
       "layer.toggleLock",
+      "-",
+      "layer.rasterize",
+      "layer.mergeDown",
+      "layer.mergeVisible",
+      "layer.flatten",
       "-",
       "layer.clearUnlocked",
     ],

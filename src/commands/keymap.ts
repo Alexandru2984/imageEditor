@@ -19,6 +19,11 @@ export const KEYMAP = {
   delete: [{ key: "Delete" }, { key: "Backspace" }],
 
   duplicate: [{ key: "j", mod: true }],
+  // Ctrl+Shift+N is the browser's private window; Photoshop's no-dialog
+  // variant adds Alt.
+  newLayer: [{ key: "n", mod: true, shift: true, alt: true }],
+  mergeDown: [{ key: "e", mod: true }],
+  mergeVisible: [{ key: "e", mod: true, shift: true }],
   bringToFront: [{ key: "]", mod: true, shift: true }],
   bringForward: [{ key: "]", mod: true }],
   sendBackward: [{ key: "[", mod: true }],

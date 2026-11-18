@@ -1,4 +1,4 @@
-import type { Canvas as FabricCanvas, TBBox, TMat2D } from "fabric";
+import type { Canvas as FabricCanvas, FabricObject, TBBox, TMat2D } from "fabric";
 import { findBackgroundImage } from "./viewport";
 
 export const MAX_RASTER_SIDE = 8_192;
@@ -166,6 +166,27 @@ export function flattenRegion(
     throw new Error("The browser could not encode the rendered region");
   }
   return { ...plan, dataUrl };
+}
+
+/**
+ * Render only the objects `include` accepts over a scene region, into a new
+ * canvas at `requestedMultiplier` pixels per scene unit (capped for safety).
+ * Pixel (0, 0) of the result sits at the region's top-left corner.
+ */
+export function renderObjectsRegion(
+  canvas: FabricCanvas,
+  region: TBBox,
+  requestedMultiplier: number,
+  include: (object: FabricObject) => boolean
+): { element: HTMLCanvasElement; plan: RasterPlan } {
+  const plan = planRasterization(region, requestedMultiplier);
+  const element = renderWithIdentityViewport(canvas, () =>
+    canvas.toCanvasElement(plan.multiplier, {
+      ...cropFor(region, plan),
+      filter: (object) => include(object as FabricObject),
+    })
+  );
+  return { element, plan };
 }
 
 export interface RenderBlobOptions {

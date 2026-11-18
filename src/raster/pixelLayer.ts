@@ -130,6 +130,20 @@ async function decodeImage(dataUrl: string): Promise<HTMLImageElement> {
 }
 
 /**
+ * The pixels of a canvas as a decoded PNG image with a data-URL source, which
+ * snapshots can reference without encoding it again.
+ */
+export async function surfaceToImage(surface: HTMLCanvasElement): Promise<HTMLImageElement> {
+  return decodeImage(await readDataUrl(await encodePng(surface)));
+}
+
+/** Free a working canvas's memory now rather than at garbage collection. */
+export function releaseSurface(surface: HTMLCanvasElement): void {
+  surface.width = 0;
+  surface.height = 0;
+}
+
+/**
  * Encode the layer's surface and make it the layer's image, as one history
  * step. Resolves false when a newer stroke or an undo overtook this one.
  */
@@ -137,7 +151,7 @@ export async function commitPixelEdit(canvas: FabricCanvas, image: FabricImage):
   const session = sessions.get(image);
   if (!session) return false;
   const generation = session.generation;
-  const element = await decodeImage(await readDataUrl(await encodePng(session.surface)));
+  const element = await surfaceToImage(session.surface);
   const current =
     sessions.get(image) === session &&
     session.generation === generation &&
@@ -154,8 +168,7 @@ export async function commitPixelEdit(canvas: FabricCanvas, image: FabricImage):
   }
   image.setElement(element, { width: image.width, height: image.height });
   image.dirty = true;
-  session.surface.width = 0;
-  session.surface.height = 0;
+  releaseSurface(session.surface);
   canvas.requestRenderAll();
   canvas.fire("object:modified", { target: image });
   return true;
@@ -185,17 +198,9 @@ export function documentPixelSize(width: number, height: number) {
   };
 }
 
-/**
- * A transparent layer exactly over the photo, at the photo's resolution, on
- * top of the stack. It stays out of history and the Layers panel until its
- * first stroke is committed, so an empty click leaves nothing behind.
- */
-export function createPendingLayer(canvas: FabricCanvas): FabricImage | null {
-  const photo = findBackgroundImage(canvas);
-  if (!photo || photo.width <= 0 || photo.height <= 0) return null;
-  const size = documentPixelSize(photo.width, photo.height);
-  const { surface, context } = createSurface(size.width, size.height);
-  const layer = new FabricImage(surface, {
+/** Placement that lays a layer of `size` pixels exactly over the photo. */
+export function overPhoto(photo: FabricImage, size: { width: number; height: number }) {
+  return {
     left: photo.left,
     top: photo.top,
     angle: photo.angle,
@@ -207,7 +212,20 @@ export function createPendingLayer(canvas: FabricCanvas): FabricImage | null {
     originY: photo.originY,
     scaleX: (photo.scaleX * photo.width) / size.width,
     scaleY: (photo.scaleY * photo.height) / size.height,
-  }) as PaintableImage;
+  };
+}
+
+/**
+ * A transparent layer exactly over the photo, at the photo's resolution, on
+ * top of the stack. It stays out of history and the Layers panel until its
+ * first stroke is committed, so an empty click leaves nothing behind.
+ */
+export function createPendingLayer(canvas: FabricCanvas): FabricImage | null {
+  const photo = findBackgroundImage(canvas);
+  if (!photo || photo.width <= 0 || photo.height <= 0) return null;
+  const size = documentPixelSize(photo.width, photo.height);
+  const { surface, context } = createSurface(size.width, size.height);
+  const layer = new FabricImage(surface, overPhoto(photo, size)) as PaintableImage;
   layer.name = nextLayerName(canvas);
   layer.__isPreview = true;
   layer.excludeFromExport = true;
@@ -223,8 +241,7 @@ export function discardPendingLayer(canvas: FabricCanvas, image: FabricImage): v
   if (!session?.pending) return;
   sessions.delete(image);
   canvas.remove(image);
-  session.surface.width = 0;
-  session.surface.height = 0;
+  releaseSurface(session.surface);
 }
 
 export function editSession(image: FabricImage): EditSession | undefined {

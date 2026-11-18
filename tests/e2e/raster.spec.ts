@@ -4,6 +4,8 @@ import {
   autosavedLayerPixels,
   autosavedObjects,
   canvasCenter,
+  chooseMenu,
+  menuItem,
   uploadSolidImage,
 } from "./helpers";
 
@@ -23,6 +25,13 @@ function expectColor(actual: number[] | undefined, expected: number[], tolerance
 const layerNames = async (page: import("@playwright/test").Page) =>
   (await autosavedObjects(page)).map((object) => object.name);
 
+/** Press a tool key and wait until the tool is armed, so the next drag uses it. */
+async function arm(page: import("@playwright/test").Page, key: string, name: string) {
+  await page.keyboard.press(key);
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText(name);
+}
+const armBrush = (page: import("@playwright/test").Page) => arm(page, "b", "Brush");
+
 async function stroke(page: import("@playwright/test").Page, dy = 0, span = 80) {
   const center = await canvasCenter(page);
   await page.mouse.move(center.x - span, center.y + dy);
@@ -35,8 +44,7 @@ test("the brush paints pixels on a new layer, undoably, and the eraser removes t
   page,
 }) => {
   await uploadSolidImage(page, 400, 300);
-  await page.keyboard.press("b");
-  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Brush");
+  await armBrush(page);
 
   await stroke(page);
   await expect.poll(() => layerNames(page)).toContain("Layer 1");
@@ -66,7 +74,7 @@ test("the brush paints pixels on a new layer, undoably, and the eraser removes t
   await expect.poll(() => layerNames(page)).toContain("Layer 1");
 
   // The eraser works on the same pixel layer.
-  await page.keyboard.press("e");
+  await arm(page, "e", "Eraser");
   await stroke(page);
   await expect
     .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0]?.[3])
@@ -98,7 +106,7 @@ test("the brush paints on the selected image layer at that layer's resolution", 
   await expect.poll(async () => (await autosavedObjects(page)).length).toBe(2);
 
   // The added layer is selected, so the brush paints on it.
-  await page.keyboard.press("b");
+  await armBrush(page);
   const center = await canvasCenter(page);
   await page.mouse.click(center.x, center.y);
   await expect
@@ -117,7 +125,7 @@ test("the brush paints on the selected image layer at that layer's resolution", 
 
 test("painted layers survive saving and reopening the project", async ({ page }) => {
   await uploadSolidImage(page, 300, 200);
-  await page.keyboard.press("b");
+  await armBrush(page);
   await stroke(page);
   await expect.poll(() => layerNames(page)).toContain("Layer 1");
 
@@ -138,14 +146,14 @@ test("painted layers survive saving and reopening the project", async ({ page })
 test("clicks pass through the transparent pixels of a pixel layer", async ({ page }) => {
   await uploadSolidImage(page, 400, 300);
   const center = await canvasCenter(page);
-  await page.keyboard.press("u");
+  await arm(page, "u", "Shape");
   await page.mouse.click(center.x, center.y);
   // A stroke well away from the shape, on a layer spanning the whole photo.
-  await page.keyboard.press("b");
+  await armBrush(page);
   await stroke(page, -150);
   await expect.poll(() => layerNames(page)).toContain("Layer 1");
 
-  await page.keyboard.press("v");
+  await arm(page, "v", "Move");
   await page.getByRole("button", { name: "Toggle layers" }).click();
   const current = page.locator('[data-layer-id][aria-current="true"]');
   await expect(current).toContainText("Layer 1");
@@ -153,4 +161,91 @@ test("clicks pass through the transparent pixels of a pixel layer", async ({ pag
   await expect(current).toContainText(/rect/i);
   await page.mouse.click(center.x, center.y - 150);
   await expect(current).toContainText("Layer 1");
+});
+
+test("layer commands create, merge, rasterize and flatten layers in one undo step each", async ({
+  page,
+}) => {
+  await uploadSolidImage(page, 400, 300);
+  const center = await canvasCenter(page);
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  const rows = page.locator("[data-layer-id]");
+  const current = page.locator('[data-layer-id][aria-current="true"]');
+
+  // New layer, then paint on it: the brush uses the selected layer.
+  await page.keyboard.press("Control+Shift+Alt+n");
+  await expect(current).toContainText("Layer 1");
+  await armBrush(page);
+  await stroke(page);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0]?.[3])
+    .toBe(255);
+
+  // A shape above it, rasterized into pixels.
+  await arm(page, "u", "Shape");
+  await page.mouse.click(center.x, center.y + 60);
+  await expect(current).toContainText(/rect/i);
+  await chooseMenu(page, "Layer", "Rasterize layer");
+  await expect
+    .poll(async () => (await autosavedObjects(page)).map((object) => object.type?.toString().toLowerCase()))
+    .toEqual(["image", "image", "image"]);
+  await expect(rows).toHaveCount(3);
+
+  // Merge down: the shape's pixels join Layer 1, which keeps its name.
+  await page.keyboard.press("Control+e");
+  await expect(rows).toHaveCount(2);
+  await expect(current).toContainText("Layer 1");
+  await expect.poll(async () => (await autosavedObjects(page)).length).toBe(2);
+  const merged = await autosavedLayerPixels(page, "Layer 1", [[200, 150]]);
+  expect(merged?.width).toBe(400);
+  expectColor(merged?.pixels[0], [168, 85, 247, 255]);
+
+  // One undo brings both layers back.
+  await page.keyboard.press("Control+z");
+  await expect(rows).toHaveCount(3);
+  await page.keyboard.press("Control+Shift+z");
+  await expect(rows).toHaveCount(2);
+
+  // Flatten bakes everything into the photo at its own resolution.
+  await chooseMenu(page, "Layer", "Flatten image");
+  await expect(rows).toHaveCount(1);
+  await expect.poll(async () => (await autosavedObjects(page)).length).toBe(1);
+  const flat = await autosavedLayerPixels(page, "Background", [
+    [200, 150],
+    [5, 5],
+  ]);
+  expect([flat?.width, flat?.height]).toEqual([400, 300]);
+  expectColor(flat?.pixels[0], [168, 85, 247, 255]);
+  expect(flat?.pixels[1]).toEqual([255, 255, 255, 255]);
+  // Nothing is left to merge.
+  await page.getByRole("menuitem", { name: "Layer", exact: true }).click();
+  await expect(menuItem(page, "Merge visible")).toBeDisabled();
+  await page.keyboard.press("Escape");
+});
+
+test("flattening a rotated photo keeps all of it, upright", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  await armBrush(page);
+  await stroke(page);
+  await expect.poll(() => layerNames(page)).toContain("Layer 1");
+
+  // The document turns on its side; nothing is selected, so all of it turns.
+  await page.keyboard.press("Escape");
+  await chooseMenu(page, "Image", "Rotate 90° clockwise");
+  await expect
+    .poll(async () => (await autosavedObjects(page)).map((object) => object.angle))
+    .toEqual([90, 90]);
+
+  await chooseMenu(page, "Layer", "Flatten image");
+  await expect.poll(async () => (await autosavedObjects(page)).length).toBe(1);
+  const [photo] = await autosavedObjects(page);
+  expect(photo?.angle ?? 0).toBe(0);
+  // Painted across the middle, the stroke now runs down the centre.
+  const flat = await autosavedLayerPixels(page, "Background", [
+    [150, 200],
+    [150, 5],
+  ]);
+  expect([flat?.width, flat?.height]).toEqual([300, 400]);
+  expectColor(flat?.pixels[0], [168, 85, 247, 255]);
+  expect(flat?.pixels[1]).toEqual([255, 255, 255, 255]);
 });
