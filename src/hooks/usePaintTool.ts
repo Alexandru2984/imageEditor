@@ -14,6 +14,7 @@ import {
 } from "@/raster/pixelLayer";
 import { StrokePainter } from "@/raster/painter";
 import { bucketFill, type BucketOptions } from "@/raster/fill";
+import { constrainAngle, drawGradient, type GradientOptions } from "@/raster/gradient";
 import type { PaintOptions } from "@/raster/paintSettings";
 import type { StrokePoint } from "@/raster/stroke";
 import { ensureLayerId, type EditorFabricObject } from "@/utils/editorObjects";
@@ -26,8 +27,11 @@ interface UsePaintToolOptions {
   canvasKey: unknown;
   activeTool: Tool;
   color: string;
+  /** The background colour, where a gradient ends. */
+  secondaryColor: string;
   paint: PaintOptions;
   bucket: BucketOptions;
+  gradient: GradientOptions;
   spaceDownRef: MutableRefObject<boolean>;
 }
 
@@ -52,7 +56,10 @@ function pressureOf(event: Event): number {
   return pointer.pointerType === "pen" && pointer.pressure > 0 ? pointer.pressure : 1;
 }
 
-const PIXEL_TOOLS: ReadonlySet<Tool> = new Set<Tool>(["brush", "eraser", "bucket"]);
+const PIXEL_TOOLS: ReadonlySet<Tool> = new Set<Tool>(["brush", "eraser", "bucket", "gradient"]);
+
+/** Below this many screen pixels a gradient drag is taken for a stray click. */
+const MIN_GRADIENT_DRAG = 3;
 
 /**
  * Pixel painting for the Brush and the Paint bucket, and for the Eraser when
@@ -66,12 +73,14 @@ export function usePaintTool({
   canvasKey,
   activeTool,
   color,
+  secondaryColor,
   paint,
   bucket,
+  gradient,
   spaceDownRef,
 }: UsePaintToolOptions): void {
-  const settingsRef = useRef({ color, paint, bucket });
-  settingsRef.current = { color, paint, bucket };
+  const settingsRef = useRef({ color, secondaryColor, paint, bucket, gradient });
+  settingsRef.current = { color, secondaryColor, paint, bucket, gradient };
   /** The layer the tools paint on, kept across tool switches. */
   const targetIdRef = useRef<string | null>(null);
   // A layer from a previous document never carries over.
@@ -85,6 +94,7 @@ export function usePaintTool({
     if (!PIXEL_TOOLS.has(activeTool)) return;
     const erasing = activeTool === "eraser";
     const filling = activeTool === "bucket";
+    const blending = activeTool === "gradient";
 
     const currentTarget = (): FabricImage | null => {
       const layer = findLayer(canvas, targetIdRef.current);
@@ -132,7 +142,7 @@ export function usePaintTool({
 
     const drawOutline = () => {
       // The vector eraser draws its own trail on the same layer.
-      if (canvas.isDrawingMode || filling) return;
+      if (canvas.isDrawingMode || filling || blending) return;
       const top = canvas.contextTop;
       canvas.clearContext(top);
       if (!outline) return;
@@ -217,6 +227,65 @@ export function usePaintTool({
       commit(target.layer);
     };
 
+    /** A gradient drag in progress, in scene coordinates. */
+    let drag: { start: { x: number; y: number }; end: { x: number; y: number } } | null = null;
+
+    const drawGuide = () => {
+      const top = canvas.contextTop;
+      canvas.clearContext(top);
+      if (!drag) return;
+      const transform = canvas.viewportTransform;
+      const toScreen = (point: { x: number; y: number }) => ({
+        x: transform[0] * point.x + transform[2] * point.y + transform[4],
+        y: transform[1] * point.x + transform[3] * point.y + transform[5],
+      });
+      const start = toScreen(drag.start);
+      const end = toScreen(drag.end);
+      const ratio = canvas.getRetinaScaling();
+      top.save();
+      top.setTransform(ratio, 0, 0, ratio, 0, 0);
+      for (const [width, style] of [
+        [3, "rgba(0, 0, 0, 0.6)"],
+        [1, "rgba(255, 255, 255, 0.95)"],
+      ] as const) {
+        top.lineWidth = width;
+        top.strokeStyle = style;
+        top.beginPath();
+        top.moveTo(start.x, start.y);
+        top.lineTo(end.x, end.y);
+        top.stroke();
+        for (const point of [start, end]) {
+          top.beginPath();
+          top.arc(point.x, point.y, 4, 0, Math.PI * 2);
+          top.stroke();
+        }
+      }
+      top.restore();
+    };
+
+    const finishGradient = () => {
+      const current = drag;
+      drag = null;
+      drawGuide();
+      if (!current) return;
+      const zoom = canvas.getZoom() || 1;
+      const length = Math.hypot(current.end.x - current.start.x, current.end.y - current.start.y);
+      if (length * zoom < MIN_GRADIENT_DRAG) return;
+      const target = resolveTarget();
+      if (!target) return;
+      const { color: foreground, secondaryColor: background, gradient: options } = settingsRef.current;
+      try {
+        drawGradient(target.layer, current.start, current.end, foreground, background, options);
+      } catch (error) {
+        console.error("Gradient failed:", error);
+        toast.error("Could not draw the gradient");
+        if (target.created) discardPendingLayer(canvas, target.layer);
+        return;
+      }
+      refreshPixelLayer(target.layer, canvas);
+      commit(target.layer);
+    };
+
     const startStroke = (event: PointerEvent | MouseEvent | TouchEvent) => {
       const target = resolveTarget();
       if (!target) return;
@@ -273,11 +342,21 @@ export function usePaintTool({
       if ("button" in event && event.button !== 0) return;
       if (erasing && canvas.isDrawingMode) return;
       if (filling) fillAt(event);
-      else startStroke(event);
+      else if (blending) {
+        const point = canvas.getScenePoint(event as PointerEvent);
+        drag = { start: point, end: point };
+      } else startStroke(event);
     };
 
     const onMove = (opt: PointerInfo) => {
       const event = opt.e;
+      if (blending) {
+        if (!drag) return;
+        const point = canvas.getScenePoint(event as PointerEvent);
+        drag.end = event.shiftKey ? constrainAngle(drag.start, point) : point;
+        drawGuide();
+        return;
+      }
       outline = canvas.getViewportPoint(event);
       drawOutline();
       if (!stroke) return;
@@ -303,12 +382,20 @@ export function usePaintTool({
     };
 
     const onTouchStart = (event: TouchEvent) => {
-      if (event.touches.length > 1) cancelStroke();
+      if (event.touches.length > 1) {
+        cancelStroke();
+        drag = null;
+        drawGuide();
+      }
+    };
+    const onUp = () => {
+      if (blending) finishGradient();
+      else finishStroke();
     };
 
     canvas.on("mouse:down", onDown);
     canvas.on("mouse:move", onMove);
-    canvas.on("mouse:up", finishStroke);
+    canvas.on("mouse:up", onUp);
     canvas.on("mouse:out", onOut);
     canvas.on("selection:created", onSelection);
     canvas.on("selection:updated", onSelection);
@@ -316,10 +403,11 @@ export function usePaintTool({
 
     return () => {
       finishStroke();
+      drag = null;
       released = true;
       canvas.off("mouse:down", onDown);
       canvas.off("mouse:move", onMove);
-      canvas.off("mouse:up", finishStroke);
+      canvas.off("mouse:up", onUp);
       canvas.off("mouse:out", onOut);
       canvas.off("selection:created", onSelection);
       canvas.off("selection:updated", onSelection);

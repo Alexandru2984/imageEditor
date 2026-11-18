@@ -30,7 +30,8 @@ import { useSmartGuides } from "@/hooks/useSmartGuides";
 import { BRUSHES, stepBrushHardness, stepBrushWidth, type BrushKind } from "@/utils/brushes";
 import { DEFAULT_PAINT_OPTIONS, stepPaintSize, type PaintOptions } from "@/raster/paintSettings";
 import { DEFAULT_BUCKET_OPTIONS, type BucketOptions } from "@/raster/fill";
-import { isBrushTool, type BrushTool } from "./brushTools";
+import { DEFAULT_GRADIENT_OPTIONS, type GradientOptions } from "@/raster/gradient";
+import { isBrushTool, isFillTool, type BrushTool, type FillTool } from "./toolGroups";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -124,6 +125,12 @@ export const EditorWorkspace = ({
   const [lastBrushTool, setLastBrushTool] = useSessionState<BrushTool>("lastBrushTool", "brush");
   const [paint, setPaint] = useSessionState<PaintOptions>("paint", DEFAULT_PAINT_OPTIONS);
   const [bucket, setBucket] = useSessionState<BucketOptions>("bucket", DEFAULT_BUCKET_OPTIONS);
+  const [gradient, setGradient] = useSessionState<GradientOptions>("gradient", DEFAULT_GRADIENT_OPTIONS);
+  const updateGradient = useCallback(
+    (change: Partial<GradientOptions>) => setGradient((current) => ({ ...current, ...change })),
+    [setGradient]
+  );
+  const [lastFillTool, setLastFillTool] = useSessionState<FillTool>("lastFillTool", "bucket");
   const updateBucket = useCallback(
     (change: Partial<BucketOptions>) => setBucket((current) => ({ ...current, ...change })),
     [setBucket]
@@ -221,8 +228,9 @@ export const EditorWorkspace = ({
       setActiveTool(tool);
       if (isShapeKind(tool)) setLastShape(tool);
       if (isBrushTool(tool)) setLastBrushTool(tool);
+      if (isFillTool(tool)) setLastFillTool(tool);
     },
-    [setLastShape, setLastBrushTool]
+    [setLastShape, setLastBrushTool, setLastFillTool]
   );
 
   const handleZoomChange = useCallback((newZoom: number) => {
@@ -444,6 +452,7 @@ export const EditorWorkspace = ({
     onToolChange: handleToolChange,
     lastShape,
     lastBrushTool,
+    lastFillTool,
     undo,
     redo,
     hasUndo,
@@ -631,6 +640,9 @@ export const EditorWorkspace = ({
       onPaintChange={updatePaint}
       bucket={bucket}
       onBucketChange={updateBucket}
+      gradient={gradient}
+      onGradientChange={updateGradient}
+      secondaryColor={backgroundColor}
       snapping={snapping}
       onSnappingChange={handleSnappingChange}
     />
@@ -729,6 +741,7 @@ export const EditorWorkspace = ({
             onToolChange={handleToolChange}
             lastShape={lastShape}
             lastBrushTool={lastBrushTool}
+            lastFillTool={lastFillTool}
             fabricCanvas={fabricCanvas}
             onEyedropper={eyedropper.start}
             colors={colorWells(false)}
@@ -745,6 +758,8 @@ export const EditorWorkspace = ({
             brushKind={brushKind}
             paint={paint}
             bucket={bucket}
+            gradient={gradient}
+            secondaryColor={backgroundColor}
             uploadedImage={uploadedImage}
             initialSnapshot={initialSnapshot}
             onCanvasReady={setFabricCanvas}
@@ -811,6 +826,7 @@ export const EditorWorkspace = ({
           onToolChange={handleToolChange}
           lastShape={lastShape}
           lastBrushTool={lastBrushTool}
+          lastFillTool={lastFillTool}
           fabricCanvas={fabricCanvas}
           onEyedropper={eyedropper.start}
         />

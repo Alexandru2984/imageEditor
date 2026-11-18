@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import {
   Crop,
   Eraser,
+  ArrowLeftRight,
+  Blend,
   Layers,
   Magnet,
   MousePointer2,
@@ -27,6 +29,7 @@ import {
   type PaintOptions,
 } from "@/raster/paintSettings";
 import type { BucketOptions } from "@/raster/fill";
+import type { GradientColors, GradientOptions, GradientType } from "@/raster/gradient";
 import type { Tool } from "@/types/editor";
 import { cn } from "@/lib/utils";
 
@@ -55,6 +58,10 @@ interface OptionsBarProps {
   onPaintChange: (change: Partial<PaintOptions>) => void;
   bucket: BucketOptions;
   onBucketChange: (change: Partial<BucketOptions>) => void;
+  gradient: GradientOptions;
+  onGradientChange: (change: Partial<GradientOptions>) => void;
+  /** The background colour, shown in the gradient's colour choice. */
+  secondaryColor: string;
   snapping: boolean;
   onSnappingChange: (enabled: boolean) => void;
 }
@@ -72,6 +79,7 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   },
   draw: { icon: Highlighter, name: "Marker", hint: "" },
   bucket: { icon: PaintBucket, name: "Paint bucket", hint: "" },
+  gradient: { icon: Blend, name: "Gradient", hint: "" },
   eraser: {
     icon: Eraser,
     name: "Eraser",
@@ -119,6 +127,48 @@ function ToggleOption({
   );
 }
 
+/** A small set of mutually exclusive choices, as radio buttons. */
+function Choice<T extends string>({
+  label,
+  value,
+  onChange,
+  options,
+  render,
+}: {
+  label: string;
+  value: T;
+  onChange: (value: T) => void;
+  options: { value: T; label: string }[];
+  render: (option: { value: T; label: string }) => ReactNode;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex shrink-0 items-center gap-1">
+      {options.map((option) => {
+        const checked = option.value === value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={checked}
+            aria-label={option.label}
+            title={option.label}
+            onClick={() => onChange(option.value)}
+            className={cn(
+              "flex h-8 items-center rounded-md border px-1.5 transition-colors",
+              checked
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+            )}
+          >
+            {render(option)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Setting({
   label,
   value,
@@ -159,6 +209,9 @@ export function OptionsBar({
   onPaintChange,
   bucket,
   onBucketChange,
+  gradient,
+  onGradientChange,
+  secondaryColor,
   snapping,
   onSnappingChange,
 }: OptionsBarProps) {
@@ -168,7 +221,8 @@ export function OptionsBar({
     activeTool === "draw" ||
     activeTool === "brush" ||
     activeTool === "eraser" ||
-    activeTool === "bucket";
+    activeTool === "bucket" ||
+    activeTool === "gradient";
   const brushOption = BRUSHES.find((option) => option.kind === brush.kind);
   const sliderClass = compact ? "w-16" : "w-20 xl:w-28";
 
@@ -269,6 +323,59 @@ export function OptionsBar({
           icon={Layers}
           label="All layers"
           title="Find the area from everything visible, not only this layer"
+        />
+      </>
+    );
+  } else if (activeTool === "gradient") {
+    const swatch = (colors: GradientColors) => {
+      const end = colors === "foreground-background" ? secondaryColor : `${activeColor}00`;
+      const [from, to] = gradient.reverse ? [end, activeColor] : [activeColor, end];
+      return `linear-gradient(to right, ${from}, ${to}), repeating-conic-gradient(#d4d4d4 0 25%, #fff 0 50%) 0 0 / 8px 8px`;
+    };
+    options = (
+      <>
+        <Choice
+          label="Gradient colors"
+          value={gradient.colors}
+          onChange={(colors) => onGradientChange({ colors })}
+          options={[
+            { value: "foreground-background", label: "Foreground to background" },
+            { value: "foreground-transparent", label: "Foreground to transparent" },
+          ]}
+          render={(option) => (
+            <span
+              aria-hidden="true"
+              className="block h-4 w-10 rounded-sm border border-border"
+              style={{ background: swatch(option.value) }}
+            />
+          )}
+        />
+        <Choice
+          label="Gradient type"
+          value={gradient.type}
+          onChange={(type) => onGradientChange({ type })}
+          options={[
+            { value: "linear" as GradientType, label: "Linear" },
+            { value: "radial" as GradientType, label: "Radial" },
+          ]}
+          render={(option) => <span className="text-xs">{option.label}</span>}
+        />
+        <Setting label="Opacity" value={`${gradient.opacity}%`}>
+          <Slider
+            value={[gradient.opacity]}
+            aria-label="Gradient opacity"
+            min={1}
+            max={100}
+            step={1}
+            onValueChange={(value) => onGradientChange({ opacity: value[0] ?? gradient.opacity })}
+            className={sliderClass}
+          />
+        </Setting>
+        <ToggleOption
+          pressed={gradient.reverse}
+          onChange={(reverse) => onGradientChange({ reverse })}
+          icon={ArrowLeftRight}
+          label="Reverse"
         />
       </>
     );

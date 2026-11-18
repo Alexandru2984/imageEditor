@@ -2,6 +2,7 @@ export type Tool =
   | "select"
   | "brush"
   | "bucket"
+  | "gradient"
   | "draw"
   | "eraser"
   | "rectangle"

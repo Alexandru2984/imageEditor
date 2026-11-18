@@ -49,11 +49,14 @@ import { useShapeTool } from "@/hooks/useShapeTool";
 import { usePaintTool } from "@/hooks/usePaintTool";
 import type { PaintOptions } from "@/raster/paintSettings";
 import type { BucketOptions } from "@/raster/fill";
+import type { GradientOptions } from "@/raster/gradient";
 import { findBackgroundImage } from "@/utils/viewport";
 
 interface CanvasProps {
   activeTool: Tool;
   activeColor: string;
+  /** The background colour (gradients end in it). */
+  secondaryColor: string;
   brushWidth: number;
   brushHardness: number;
   brushOpacity: number;
@@ -61,6 +64,7 @@ interface CanvasProps {
   /** Pixel brush and eraser settings (sizes in image pixels). */
   paint: PaintOptions;
   bucket: BucketOptions;
+  gradient: GradientOptions;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -131,12 +135,14 @@ const eraserSceneWidth = (canvas: FabricCanvas, size: number): number => {
 export const Canvas = ({
   activeTool,
   activeColor,
+  secondaryColor,
   brushWidth,
   brushHardness,
   brushOpacity,
   brushKind,
   paint,
   bucket,
+  gradient,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -1192,8 +1198,10 @@ export const Canvas = ({
     canvasKey: uploadedImage,
     activeTool,
     color: activeColor,
+    secondaryColor,
     paint,
     bucket,
+    gradient,
     spaceDownRef,
   });
 

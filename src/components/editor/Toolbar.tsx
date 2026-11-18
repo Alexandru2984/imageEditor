@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MousePointer2,
-  PaintBucket,
   Eraser,
   Type,
   Crop,
@@ -25,7 +24,7 @@ import { isShapeKind, type ShapeKind } from "@/utils/shapes";
 import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
 import { cn } from "@/lib/utils";
 import { SHAPE_TOOLS } from "./shapeTools";
-import { BRUSH_TOOLS, type BrushTool } from "./brushTools";
+import { BRUSH_TOOLS, FILL_TOOLS, type BrushTool, type FillTool } from "./toolGroups";
 import { ToolGroupButton } from "./ToolGroupButton";
 import { ACTIVE_TOOL_CLASS, IDLE_TOOL_CLASS } from "./toolStyles";
 
@@ -36,6 +35,8 @@ interface ToolbarProps {
   lastShape: ShapeKind;
   /** The tool the Brush button (and the B key) arms. */
   lastBrushTool: BrushTool;
+  /** The tool the fill button (and the G key) arms. */
+  lastFillTool: FillTool;
   fabricCanvas: FabricCanvas | null;
   orientation: "vertical" | "horizontal";
   onEyedropper: () => void;
@@ -47,7 +48,6 @@ type ToolDef = { id: Tool; icon: typeof MousePointer2; label: string };
 
 const SELECT_TOOL: ToolDef = { id: "select", icon: MousePointer2, label: "Select (V)" };
 const ERASER_TOOL: ToolDef = { id: "eraser", icon: Eraser, label: "Eraser (E)" };
-const BUCKET_TOOL: ToolDef = { id: "bucket", icon: PaintBucket, label: "Paint bucket (G)" };
 
 
 const SECONDARY_TOOLS: ToolDef[] = [
@@ -64,6 +64,7 @@ export const Toolbar = ({
   onToolChange,
   lastShape,
   lastBrushTool,
+  lastFillTool,
   fabricCanvas,
   orientation,
   onEyedropper,
@@ -312,7 +313,14 @@ export const Toolbar = ({
         side={tooltipSide}
       />
       {renderTool(ERASER_TOOL)}
-      {renderTool(BUCKET_TOOL)}
+      <ToolGroupButton
+        tools={FILL_TOOLS}
+        current={lastFillTool}
+        activeTool={activeTool}
+        onToolChange={onToolChange}
+        className={buttonSize}
+        side={tooltipSide}
+      />
       {separator}
       {shapesButton}
       {SECONDARY_TOOLS.map(renderTool)}

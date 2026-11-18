@@ -22,6 +22,7 @@ import {
   Maximize,
   MousePointer2,
   MousePointerSquareDashed,
+  Blend,
   Combine,
   Grid2x2,
   Highlighter,
@@ -64,7 +65,12 @@ import { isEditorChrome, removeSelectedObjects } from "@/utils/editorObjects";
 import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
 import type { PanelTab, Tool } from "@/types/editor";
-import { isBrushTool, type BrushTool } from "@/components/editor/brushTools";
+import {
+  isBrushTool,
+  isFillTool,
+  type BrushTool,
+  type FillTool,
+} from "@/components/editor/toolGroups";
 import {
   addEmptyLayer,
   planFlatten,
@@ -82,6 +88,7 @@ export interface EditorCommandContext {
   onToolChange: (tool: Tool) => void;
   lastShape: ShapeKind;
   lastBrushTool: BrushTool;
+  lastFillTool: FillTool;
   undo: () => void;
   redo: () => void;
   /** Live checks: a shortcut can arrive before React re-renders. */
@@ -141,6 +148,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     onToolChange,
     lastShape,
     lastBrushTool,
+    lastFillTool,
     undo,
     redo,
     hasUndo,
@@ -599,7 +607,27 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
       tool("tool.draw", "draw", "Marker", Highlighter, undefined, "draw pen highlighter neon dashed strokes"),
       tool("tool.eraser", "eraser", "Eraser", Eraser, KEYMAP.eraserTool),
-      tool("tool.bucket", "bucket", "Paint bucket", PaintBucket, KEYMAP.bucketTool, "fill flood colour color"),
+      {
+        id: "tool.fill",
+        label: "Paint bucket or gradient",
+        icon: PaintBucket,
+        shortcuts: KEYMAP.fillTool,
+        keywords: "fill",
+        run: () => onToolChange(lastFillTool),
+        isChecked: () => isFillTool(activeTool),
+      },
+      {
+        id: "tool.nextFill",
+        label: "Switch between Paint bucket and Gradient",
+        icon: PaintBucket,
+        shortcuts: KEYMAP.nextFillTool,
+        run: () =>
+          onToolChange(
+            activeTool === "bucket" ? "gradient" : activeTool === "gradient" ? "bucket" : lastFillTool
+          ),
+      },
+      tool("tool.bucket", "bucket", "Paint bucket", PaintBucket, undefined, "fill flood colour color"),
+      tool("tool.gradient", "gradient", "Gradient", Blend, undefined, "fill blend fade linear radial"),
       {
         id: "tool.shape",
         label: "Shape",
@@ -683,6 +711,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     hasRedo,
     hasUndo,
     lastBrushTool,
+    lastFillTool,
     lastShape,
     onToolChange,
     openCommandPalette,

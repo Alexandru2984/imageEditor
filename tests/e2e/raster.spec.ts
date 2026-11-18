@@ -306,3 +306,58 @@ test("the paint bucket fills the clicked area on a new layer, one undo step per 
     .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))?.pixels[0]?.[3])
     .toBe(255);
 });
+
+test("the gradient blends the colours along a drag, linear or radial", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  await page.keyboard.press("d");
+  await page.keyboard.press("g");
+  await page.keyboard.press("Shift+g");
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expect(options).toContainText("Gradient");
+  await settle(page);
+
+  // Black to white across the middle; Shift keeps the line level.
+  const center = await canvasCenter(page);
+  await page.keyboard.down("Shift");
+  await page.mouse.move(center.x - 100, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 100, center.y + 7, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
+  await expect.poll(() => layerNames(page)).toContain("Layer 1");
+  const linear = await autosavedLayerPixels(page, "Layer 1", [
+    [10, 150],
+    [200, 150],
+    [390, 150],
+    [200, 5],
+  ]);
+  expectColor(linear?.pixels[0], [0, 0, 0, 255], 0);
+  expectColor(linear?.pixels[1], [128, 128, 128, 255], 6);
+  expectColor(linear?.pixels[2], [255, 255, 255, 255], 0);
+  // Level: the top row matches the middle one.
+  expectColor(linear?.pixels[3], linear!.pixels[1]!, 2);
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => layerNames(page)).not.toContain("Layer 1");
+
+  // Radial, fading the foreground out from the centre.
+  await options.getByRole("radio", { name: "Radial" }).click();
+  await options.getByRole("radio", { name: "Foreground to transparent" }).click();
+  await page.mouse.move(center.x, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 60, center.y, { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(() => layerNames(page)).toContain("Layer 1");
+  const radial = await autosavedLayerPixels(page, "Layer 1", [
+    [200, 150],
+    [5, 5],
+  ]);
+  // The drag starts within a pixel of the centre, where the fade has barely begun.
+  expectColor(radial?.pixels[0], [0, 0, 0, 255], 12);
+  expect(radial?.pixels[1]?.[3]).toBe(0);
+
+  // A click without a drag paints nothing.
+  await page.mouse.click(center.x, center.y - 50);
+  await page.waitForTimeout(400);
+  expect((await layerNames(page)).filter((name) => name?.startsWith("Layer"))).toEqual(["Layer 1"]);
+});

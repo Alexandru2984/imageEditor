@@ -205,3 +205,14 @@ test("the paint bucket fills with a tap, its settings on screen", async ({ page 
     .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[10, 10]]))?.pixels[0]?.[3])
     .toBe(255);
 });
+
+test("the gradient is picked from the fill tools, its settings on screen", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Paint bucket (G)" }).tap();
+  await page.getByRole("button", { name: "Paint bucket (G)" }).tap();
+  await page.getByRole("button", { name: /^Gradient/ }).tap();
+  await expect(page.getByRole("button", { name: "Gradient (G)" })).toHaveAttribute("aria-pressed", "true");
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expectOnScreen(page, options.getByRole("radiogroup", { name: "Gradient colors" }));
+  await expectNoSidewaysScroll(page);
+});
