@@ -18,7 +18,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionState } from "@/hooks/useSessionState";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
-import { useKeyboardShortcuts, type ShortcutActions } from "@/hooks/useKeyboardShortcuts";
+import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
+import { useEditorCommands } from "@/hooks/useEditorCommands";
 import { useAiActions } from "@/hooks/useAiActions";
 import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
@@ -33,10 +34,10 @@ import { CanvasContextMenu } from "./CanvasContextMenu";
 import { downloadProjectFile } from "@/utils/projectFile";
 import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { isAbortError } from "@/utils/abort";
-import { readSafeRasterImage } from "@/utils/imageFile";
+import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { isEditorChrome, isReadOnlySelection } from "@/utils/editorObjects";
-import { applyColor } from "@/utils/shapes";
+import { applyColor, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import {
   addImageLayer,
   arrange,
@@ -50,6 +51,25 @@ import {
 } from "@/utils/canvasActions";
 import type { PanelTab, Tool } from "@/types/editor";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+/** Replacing the open document needs a confirmation first. */
+type DiscardAction = "new" | "openImage" | "openProject";
+
+const DISCARD_TEXT: Record<DiscardAction, { title: string; confirm: string }> = {
+  new: { title: "Start a new project?", confirm: "Start new" },
+  openImage: { title: "Open another image?", confirm: "Choose image" },
+  openProject: { title: "Open a project file?", confirm: "Choose file" },
+};
 
 const isTypingTarget = (target: EventTarget | null): boolean => {
   const element = target as HTMLElement | null;
@@ -74,6 +94,7 @@ export interface EditorWorkspaceProps {
   /** Every committed history state, for autosave. */
   onSnapshot: (snapshot: CanvasSnapshot) => void;
   onLoadError: (error: unknown) => void;
+  onOpenImageFile: (file: File) => void;
   onOpenProjectFile: (file: File) => void;
   onNewProject: () => void;
 }
@@ -88,10 +109,12 @@ export const EditorWorkspace = ({
   documentName,
   onSnapshot,
   onLoadError,
+  onOpenImageFile,
   onOpenProjectFile,
   onNewProject,
 }: EditorWorkspaceProps) => {
   const [activeTool, setActiveTool] = useState<Tool>("select");
+  const [lastShape, setLastShape] = useSessionState<ShapeKind>("lastShape", "rectangle");
   const [activeColor, setActiveColor] = useSessionState("activeColor", "#a855f7");
   const [brushWidth, setBrushWidth] = useSessionState("brushWidth", 3);
   const [brushHardness, setBrushHardness] = useSessionState("brushHardness", 100);
@@ -113,7 +136,11 @@ export const EditorWorkspace = ({
   const [exportOpen, setExportOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [discardAction, setDiscardAction] = useState<DiscardAction | null>(null);
 
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
+  const layerInputRef = useRef<HTMLInputElement>(null);
   const layerLoadControllerRef = useRef<AbortController | null>(null);
   const clipboardRef = useRef<{ objects: FabricObject[]; pastes: number } | null>(null);
   const dragDepthRef = useRef(0);
@@ -137,7 +164,7 @@ export const EditorWorkspace = ({
     toast.error("Undo/redo failed. The editor attempted a safe rollback.");
   }, []);
 
-  const { undo, redo, canUndo, canRedo } = useUndoRedo(
+  const { undo, redo, canUndo, canRedo, hasUndo, hasRedo } = useUndoRedo(
     fabricCanvas,
     onSnapshot,
     handleHistoryError
@@ -170,9 +197,13 @@ export const EditorWorkspace = ({
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, []);
 
-  const handleToolChange = useCallback((tool: Tool) => {
-    setActiveTool(tool);
-  }, []);
+  const handleToolChange = useCallback(
+    (tool: Tool) => {
+      setActiveTool(tool);
+      if (isShapeKind(tool)) setLastShape(tool);
+    },
+    [setLastShape]
+  );
 
   const handleZoomChange = useCallback((newZoom: number) => {
     setZoom(newZoom);
@@ -234,6 +265,7 @@ export const EditorWorkspace = ({
   const handleFit = useCallback(() => {
     if (fabricCanvas) setZoom(fitToScreen(fabricCanvas));
   }, [fabricCanvas]);
+  const handleActualPixels = useCallback(() => setZoom(1), []);
 
   const handleRotate = useCallback(
     (degrees: number) => {
@@ -335,37 +367,68 @@ export const EditorWorkspace = ({
     if (fabricCanvas) setExportOpen(true);
   }, [fabricCanvas]);
 
-  const shortcutActions = useMemo<ShortcutActions>(
-    () => ({
-      save: handleSaveProjectFile,
-      exportImage: openExport,
-      duplicate: handleDuplicate,
-      copy: handleCopy,
-      arrange: handleArrange,
-      flip: handleFlip,
-      pickColor: eyedropper.start,
-      showShortcuts: () => setShortcutsOpen(true),
-    }),
-    [
-      handleSaveProjectFile,
-      openExport,
-      handleDuplicate,
-      handleCopy,
-      handleArrange,
-      handleFlip,
-      eyedropper.start,
-    ]
+  const togglePanel = useCallback(
+    (tab: PanelTab) => setPanel((current) => (current === tab ? null : tab)),
+    [setPanel]
   );
+  const openPanel = useCallback((tab: PanelTab) => setPanel(tab), [setPanel]);
+  const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
+  const requestNew = useCallback(() => setDiscardAction("new"), []);
+  const requestOpenImage = useCallback(() => setDiscardAction("openImage"), []);
+  const requestOpenProject = useCallback(() => setDiscardAction("openProject"), []);
+  const placeImage = useCallback(() => layerInputRef.current?.click(), []);
 
-  useKeyboardShortcuts({
+  const confirmDiscard = () => {
+    const action = discardAction;
+    setDiscardAction(null);
+    if (action === "new") {
+      ai.cancel();
+      onNewProject();
+    } else if (action === "openImage") {
+      // Still inside the click that confirmed, so the file picker may open.
+      imageInputRef.current?.click();
+    } else if (action === "openProject") {
+      projectInputRef.current?.click();
+    }
+  };
+
+  const commands = useEditorCommands({
     canvas: fabricCanvas,
+    activeTool,
+    onToolChange: handleToolChange,
+    lastShape,
     undo,
     redo,
-    zoom,
-    onZoomChange: handleZoomChange,
-    onToolChange: handleToolChange,
-    actions: shortcutActions,
+    hasUndo,
+    hasRedo,
+    zoomIn: handleZoomIn,
+    zoomOut: handleZoomOut,
+    fitOnScreen: handleFit,
+    actualPixels: handleActualPixels,
+    rotate: handleRotate,
+    flip: handleFlip,
+    arrange: handleArrange,
+    duplicate: handleDuplicate,
+    copy: handleCopy,
+    paste: handleContextPaste,
+    canPaste: canPasteLayers,
+    requestNew,
+    requestOpenImage,
+    requestOpenProject,
+    placeImage,
+    saveProject: handleSaveProjectFile,
+    exportImage: openExport,
+    ai,
+    pickColor: eyedropper.start,
+    snapping,
+    setSnapping: handleSnappingChange,
+    panel,
+    togglePanel,
+    openPanel,
+    showShortcuts,
   });
+  const commandList = useMemo(() => Object.values(commands), [commands]);
+  useKeyboardShortcuts({ canvas: fabricCanvas, commands: commandList });
 
   // ---------- Paste and drop: images open or become layers ----------
 
@@ -439,10 +502,6 @@ export const EditorWorkspace = ({
 
   // ---------- Layout ----------
 
-  const togglePanel = useCallback((tab: PanelTab) => {
-    setPanel((current) => (current === tab ? null : tab));
-  }, [setPanel]);
-
   const panelTabs = (
     <Tabs
       value={panel ?? "properties"}
@@ -506,7 +565,6 @@ export const EditorWorkspace = ({
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-editor-bg text-foreground">
       <TopBar
-        hasDocument
         isMobile={isMobile}
         zoom={zoom}
         onZoomIn={handleZoomIn}
@@ -517,18 +575,73 @@ export const EditorWorkspace = ({
         canUndo={canUndo}
         canRedo={canRedo}
         ai={ai}
-        onRotate={handleRotate}
-        onFlip={handleFlip}
         onExport={openExport}
         onSaveProject={handleSaveProjectFile}
-        onOpenProject={onOpenProjectFile}
-        onNewProject={onNewProject}
-        onShowShortcuts={() => setShortcutsOpen(true)}
-        snapping={snapping}
-        onSnappingChange={handleSnappingChange}
         panel={panel}
         onTogglePanel={togglePanel}
+        commands={commands}
       />
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept={RASTER_FILE_ACCEPT}
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) onOpenImageFile(file);
+        }}
+      />
+      <input
+        ref={projectInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) onOpenProjectFile(file);
+        }}
+      />
+      <input
+        ref={layerInputRef}
+        type="file"
+        accept={RASTER_FILE_ACCEPT}
+        className="hidden"
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (file) void addImageFileAsLayer(file);
+        }}
+      />
+      <AlertDialog
+        open={discardAction !== null}
+        onOpenChange={(open) => {
+          if (!open) setDiscardAction(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-[calc(100vw-2rem)] rounded-2xl sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{DISCARD_TEXT[discardAction ?? "new"].title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              The current image and all edits will be discarded. Save a project file first if
+              you want to keep editing later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDiscard}>
+              {DISCARD_TEXT[discardAction ?? "new"].confirm}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="relative flex min-h-0 flex-1">
         {desktopChrome ? (
@@ -536,6 +649,7 @@ export const EditorWorkspace = ({
             orientation="vertical"
             activeTool={activeTool}
             onToolChange={handleToolChange}
+            lastShape={lastShape}
             fabricCanvas={fabricCanvas}
             onEyedropper={eyedropper.start}
           />
@@ -612,6 +726,7 @@ export const EditorWorkspace = ({
           orientation="horizontal"
           activeTool={activeTool}
           onToolChange={handleToolChange}
+          lastShape={lastShape}
           fabricCanvas={fabricCanvas}
           onEyedropper={eyedropper.start}
         />
@@ -623,7 +738,7 @@ export const EditorWorkspace = ({
         canvas={fabricCanvas}
         defaultName={documentName}
       />
-      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}
         enabled={activeTool === "select"}

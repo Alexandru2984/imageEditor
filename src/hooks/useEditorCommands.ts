@@ -1,0 +1,557 @@
+import { useMemo } from "react";
+import type { Canvas as FabricCanvas } from "fabric";
+import {
+  ArrowDownToLine,
+  ArrowUpToLine,
+  ChevronDown,
+  ChevronUp,
+  ClipboardPaste,
+  Copy,
+  CopyPlus,
+  Crop,
+  Download,
+  Eraser,
+  FilePlus2,
+  FlipHorizontal2,
+  FlipVertical2,
+  FolderOpen,
+  ImageIcon,
+  ImagePlus,
+  Keyboard,
+  Lock,
+  Maximize,
+  MousePointer2,
+  MousePointerSquareDashed,
+  Pencil,
+  Pipette,
+  Redo2,
+  RotateCcw,
+  RotateCw,
+  Save,
+  Scaling,
+  Scissors,
+  Shapes,
+  SlidersHorizontal,
+  Sparkles,
+  SquareDashed,
+  Trash2,
+  Type,
+  Undo2,
+  XCircle,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
+import { toast } from "sonner";
+import { KEYMAP } from "@/commands/keymap";
+import type { Command, CommandMap } from "@/commands/types";
+import {
+  clearUnlockedLayers,
+  deselect,
+  selectAllLayers,
+  toggleSelectionLock,
+  type ArrangeAction,
+} from "@/utils/canvasActions";
+import { isEditorChrome, removeSelectedObjects } from "@/utils/editorObjects";
+import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
+import type { AiActions } from "@/hooks/useAiActions";
+import type { PanelTab, Tool } from "@/types/editor";
+
+export interface EditorCommandContext {
+  canvas: FabricCanvas | null;
+  activeTool: Tool;
+  onToolChange: (tool: Tool) => void;
+  lastShape: ShapeKind;
+  undo: () => void;
+  redo: () => void;
+  /** Live checks: a shortcut can arrive before React re-renders. */
+  hasUndo: () => boolean;
+  hasRedo: () => boolean;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  fitOnScreen: () => void;
+  actualPixels: () => void;
+  rotate: (degrees: number) => void;
+  flip: (axis: "x" | "y") => void;
+  arrange: (action: ArrangeAction) => void;
+  duplicate: () => void;
+  copy: () => void;
+  paste: () => void;
+  canPaste: () => boolean;
+  requestNew: () => void;
+  requestOpenImage: () => void;
+  requestOpenProject: () => void;
+  placeImage: () => void;
+  saveProject: () => void;
+  exportImage: () => void;
+  ai: AiActions;
+  pickColor: () => void;
+  snapping: boolean;
+  setSnapping: (enabled: boolean) => void;
+  panel: PanelTab | null;
+  togglePanel: (tab: PanelTab) => void;
+  openPanel: (tab: PanelTab) => void;
+  showShortcuts: () => void;
+}
+
+/** Whether a document layer (not editor chrome) is selected. */
+const hasSelection = (canvas: FabricCanvas | null): boolean => {
+  const active = canvas?.getActiveObject();
+  return !!active && !isEditorChrome(active);
+};
+
+/** Every command the editor offers, keyed by id. */
+export function useEditorCommands(context: EditorCommandContext): CommandMap {
+  const {
+    canvas,
+    activeTool,
+    onToolChange,
+    lastShape,
+    undo,
+    redo,
+    hasUndo,
+    hasRedo,
+    zoomIn,
+    zoomOut,
+    fitOnScreen,
+    actualPixels,
+    rotate,
+    flip,
+    arrange,
+    duplicate,
+    copy,
+    paste,
+    canPaste,
+    requestNew,
+    requestOpenImage,
+    requestOpenProject,
+    placeImage,
+    saveProject,
+    exportImage,
+    ai,
+    pickColor,
+    snapping,
+    setSnapping,
+    panel,
+    togglePanel,
+    openPanel,
+    showShortcuts,
+  } = context;
+  // The AI actions object is rebuilt on every render; its parts are stable.
+  const { isProcessing: aiBusy, removeBackground, extractSubject } = ai;
+
+  return useMemo(() => {
+    const selected = () => hasSelection(canvas);
+    const aiIdle = () => !aiBusy;
+
+    const removeSelection = (): number => {
+      if (!canvas) return 0;
+      const active = canvas.getActiveObject() as
+        | (ReturnType<FabricCanvas["getActiveObject"]> & { __isCropOverlay?: boolean })
+        | undefined;
+      if (!active) return 0;
+      // The crop frame is UI: Delete cancels the crop instead of removing it.
+      if (active.__isCropOverlay) {
+        onToolChange("select");
+        return 0;
+      }
+      const removed = removeSelectedObjects(canvas);
+      if (removed === 0) toast.error("Unlock the layer before deleting it");
+      return removed;
+    };
+
+    const tool = (
+      id: string,
+      target: Tool,
+      label: string,
+      icon: Command["icon"],
+      shortcuts: Command["shortcuts"],
+      keywords?: string
+    ): Command => ({
+      id,
+      label,
+      icon,
+      shortcuts,
+      keywords,
+      run: () => onToolChange(target),
+      isChecked: () => activeTool === target,
+    });
+
+    const nextShape = (): ShapeKind => {
+      const current = isShapeKind(activeTool) ? activeTool : lastShape;
+      if (!isShapeKind(activeTool)) return current;
+      return SHAPE_KINDS[(SHAPE_KINDS.indexOf(current) + 1) % SHAPE_KINDS.length]!;
+    };
+
+    const list: Command[] = [
+      // ---------- File ----------
+      { id: "file.new", label: "New…", icon: FilePlus2, run: requestNew, keywords: "start over blank" },
+      {
+        id: "file.openImage",
+        label: "Open image…",
+        icon: ImageIcon,
+        shortcuts: KEYMAP.openImage,
+        run: requestOpenImage,
+      },
+      { id: "file.openProject", label: "Open project file…", icon: FolderOpen, run: requestOpenProject },
+      {
+        id: "file.placeImage",
+        label: "Place image as layer…",
+        icon: ImagePlus,
+        run: placeImage,
+        keywords: "add import overlay",
+      },
+      {
+        id: "file.saveProject",
+        label: "Save project",
+        icon: Save,
+        shortcuts: KEYMAP.saveProject,
+        run: saveProject,
+      },
+      {
+        id: "file.export",
+        label: "Export…",
+        icon: Download,
+        shortcuts: KEYMAP.exportImage,
+        run: exportImage,
+        keywords: "download png jpg webp save as",
+      },
+
+      // ---------- Edit ----------
+      {
+        id: "edit.undo",
+        label: "Undo",
+        icon: Undo2,
+        shortcuts: KEYMAP.undo,
+        repeat: true,
+        run: undo,
+        isEnabled: hasUndo,
+      },
+      {
+        id: "edit.redo",
+        label: "Redo",
+        icon: Redo2,
+        shortcuts: KEYMAP.redo,
+        repeat: true,
+        run: redo,
+        isEnabled: hasRedo,
+      },
+      {
+        id: "edit.cut",
+        label: "Cut",
+        icon: Scissors,
+        shortcuts: KEYMAP.cut,
+        run: () => {
+          copy();
+          removeSelection();
+        },
+        isEnabled: selected,
+      },
+      { id: "edit.copy", label: "Copy", icon: Copy, shortcuts: KEYMAP.copy, run: copy, isEnabled: selected },
+      {
+        id: "edit.paste",
+        label: "Paste",
+        icon: ClipboardPaste,
+        shortcuts: KEYMAP.paste,
+        shortcutsDisplayOnly: true,
+        run: paste,
+        isEnabled: canPaste,
+      },
+      {
+        id: "edit.delete",
+        label: "Delete",
+        icon: Trash2,
+        shortcuts: KEYMAP.delete,
+        run: () => void removeSelection(),
+        isEnabled: selected,
+      },
+
+      // ---------- Image ----------
+      {
+        id: "image.rotateCounterClockwise",
+        label: "Rotate 90° counter-clockwise",
+        icon: RotateCcw,
+        run: () => rotate(-90),
+        keywords: "turn left",
+      },
+      {
+        id: "image.rotateClockwise",
+        label: "Rotate 90° clockwise",
+        icon: RotateCw,
+        run: () => rotate(90),
+        keywords: "turn right",
+      },
+      {
+        id: "image.flipHorizontal",
+        label: "Flip horizontal",
+        icon: FlipHorizontal2,
+        shortcuts: KEYMAP.flipHorizontal,
+        run: () => flip("x"),
+        keywords: "mirror",
+      },
+      {
+        id: "image.flipVertical",
+        label: "Flip vertical",
+        icon: FlipVertical2,
+        shortcuts: KEYMAP.flipVertical,
+        run: () => flip("y"),
+        keywords: "mirror upside down",
+      },
+      {
+        id: "ai.removeBackground",
+        label: "Remove background",
+        icon: Scissors,
+        run: () => void removeBackground(),
+        isEnabled: aiIdle,
+        keywords: "ai cutout transparent",
+      },
+      {
+        id: "ai.extractSubject",
+        label: "Extract subject to layer",
+        icon: Sparkles,
+        run: () => void extractSubject(),
+        isEnabled: aiIdle,
+        keywords: "ai cutout person object",
+      },
+
+      // ---------- Layer ----------
+      {
+        id: "layer.duplicate",
+        label: "Duplicate layer",
+        icon: CopyPlus,
+        shortcuts: KEYMAP.duplicate,
+        run: duplicate,
+        isEnabled: selected,
+        keywords: "copy clone",
+      },
+      {
+        id: "layer.bringToFront",
+        label: "Bring to front",
+        icon: ArrowUpToLine,
+        shortcuts: KEYMAP.bringToFront,
+        run: () => arrange("front"),
+        isEnabled: selected,
+      },
+      {
+        id: "layer.bringForward",
+        label: "Bring forward",
+        icon: ChevronUp,
+        shortcuts: KEYMAP.bringForward,
+        run: () => arrange("forward"),
+        isEnabled: selected,
+      },
+      {
+        id: "layer.sendBackward",
+        label: "Send backward",
+        icon: ChevronDown,
+        shortcuts: KEYMAP.sendBackward,
+        run: () => arrange("backward"),
+        isEnabled: selected,
+      },
+      {
+        id: "layer.sendToBack",
+        label: "Send to back",
+        icon: ArrowDownToLine,
+        shortcuts: KEYMAP.sendToBack,
+        run: () => arrange("back"),
+        isEnabled: selected,
+      },
+      {
+        id: "layer.toggleLock",
+        label: "Lock or unlock layer",
+        icon: Lock,
+        shortcuts: KEYMAP.lockLayer,
+        run: () => {
+          if (canvas && toggleSelectionLock(canvas) === null) toast("Select a layer to lock");
+        },
+        isEnabled: selected,
+      },
+      {
+        id: "layer.clearUnlocked",
+        label: "Clear unlocked layers",
+        icon: XCircle,
+        run: () => {
+          if (!canvas) return;
+          const removed = clearUnlockedLayers(canvas);
+          if (removed === 0) toast("Nothing to clear: only the photo and locked layers remain");
+          else
+            toast.success(`Cleared ${removed} layer${removed === 1 ? "" : "s"}`, {
+              description: "Press Ctrl+Z to bring them back.",
+            });
+        },
+        keywords: "remove all reset",
+      },
+
+      // ---------- Select ----------
+      {
+        id: "select.allLayers",
+        label: "All layers",
+        icon: MousePointerSquareDashed,
+        shortcuts: KEYMAP.selectAllLayers,
+        run: () => {
+          if (canvas) selectAllLayers(canvas);
+        },
+        keywords: "select everything",
+      },
+      {
+        id: "select.deselect",
+        label: "Deselect",
+        shortcuts: KEYMAP.deselect,
+        run: () => {
+          if (canvas) deselect(canvas);
+        },
+        isEnabled: selected,
+      },
+
+      // ---------- Filter ----------
+      {
+        id: "filter.adjustments",
+        label: "Adjustments…",
+        icon: SlidersHorizontal,
+        run: () => openPanel("adjust"),
+        keywords: "brightness contrast saturation filters presets",
+      },
+
+      // ---------- View ----------
+      {
+        id: "view.zoomIn",
+        label: "Zoom in",
+        icon: ZoomIn,
+        shortcuts: KEYMAP.zoomIn,
+        repeat: true,
+        run: zoomIn,
+      },
+      {
+        id: "view.zoomOut",
+        label: "Zoom out",
+        icon: ZoomOut,
+        shortcuts: KEYMAP.zoomOut,
+        repeat: true,
+        run: zoomOut,
+      },
+      {
+        id: "view.fitOnScreen",
+        label: "Fit on screen",
+        icon: Maximize,
+        shortcuts: KEYMAP.fitOnScreen,
+        run: fitOnScreen,
+      },
+      {
+        id: "view.actualPixels",
+        label: "100%",
+        icon: Scaling,
+        shortcuts: KEYMAP.actualPixels,
+        run: actualPixels,
+        keywords: "actual pixels zoom",
+      },
+      {
+        id: "view.snap",
+        label: "Snap to guides",
+        shortcuts: KEYMAP.toggleSnap,
+        run: () => setSnapping(!snapping),
+        isChecked: () => snapping,
+        toggle: true,
+      },
+      {
+        id: "view.propertiesPanel",
+        label: "Properties panel",
+        run: () => togglePanel("properties"),
+        isChecked: () => panel === "properties",
+        toggle: true,
+      },
+      {
+        id: "view.adjustPanel",
+        label: "Adjustments panel",
+        run: () => togglePanel("adjust"),
+        isChecked: () => panel === "adjust",
+        toggle: true,
+      },
+      {
+        id: "view.layersPanel",
+        label: "Layers panel",
+        shortcuts: KEYMAP.layersPanel,
+        run: () => togglePanel("layers"),
+        isChecked: () => panel === "layers",
+        toggle: true,
+      },
+
+      // ---------- Help ----------
+      {
+        id: "help.shortcuts",
+        label: "Keyboard shortcuts",
+        icon: Keyboard,
+        shortcuts: KEYMAP.shortcuts,
+        run: showShortcuts,
+      },
+
+      // ---------- Tools ----------
+      tool("tool.select", "select", "Select and move", MousePointer2, KEYMAP.selectTool, "move"),
+      tool("tool.draw", "draw", "Draw", Pencil, KEYMAP.drawTool, "brush pen paint"),
+      tool("tool.eraser", "eraser", "Eraser", Eraser, KEYMAP.eraserTool),
+      {
+        id: "tool.shape",
+        label: "Shape",
+        icon: Shapes,
+        shortcuts: KEYMAP.shapeTool,
+        keywords: "rectangle ellipse circle triangle star line arrow",
+        run: () => onToolChange(lastShape),
+        isChecked: () => isShapeKind(activeTool),
+      },
+      {
+        id: "tool.nextShape",
+        label: "Next shape",
+        icon: Shapes,
+        shortcuts: KEYMAP.nextShape,
+        run: () => onToolChange(nextShape()),
+      },
+      tool("tool.text", "text", "Text", Type, KEYMAP.textTool, "type font"),
+      tool("tool.marquee", "marquee", "Select region", SquareDashed, KEYMAP.marqueeTool, "marquee rectangle"),
+      tool("tool.crop", "crop", "Crop", Crop, KEYMAP.cropTool, "trim aspect ratio"),
+      {
+        id: "tool.eyedropper",
+        label: "Pick a colour",
+        icon: Pipette,
+        shortcuts: KEYMAP.eyedropper,
+        run: pickColor,
+        keywords: "eyedropper color sample",
+      },
+    ];
+
+    return Object.fromEntries(list.map((command) => [command.id, command]));
+  }, [
+    activeTool,
+    aiBusy,
+    arrange,
+    actualPixels,
+    canPaste,
+    canvas,
+    copy,
+    duplicate,
+    exportImage,
+    extractSubject,
+    fitOnScreen,
+    flip,
+    hasRedo,
+    hasUndo,
+    lastShape,
+    onToolChange,
+    openPanel,
+    panel,
+    paste,
+    pickColor,
+    placeImage,
+    redo,
+    removeBackground,
+    requestNew,
+    requestOpenImage,
+    requestOpenProject,
+    rotate,
+    saveProject,
+    setSnapping,
+    showShortcuts,
+    snapping,
+    togglePanel,
+    undo,
+    zoomIn,
+    zoomOut,
+  ]);
+}

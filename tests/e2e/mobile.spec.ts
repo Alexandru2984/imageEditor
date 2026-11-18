@@ -117,7 +117,7 @@ test("stickers and the export dialog fit on the phone", async ({ page }) => {
 
 test("the crop bar fits on the phone and applies a square crop", async ({ page }) => {
   await openPhoto(page);
-  await page.getByRole("button", { name: "Crop (K)" }).tap();
+  await page.getByRole("button", { name: "Crop (C)" }).tap();
   await expectOnScreen(page, page.getByRole("button", { name: "Apply crop" }));
   await expectOnScreen(page, page.getByRole("button", { name: "Cancel" }));
 
@@ -129,4 +129,21 @@ test("the crop bar fits on the phone and applies a square crop", async ({ page }
   await page.getByRole("button", { name: "Apply crop" }).tap();
   await expect(page.getByRole("button", { name: "Apply crop" })).toHaveCount(0);
   await expectNoSidewaysScroll(page);
+});
+
+test("the menu reaches every command on the phone, on screen", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Menu" }).tap();
+  for (const name of ["File", "Edit", "Image", "Layer", "Select", "Filter", "View", "Help"]) {
+    await expectOnScreen(page, page.getByRole("menuitem", { name, exact: true }));
+  }
+  await page.getByRole("menuitem", { name: "View", exact: true }).tap();
+  const layersPanel = page.getByRole("menuitemcheckbox", { name: "Layers panel" });
+  await expectOnScreen(page, layersPanel);
+  await expectNoSidewaysScroll(page);
+  await page.screenshot({ path: "test-results/mobile-menu.png" });
+  await layersPanel.tap();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.getByRole("tab", { name: "Layers", selected: true })).toBeVisible();
 });

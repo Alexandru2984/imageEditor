@@ -8,6 +8,7 @@ import {
   findBackgroundImage,
   isBackgroundObject,
   isEditorChrome,
+  isObjectLocked,
   isProtectedObject,
   isReadOnlySelection,
   setObjectLocked,
@@ -235,4 +236,51 @@ export async function addImageLayer(
   canvas.setActiveObject(image);
   canvas.requestRenderAll();
   return image;
+}
+
+/** Select every unlocked layer above the photo. Returns how many. */
+export function selectAllLayers(canvas: FabricCanvas): number {
+  const objects = canvas
+    .getObjects()
+    .filter((object) => !isEditorChrome(object) && !isProtectedObject(object));
+  if (objects.length === 0) return 0;
+  canvas.setActiveObject(
+    objects.length === 1 ? objects[0]! : new ActiveSelection(objects, { canvas })
+  );
+  canvas.requestRenderAll();
+  return objects.length;
+}
+
+/** Drop the selection. Returns whether anything was selected. */
+export function deselect(canvas: FabricCanvas): boolean {
+  if (!canvas.getActiveObject()) return false;
+  canvas.discardActiveObject();
+  canvas.requestRenderAll();
+  return true;
+}
+
+/**
+ * Lock the selected layers, or unlock them when all are already locked.
+ * Returns the new state, or null when no layer (other than the photo) is
+ * selected.
+ */
+export function toggleSelectionLock(canvas: FabricCanvas): boolean | null {
+  const objects = selectedObjects(canvas).filter((object) => !isBackgroundObject(object));
+  if (objects.length === 0) return null;
+  const lock = !objects.every((object) => isObjectLocked(object));
+  for (const object of objects) setObjectLocked(object, lock);
+  notifyModified(canvas, canvas.getActiveObject() ?? objects[0]);
+  return lock;
+}
+
+/** Remove every unlocked layer, keeping the photo. Returns how many. */
+export function clearUnlockedLayers(canvas: FabricCanvas): number {
+  const removable = canvas
+    .getObjects()
+    .filter((object) => !isEditorChrome(object) && !isProtectedObject(object));
+  if (removable.length === 0) return 0;
+  canvas.discardActiveObject();
+  canvas.remove(...removable);
+  canvas.requestRenderAll();
+  return removable.length;
 }

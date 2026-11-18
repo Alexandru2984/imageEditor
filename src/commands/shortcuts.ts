@@ -27,13 +27,14 @@ const SHIFT_AGNOSTIC = new Set(["?", "+", "=", "-"]);
  * The key a press stands for, independent of modifiers. Letters follow the
  * layout (Z is Z on AZERTY too); when a modifier turns a letter or digit into
  * another character (Option on macOS, Shift on digits), the physical key is
- * used instead. Brackets always use the physical key, as Shift turns them
- * into braces.
+ * used instead. Brackets and the semicolon always use the physical key, as
+ * Shift turns them into braces and a colon.
  */
 export function normalizedKey(event: Pick<KeyboardEvent, "key" | "code">): string {
   const { key, code } = event;
   if (code === "BracketLeft") return "[";
   if (code === "BracketRight") return "]";
+  if (code === "Semicolon") return ";";
   if (/^[a-z]$/i.test(key)) return key.toLowerCase();
   if (/^[0-9]$/.test(key)) return key;
   const letter = /^Key([A-Z])$/.exec(code);

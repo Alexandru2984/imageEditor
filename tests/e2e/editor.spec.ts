@@ -3,17 +3,19 @@ import {
   PNG_BASE64,
   autosavedObjects,
   canvasCenter,
+  chooseMenu,
   getAutosaveJson,
+  menuItem,
   uploadImage,
 } from "./helpers";
 
 const SHAPE_LABELS = new Set([
-  "Rectangle (R)",
-  "Ellipse (C)",
-  "Triangle (Y)",
-  "Star (S)",
-  "Line (L)",
-  "Arrow (A)",
+  "Rectangle (U)",
+  "Ellipse (U)",
+  "Triangle (U)",
+  "Star (U)",
+  "Line (U)",
+  "Arrow (U)",
 ]);
 
 /** Arm a tool; shape tools live in the Shapes flyout. */
@@ -32,7 +34,7 @@ async function exportAs(page: Page, format: "PNG" | "JPG" | "WebP") {
 }
 
 /** Arm a shape tool and click the canvas centre to drop a default shape. */
-async function addShape(page: Page, toolLabel = "Rectangle (R)") {
+async function addShape(page: Page, toolLabel = "Rectangle (U)") {
   await armTool(page, toolLabel);
   const center = await canvasCenter(page);
   await page.mouse.click(center.x, center.y);
@@ -367,7 +369,7 @@ test("new project cannot be overwritten by a pending autosave", async ({
 }) => {
   await uploadImage(page);
   await addShape(page);
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await chooseMenu(page, "File", "New…");
   await page.getByRole("button", { name: "Start new" }).click();
 
   await expect(page.getByText("Upload an Image")).toBeVisible();
@@ -394,7 +396,7 @@ test("a newer clear in another tab blocks a stale pending autosave", async ({
   // Everything slow happens first: the confirmation is already open, and the
   // stale edit is one key press on the selected shape. The clear then lands
   // well inside the first tab's autosave delay, even on a loaded machine.
-  await secondPage.getByRole("button", { name: "New", exact: true }).click();
+  await chooseMenu(secondPage, "File", "New…");
   const startNew = secondPage.getByRole("button", { name: "Start new" });
   await expect(startNew).toBeVisible();
   await page.keyboard.press("Shift+H");
@@ -450,7 +452,7 @@ test("locked image layers stay visible, protected, and persist", async ({
   const savedPath = await (await downloadPromise).path();
   expect(savedPath).toBeTruthy();
 
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await chooseMenu(page, "File", "New…");
   await page.getByRole("button", { name: "Start new" }).click();
   await page.getByTestId("project-input").setInputFiles(savedPath!);
   await expect(
@@ -622,7 +624,7 @@ test("drag draws a shape where the pointer went, even when zoomed", async ({
   await uploadImage(page);
   await page.getByRole("button", { name: "Zoom in" }).click();
   await page.getByRole("button", { name: "Zoom in" }).click();
-  await armTool(page, "Rectangle (R)");
+  await armTool(page, "Rectangle (U)");
   const center = await canvasCenter(page);
   await page.mouse.move(center.x - 60, center.y - 40);
   await page.mouse.down();
@@ -669,7 +671,7 @@ test("Ctrl+Shift+Z redoes an undone edit", async ({ page }) => {
 
 test("colour swatches recolour a line's stroke", async ({ page }) => {
   await uploadImage(page);
-  await addShape(page, "Line (L)");
+  await addShape(page, "Line (U)");
   await page.getByRole("button", { name: "Use color #22c55e" }).click();
   await expect
     .poll(async () => {
@@ -711,7 +713,7 @@ test("applies and undoes a crop without corrupting the canvas", async ({
   page.on("pageerror", (error) => pageErrors.push(error));
   await uploadImage(page);
 
-  await page.getByRole("button", { name: "Crop (K)" }).click();
+  await page.getByRole("button", { name: "Crop (C)" }).click();
   await page.getByRole("button", { name: "Apply crop" }).click();
   await expect(page.getByRole("button", { name: "Apply crop" })).toHaveCount(0);
   await expect(page.locator("canvas").first()).toBeVisible();
@@ -787,7 +789,7 @@ test("runs the pinned background-removal model end to end", async ({ page }) => 
 
 test("saves a re-editable project file", async ({ page }) => {
   await uploadImage(page);
-  await armTool(page, "Arrow (A)");
+  await armTool(page, "Arrow (U)");
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Save project" }).click();
   const download = await downloadPromise;
@@ -795,7 +797,7 @@ test("saves a re-editable project file", async ({ page }) => {
 
   const savedPath = await download.path();
   expect(savedPath).toBeTruthy();
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await chooseMenu(page, "File", "New…");
   await page.getByRole("button", { name: "Start new" }).click();
   await page.getByTestId("project-input").setInputFiles(savedPath!);
   await expect(page.getByText("Remove BG")).toBeVisible();
@@ -831,7 +833,7 @@ test("drawing and erasing remain compatible with saved projects", async ({
   const savedPath = await (await downloadPromise).path();
   expect(savedPath).toBeTruthy();
 
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await chooseMenu(page, "File", "New…");
   await page.getByRole("button", { name: "Start new" }).click();
   await page.getByTestId("project-input").setInputFiles(savedPath!);
   await expect(page.getByText("Remove BG")).toBeVisible();
@@ -876,12 +878,12 @@ test("export dialog writes WebP at the chosen size and file name", async ({ page
   expect(clear[3]).toBeLessThan(10);
 });
 
-test("Ctrl+D duplicates the selected layer and Ctrl+C / Ctrl+V pastes it", async ({
+test("Ctrl+J duplicates the selected layer and Ctrl+C / Ctrl+V pastes it", async ({
   page,
 }) => {
   await uploadImage(page);
   await addShape(page);
-  await page.keyboard.press("Control+d");
+  await page.keyboard.press("Control+j");
   await expect
     .poll(async () => (await autosavedObjects(page)).filter((o) => o.type === "Rect").length)
     .toBe(2);
@@ -895,6 +897,70 @@ test("Ctrl+D duplicates the selected layer and Ctrl+C / Ctrl+V pastes it", async
     .toBe(3);
   const ids = (await autosavedObjects(page)).map((o) => o.__layerId);
   expect(new Set(ids).size).toBe(ids.length);
+});
+
+test("the menu bar runs commands, shows their keys and disables what can't run", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  const rectangles = async () =>
+    (await autosavedObjects(page)).filter((object) => object.type === "Rect");
+
+  // Nothing is selected, so there is nothing to duplicate.
+  await page.getByRole("menuitem", { name: "Layer", exact: true }).click();
+  await expect(menuItem(page, "Duplicate layer")).toBeDisabled();
+  await expect(menuItem(page, "Duplicate layer")).toContainText("Ctrl+J");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+
+  await addShape(page);
+  await chooseMenu(page, "Layer", "Duplicate layer");
+  await expect.poll(async () => (await rectangles()).length).toBe(2);
+
+  // The copy stays selected, so the flip applies to it alone.
+  await chooseMenu(page, "Image", "Flip horizontal");
+  await expect
+    .poll(async () => (await rectangles()).map((object) => object.flipX).sort())
+    .toEqual([false, true]);
+
+  // Menu commands are undoable like any other edit.
+  await chooseMenu(page, "Edit", "Undo");
+  await expect
+    .poll(async () => (await rectangles()).map((object) => object.flipX))
+    .toEqual([false, false]);
+
+  // The shortcut list is built from the same commands.
+  await chooseMenu(page, "Help", "Keyboard shortcuts");
+  const dialog = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(dialog.getByText("Duplicate layer")).toBeVisible();
+  await expect(dialog.locator("div", { hasText: /^Duplicate layerCtrl\+J$/ })).toHaveCount(1);
+});
+
+test("menu commands that replace the document ask first", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  await chooseMenu(page, "File", "Open image…");
+  const confirm = page.getByRole("alertdialog", { name: "Open another image?" });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "Cancel" }).click();
+  await expect(confirm).toHaveCount(0);
+  // The document is untouched.
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((object) => object.type === "Rect"))
+    .toBe(true);
+
+  // Confirming opens the file picker; the chosen file replaces the document.
+  await chooseMenu(page, "File", "Open image…");
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "Choose image" }).click();
+  await (await chooser).setFiles({
+    name: "second.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(PNG_BASE64, "base64"),
+  });
+  await expect
+    .poll(async () => (await autosavedObjects(page)).some((object) => object.type === "Rect"))
+    .toBe(false);
 });
 
 test("dropping an image onto the editor adds it as a layer", async ({ page }) => {
@@ -1036,7 +1102,7 @@ test("text styles, fonts and effects apply to a text layer and persist", async (
   const downloadPromise = page.waitForEvent("download");
   await page.getByRole("button", { name: "Save project" }).click();
   const savedPath = await (await downloadPromise).path();
-  await page.getByRole("button", { name: "New", exact: true }).click();
+  await chooseMenu(page, "File", "New…");
   await page.getByRole("button", { name: "Start new" }).click();
   await page.getByTestId("project-input").setInputFiles(savedPath!);
   await expect(page.getByText("Remove BG")).toBeVisible();
@@ -1226,7 +1292,7 @@ test("smart guides snap a dragged layer to the photo centre", async ({ page }) =
   expect(Math.abs((await centres()).dy)).toBeLessThan(0.01);
 
   // Turned off from the menu (and remembered), the same drop stays off-centre.
-  await page.getByRole("button", { name: "More options" }).click();
+  await page.getByRole("menuitem", { name: "View", exact: true }).click();
   await page.getByRole("menuitemcheckbox", { name: "Snap to guides" }).click();
   await expect(page.getByRole("menuitemcheckbox", { name: "Snap to guides" })).toHaveAttribute(
     "aria-checked",
@@ -1241,7 +1307,7 @@ test("smart guides snap a dragged layer to the photo centre", async ({ page }) =
 test("crop presets frame the photo and the label matches the result", async ({ page }) => {
   await page.getByText("Try a sample photo").click();
   await expect(page.getByText("Remove BG")).toBeVisible();
-  await page.getByRole("button", { name: "Crop (K)" }).click();
+  await page.getByRole("button", { name: "Crop (C)" }).click();
 
   const size = page.getByTestId("crop-size");
   await page.getByRole("radio", { name: "16:9" }).click();

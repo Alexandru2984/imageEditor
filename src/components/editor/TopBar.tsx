@@ -1,31 +1,18 @@
-import { useRef, useState } from "react";
 import {
   Download,
-  FilePlus2,
-  FlipHorizontal2,
-  FlipVertical2,
-  FolderOpen,
-  Keyboard,
   Layers,
-  Magnet,
   Loader2,
   Maximize,
-  Monitor,
-  Moon,
-  MoreHorizontal,
+  PanelRight,
   Redo2,
-  RotateCcw,
-  RotateCw,
   Save,
   Scissors,
   SlidersHorizontal,
   Sparkles,
-  Sun,
   Undo2,
   Wand2,
   ZoomIn,
   ZoomOut,
-  PanelRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -33,36 +20,20 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuCheckboxItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuShortcut,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { IconButton } from "./IconButton";
 import { Logo } from "./Logo";
-import { useTheme, type ThemePreference } from "@/theme/theme";
+import { EditorMenuBar, EditorMobileMenu } from "./EditorMenus";
+import { KEYMAP } from "@/commands/keymap";
+import { formatShortcut, type Shortcut } from "@/commands/shortcuts";
+import type { CommandMap } from "@/commands/types";
 import type { AiActions } from "@/hooks/useAiActions";
 import type { PanelTab } from "@/types/editor";
 import { cn } from "@/lib/utils";
 
 interface TopBarProps {
-  hasDocument: boolean;
   isMobile: boolean;
   zoom: number;
   onZoomIn: () => void;
@@ -73,27 +44,16 @@ interface TopBarProps {
   canUndo: boolean;
   canRedo: boolean;
   ai: AiActions;
-  onRotate: (degrees: number) => void;
-  onFlip: (axis: "x" | "y") => void;
   onExport: () => void;
   onSaveProject: () => void;
-  onOpenProject: (file: File) => void;
-  onNewProject: () => void;
-  onShowShortcuts: () => void;
-  snapping: boolean;
-  onSnappingChange: (enabled: boolean) => void;
   panel: PanelTab | null;
   onTogglePanel: (tab: PanelTab) => void;
+  commands: CommandMap;
 }
 
-const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-  { value: "system", label: "System", icon: Monitor },
-];
+const hint = (shortcuts: readonly Shortcut[]) => formatShortcut(shortcuts[0]!);
 
 export const TopBar = ({
-  hasDocument,
   isMobile,
   zoom,
   onZoomIn,
@@ -104,102 +64,12 @@ export const TopBar = ({
   canUndo,
   canRedo,
   ai,
-  onRotate,
-  onFlip,
   onExport,
   onSaveProject,
-  onOpenProject,
-  onNewProject,
-  onShowShortcuts,
-  snapping,
-  onSnappingChange,
   panel,
   onTogglePanel,
+  commands,
 }: TopBarProps) => {
-  const projectInputRef = useRef<HTMLInputElement>(null);
-  const [confirmNew, setConfirmNew] = useState(false);
-  const { preference, setPreference, resolved } = useTheme();
-  const ThemeIcon = resolved === "dark" ? Moon : Sun;
-
-  const projectInput = (
-    <input
-      ref={projectInputRef}
-      type="file"
-      accept=".json,application/json"
-      className="hidden"
-      tabIndex={-1}
-      aria-hidden="true"
-      onChange={(event) => {
-        const file = event.target.files?.[0];
-        event.target.value = "";
-        if (file) onOpenProject(file);
-      }}
-    />
-  );
-
-  const themeSubmenu = (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger>
-        <ThemeIcon className="text-muted-foreground" />
-        Theme
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup
-          value={preference}
-          onValueChange={(value) => setPreference(value as ThemePreference)}
-        >
-          {THEME_OPTIONS.map(({ value, label }) => (
-            <DropdownMenuRadioItem key={value} value={value}>
-              {label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-
-  const transformItems = (
-    <>
-      <DropdownMenuItem onSelect={() => onRotate(-90)}>
-        <RotateCcw /> Rotate left
-      </DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => onRotate(90)}>
-        <RotateCw /> Rotate right
-      </DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => onFlip("x")}>
-        <FlipHorizontal2 /> Flip horizontal
-      </DropdownMenuItem>
-      <DropdownMenuItem onSelect={() => onFlip("y")}>
-        <FlipVertical2 /> Flip vertical
-      </DropdownMenuItem>
-    </>
-  );
-
-  const newProjectDialog = (
-    <AlertDialog open={confirmNew} onOpenChange={setConfirmNew}>
-      <AlertDialogContent className="max-w-[calc(100vw-2rem)] rounded-2xl sm:max-w-md">
-        <AlertDialogHeader>
-          <AlertDialogTitle>Start a new project?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The current image and all edits will be discarded. Save a project file first if
-            you want to keep editing later.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => {
-              ai.cancel();
-              onNewProject();
-            }}
-          >
-            Start new
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-
   const aiBusyIcon = ai.isProcessing ? Loader2 : undefined;
 
   return (
@@ -207,8 +77,6 @@ export const TopBar = ({
       <span className="sr-only" role="status" aria-live="polite">
         {ai.processingMessage ?? ""}
       </span>
-      {projectInput}
-      {newProjectDialog}
 
       <a
         href="/"
@@ -217,74 +85,111 @@ export const TopBar = ({
         aria-label="Image Editor"
       >
         <Logo className="h-7 w-7" />
-        {/* The start screen's hero is its h1; in the editor the brand is. */}
-        {!isMobile &&
-          (hasDocument ? (
-            <h1 className="whitespace-nowrap text-[15px] font-semibold tracking-tight">Image Editor</h1>
-          ) : (
-            <span className="whitespace-nowrap text-[15px] font-semibold tracking-tight">Image Editor</span>
-          ))}
+        {/* In the editor the brand is the page heading. */}
+        <h1 className="sr-only whitespace-nowrap text-[15px] font-semibold tracking-tight 2xl:not-sr-only">
+          Image Editor
+        </h1>
       </a>
 
-      {hasDocument && (
-        <>
-          {!isMobile && <Separator orientation="vertical" className="mx-1.5 h-6" />}
-          <IconButton icon={Undo2} label="Undo" shortcut="Ctrl+Z" onClick={undo} disabled={!canUndo} />
-          <IconButton icon={Redo2} label="Redo" shortcut="Ctrl+Shift+Z" onClick={redo} disabled={!canRedo} />
+      {!isMobile && <EditorMenuBar commands={commands} />}
+      {!isMobile && <Separator orientation="vertical" className="mx-1.5 h-6" />}
+      <IconButton
+        icon={Undo2}
+        label="Undo"
+        shortcut={hint(KEYMAP.undo)}
+        onClick={undo}
+        disabled={!canUndo}
+      />
+      <IconButton
+        icon={Redo2}
+        label="Redo"
+        shortcut={hint(KEYMAP.redo)}
+        onClick={redo}
+        disabled={!canRedo}
+      />
 
-          {!isMobile && (
-            <>
-              <Separator orientation="vertical" className="mx-1.5 h-6" />
-              <IconButton icon={ZoomOut} label="Zoom out" shortcut="−" onClick={onZoomOut} />
-              <button
-                type="button"
-                onClick={onFit}
-                aria-label="Zoom level"
-                title="Fit to screen"
-                className="h-9 w-14 rounded-md text-center font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {Math.round(zoom * 100)}%
-              </button>
-              <IconButton icon={ZoomIn} label="Zoom in" shortcut="+" onClick={onZoomIn} />
-              <IconButton icon={Maximize} label="Fit image to screen" shortcut="Ctrl+0" onClick={onFit} />
-            </>
-          )}
+      {!isMobile && (
+        <>
+          <Separator
+            orientation="vertical"
+            className="mx-1.5 hidden h-6 xl:block"
+          />
+          <div className="hidden items-center xl:flex">
+            <IconButton
+              icon={ZoomOut}
+              label="Zoom out"
+              shortcut={hint(KEYMAP.zoomOut)}
+              onClick={onZoomOut}
+            />
+            <button
+              type="button"
+              onClick={onFit}
+              aria-label="Zoom level"
+              title="Fit to screen"
+              className="h-9 w-14 rounded-md text-center font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <IconButton
+              icon={ZoomIn}
+              label="Zoom in"
+              shortcut={hint(KEYMAP.zoomIn)}
+              onClick={onZoomIn}
+            />
+            <IconButton
+              icon={Maximize}
+              label="Fit image to screen"
+              shortcut={hint(KEYMAP.fitOnScreen)}
+              onClick={onFit}
+            />
+          </div>
         </>
       )}
 
       <div className="min-w-0 flex-1" />
 
-      {hasDocument && !isMobile && (
+      {!isMobile && (
         <>
+          {/* Also in the Image menu; below lg the bar has no room for them
+              unless they are showing progress. */}
+          <div
+            className={cn(
+              "items-center gap-1",
+              ai.isProcessing ? "flex" : "hidden lg:flex",
+            )}
+          >
+            <IconButton
+              icon={aiBusyIcon ?? Scissors}
+              className={cn(ai.isProcessing && "[&_svg]:animate-spin")}
+              label="Remove background"
+              text={
+                <span className="hidden lg:inline">
+                  {ai.isProcessing ? "Working…" : "Remove BG"}
+                </span>
+              }
+              onClick={() => void ai.removeBackground()}
+              disabled={ai.isProcessing}
+            />
+            <IconButton
+              icon={Sparkles}
+              label="Extract subject to a new layer"
+              text={<span className="hidden lg:inline">Extract</span>}
+              onClick={() => void ai.extractSubject()}
+              disabled={ai.isProcessing}
+            />
+            <Separator orientation="vertical" className="mx-1.5 h-6" />
+          </div>
           <IconButton
-            icon={aiBusyIcon ?? Scissors}
-            className={cn(ai.isProcessing && "[&_svg]:animate-spin")}
-            label="Remove background"
-            text={<span className="hidden lg:inline">{ai.isProcessing ? "Working…" : "Remove BG"}</span>}
-            onClick={() => void ai.removeBackground()}
-            disabled={ai.isProcessing}
+            icon={Save}
+            label="Save project"
+            shortcut={hint(KEYMAP.saveProject)}
+            onClick={onSaveProject}
           />
-          <IconButton
-            icon={Sparkles}
-            label="Extract subject to a new layer"
-            text={<span className="hidden lg:inline">Extract</span>}
-            onClick={() => void ai.extractSubject()}
-            disabled={ai.isProcessing}
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="Rotate and flip">
-                <RotateCw className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>Selection, or whole image</DropdownMenuLabel>
-              {transformItems}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
-          <IconButton icon={Save} label="Save project" shortcut="Ctrl+S" onClick={onSaveProject} />
-          <Button size="sm" className="h-9 gap-1.5 px-3.5 shadow-sm" onClick={onExport}>
+          <Button
+            size="sm"
+            className="h-9 gap-1.5 px-3.5 shadow-sm"
+            onClick={onExport}
+          >
             <Download className="h-4 w-4" />
             Export
           </Button>
@@ -306,25 +211,15 @@ export const TopBar = ({
           <IconButton
             icon={Layers}
             label="Toggle layers"
+            shortcut={hint(KEYMAP.layersPanel)}
             active={panel === "layers"}
             aria-pressed={panel === "layers"}
             onClick={() => onTogglePanel("layers")}
           />
-          <Separator orientation="vertical" className="mx-1.5 h-6" />
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="New"
-            className="h-9 gap-1.5 px-2.5 text-muted-foreground hover:text-foreground"
-            onClick={() => setConfirmNew(true)}
-          >
-            <FilePlus2 className="h-4 w-4" />
-            <span className="hidden xl:inline">New</span>
-          </Button>
         </>
       )}
 
-      {hasDocument && isMobile && (
+      {isMobile && (
         <>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -359,66 +254,17 @@ export const TopBar = ({
             aria-pressed={panel !== null}
             onClick={() => onTogglePanel(panel ?? "properties")}
           />
-          <Button size="icon" className="h-9 w-9" aria-label="Export" onClick={onExport}>
+          <Button
+            size="icon"
+            className="h-9 w-9"
+            aria-label="Export"
+            onClick={onExport}
+          >
             <Download className="h-4 w-4" />
           </Button>
+          <EditorMobileMenu commands={commands} />
         </>
       )}
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="h-9 w-9" aria-label="More options">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          {hasDocument && isMobile && (
-            <>
-              <DropdownMenuItem onSelect={onZoomIn}>
-                <ZoomIn /> Zoom in
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onZoomOut}>
-                <ZoomOut /> Zoom out
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onFit}>
-                <Maximize /> Fit to screen
-                <DropdownMenuShortcut>{Math.round(zoom * 100)}%</DropdownMenuShortcut>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              {transformItems}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={onSaveProject}>
-                <Save /> Save project file
-              </DropdownMenuItem>
-            </>
-          )}
-          <DropdownMenuItem onSelect={() => projectInputRef.current?.click()}>
-            <FolderOpen /> Open project file…
-          </DropdownMenuItem>
-          {hasDocument && isMobile && (
-            <DropdownMenuItem onSelect={() => setConfirmNew(true)}>
-              <FilePlus2 /> New project
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          {hasDocument && (
-            <DropdownMenuCheckboxItem
-              checked={snapping}
-              onCheckedChange={(checked) => onSnappingChange(checked === true)}
-              onSelect={(event) => event.preventDefault()}
-            >
-              <Magnet /> Snap to guides
-            </DropdownMenuCheckboxItem>
-          )}
-          {themeSubmenu}
-          {!isMobile && (
-            <DropdownMenuItem onSelect={onShowShortcuts}>
-              <Keyboard /> Keyboard shortcuts
-              <DropdownMenuShortcut>?</DropdownMenuShortcut>
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
     </header>
   );
 };

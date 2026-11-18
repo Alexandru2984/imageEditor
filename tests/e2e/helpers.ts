@@ -57,3 +57,17 @@ export async function autosavedObjects(page: Page): Promise<Array<Record<string,
   const json = await getAutosaveJson(page);
   return json ? (JSON.parse(json).objects as Array<Record<string, unknown>>) : [];
 }
+
+/** A menu item by its label; its accessible name also carries the shortcut. */
+export const menuItem = (page: Page, label: string) =>
+  page.getByRole("menuitem", {
+    name: new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+  });
+
+/** Pick an item from the editor's menu bar, e.g. File › New…. */
+export async function chooseMenu(page: Page, menu: string, item: string) {
+  await page.getByRole("menuitem", { name: menu, exact: true }).click();
+  await menuItem(page, item).click();
+  // The menu animates out; wait so it no longer covers what it opened.
+  await expect(page.getByRole("menu")).toHaveCount(0);
+}

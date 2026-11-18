@@ -34,6 +34,7 @@ describe("normalizedKey", () => {
     expect(normalizedKey(press("+", "Equal"))).toBe("+");
     expect(normalizedKey(press("}", "BracketRight"))).toBe("]");
     expect(normalizedKey(press("+", "NumpadAdd"))).toBe("+");
+    expect(normalizedKey(press(":", "Semicolon"))).toBe(";");
   });
 
   it("passes named keys through", () => {

@@ -26,12 +26,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { Tool } from "@/types/editor";
 import { toast } from "sonner";
 import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
-import { addImageLayer } from "@/utils/canvasActions";
-import {
-  isEditorChrome,
-  isProtectedObject,
-  removeSelectedObjects,
-} from "@/utils/editorObjects";
+import { addImageLayer, clearUnlockedLayers } from "@/utils/canvasActions";
+import { removeSelectedObjects } from "@/utils/editorObjects";
 import { isShapeKind, type ShapeKind } from "@/utils/shapes";
 import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
 import { cn } from "@/lib/utils";
@@ -39,6 +35,8 @@ import { cn } from "@/lib/utils";
 interface ToolbarProps {
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
+  /** The shape the Shapes button (and the U key) arms. */
+  lastShape: ShapeKind;
   fabricCanvas: FabricCanvas | null;
   orientation: "vertical" | "horizontal";
   onEyedropper: () => void;
@@ -53,18 +51,18 @@ const PRIMARY_TOOLS: ToolDef[] = [
 ];
 
 const SHAPE_TOOLS: (ToolDef & { id: ShapeKind; name: string })[] = [
-  { id: "rectangle", icon: Square, label: "Rectangle (R)", name: "Rectangle" },
-  { id: "circle", icon: Circle, label: "Ellipse (C)", name: "Ellipse" },
-  { id: "triangle", icon: Triangle, label: "Triangle (Y)", name: "Triangle" },
-  { id: "star", icon: Star, label: "Star (S)", name: "Star" },
-  { id: "line", icon: Minus, label: "Line (L)", name: "Line" },
-  { id: "arrow", icon: MoveUpRight, label: "Arrow (A)", name: "Arrow" },
+  { id: "rectangle", icon: Square, label: "Rectangle (U)", name: "Rectangle" },
+  { id: "circle", icon: Circle, label: "Ellipse (U)", name: "Ellipse" },
+  { id: "triangle", icon: Triangle, label: "Triangle (U)", name: "Triangle" },
+  { id: "star", icon: Star, label: "Star (U)", name: "Star" },
+  { id: "line", icon: Minus, label: "Line (U)", name: "Line" },
+  { id: "arrow", icon: MoveUpRight, label: "Arrow (U)", name: "Arrow" },
 ];
 
 const SECONDARY_TOOLS: ToolDef[] = [
   { id: "text", icon: Type, label: "Text (T)" },
   { id: "marquee", icon: SquareDashed, label: "Select region (M)" },
-  { id: "crop", icon: Crop, label: "Crop (K)" },
+  { id: "crop", icon: Crop, label: "Crop (C)" },
 ];
 
 const ACTIVE_CLASS =
@@ -74,6 +72,7 @@ const IDLE_CLASS = "text-muted-foreground hover:text-foreground";
 export const Toolbar = ({
   activeTool,
   onToolChange,
+  lastShape,
   fabricCanvas,
   orientation,
   onEyedropper,
@@ -83,12 +82,7 @@ export const Toolbar = ({
   const imageLoadControllerRef = useRef<AbortController | null>(null);
   const [shapesOpen, setShapesOpen] = useState(false);
   const [stickersOpen, setStickersOpen] = useState(false);
-  const [lastShape, setLastShape] = useState<ShapeKind>("rectangle");
   const tooltipSide = vertical ? "right" : "top";
-
-  useEffect(() => {
-    if (isShapeKind(activeTool)) setLastShape(activeTool);
-  }, [activeTool]);
 
   useEffect(
     () => () => {
@@ -137,17 +131,12 @@ export const Toolbar = ({
 
   const handleClear = () => {
     if (!fabricCanvas) return;
-    const removable = fabricCanvas
-      .getObjects()
-      .filter((object) => !isEditorChrome(object) && !isProtectedObject(object));
-    if (removable.length === 0) {
+    const removed = clearUnlockedLayers(fabricCanvas);
+    if (removed === 0) {
       toast("Nothing to clear: only the photo and locked layers remain");
       return;
     }
-    fabricCanvas.discardActiveObject();
-    fabricCanvas.remove(...removable);
-    fabricCanvas.requestRenderAll();
-    toast.success(`Cleared ${removable.length} layer${removable.length === 1 ? "" : "s"}`, {
+    toast.success(`Cleared ${removed} layer${removed === 1 ? "" : "s"}`, {
       description: "Press Ctrl+Z to bring them back.",
     });
   };

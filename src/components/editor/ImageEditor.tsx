@@ -82,6 +82,7 @@ export const ImageEditor = () => {
   const autosaveGenerationRef = useRef(0);
   const autosaveFailureShownRef = useRef(false);
   const autosaveConflictShownRef = useRef(false);
+  const conflictNoticeRef = useRef({ serial: 0, open: false });
   const documentLoadControllerRef = useRef<AbortController | null>(null);
   const dragDepthRef = useRef(0);
 
@@ -156,11 +157,24 @@ export const ImageEditor = () => {
         if (!written) {
           if (!autosaveConflictShownRef.current) {
             autosaveConflictShownRef.current = true;
-            // One notice at a time: a second conflict refreshes it rather
-            // than stacking an identical copy.
+            // One notice at a time: a second conflict refreshes the open one
+            // rather than stacking a copy. A notice that has started closing
+            // can't be refreshed (the update would leave with it), so that
+            // case gets a new one.
+            const notice = conflictNoticeRef.current;
+            if (!notice.open) {
+              notice.serial += 1;
+              notice.open = true;
+            }
+            const serial = notice.serial;
+            const closed = () => {
+              if (conflictNoticeRef.current.serial === serial) {
+                conflictNoticeRef.current.open = false;
+              }
+            };
             toast.warning(
               "A newer autosave exists in another tab. Your next edit will become the latest version.",
-              { id: "autosave-conflict" }
+              { id: `autosave-conflict-${serial}`, onAutoClose: closed, onDismiss: closed }
             );
           }
           return;
@@ -392,6 +406,7 @@ export const ImageEditor = () => {
           documentName={openDocument.name}
           onSnapshot={handleSnapshot}
           onLoadError={handleCanvasLoadError}
+          onOpenImageFile={(file) => void openImageFile(file)}
           onOpenProjectFile={(file) => void handleOpenProjectFile(file)}
           onNewProject={handleNewProject}
         />

@@ -32,14 +32,14 @@ import {
   isBackgroundObject,
   isEditorChrome,
   isObjectLocked,
-  isProtectedObject,
   removeSelectedObjects,
   setObjectLocked,
 } from "@/utils/editorObjects";
-import { selectedObjects, type ArrangeAction } from "@/utils/canvasActions";
+import { selectAllLayers, selectedObjects, type ArrangeAction } from "@/utils/canvasActions";
+import { KEYMAP } from "@/commands/keymap";
+import { formatShortcut, type Shortcut } from "@/commands/shortcuts";
 
-const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.platform);
-const MOD = isMac ? "⌘" : "Ctrl+";
+const hint = (shortcuts: readonly Shortcut[]) => formatShortcut(shortcuts[0]!);
 
 interface CanvasContextMenuProps {
   canvas: FabricCanvas | null;
@@ -125,15 +125,7 @@ export function CanvasContextMenu({
   };
 
   const selectAll = () => {
-    if (!canvas) return;
-    const objects = canvas
-      .getObjects()
-      .filter((object) => !isEditorChrome(object) && !isProtectedObject(object));
-    if (objects.length === 0) return;
-    canvas.setActiveObject(
-      objects.length === 1 ? objects[0]! : new ActiveSelection(objects, { canvas })
-    );
-    canvas.requestRenderAll();
+    if (canvas) selectAllLayers(canvas);
   };
 
   return (
@@ -149,13 +141,13 @@ export function CanvasContextMenu({
         {menu?.hasSelection ? (
           <>
             <DropdownMenuItem onSelect={onCopy}>
-              <Copy /> Copy <DropdownMenuShortcut>{MOD}C</DropdownMenuShortcut>
+              <Copy /> Copy <DropdownMenuShortcut>{hint(KEYMAP.copy)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onPaste} disabled={!menu.canPaste}>
-              <ClipboardPaste /> Paste <DropdownMenuShortcut>{MOD}V</DropdownMenuShortcut>
+              <ClipboardPaste /> Paste <DropdownMenuShortcut>{hint(KEYMAP.paste)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onDuplicate}>
-              <CopyPlus /> Duplicate <DropdownMenuShortcut>{MOD}D</DropdownMenuShortcut>
+              <CopyPlus /> Duplicate <DropdownMenuShortcut>{hint(KEYMAP.duplicate)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuSub>
@@ -164,24 +156,24 @@ export function CanvasContextMenu({
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-56">
                 <DropdownMenuItem onSelect={() => onArrange("front")}>
-                  <ArrowUpToLine /> Bring to front <DropdownMenuShortcut>⇧{MOD}]</DropdownMenuShortcut>
+                  <ArrowUpToLine /> Bring to front <DropdownMenuShortcut>{hint(KEYMAP.bringToFront)}</DropdownMenuShortcut>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onArrange("forward")}>
-                  <ChevronUp /> Bring forward <DropdownMenuShortcut>{MOD}]</DropdownMenuShortcut>
+                  <ChevronUp /> Bring forward <DropdownMenuShortcut>{hint(KEYMAP.bringForward)}</DropdownMenuShortcut>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onArrange("backward")}>
-                  <ChevronDown /> Send backward <DropdownMenuShortcut>{MOD}[</DropdownMenuShortcut>
+                  <ChevronDown /> Send backward <DropdownMenuShortcut>{hint(KEYMAP.sendBackward)}</DropdownMenuShortcut>
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => onArrange("back")}>
-                  <ArrowDownToLine /> Send to back <DropdownMenuShortcut>⇧{MOD}[</DropdownMenuShortcut>
+                  <ArrowDownToLine /> Send to back <DropdownMenuShortcut>{hint(KEYMAP.sendToBack)}</DropdownMenuShortcut>
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuSub>
             <DropdownMenuItem onSelect={() => onFlip("x")} disabled={menu.locked}>
-              <FlipHorizontal2 /> Flip horizontal <DropdownMenuShortcut>⇧H</DropdownMenuShortcut>
+              <FlipHorizontal2 /> Flip horizontal <DropdownMenuShortcut>{hint(KEYMAP.flipHorizontal)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => onFlip("y")} disabled={menu.locked}>
-              <FlipVertical2 /> Flip vertical <DropdownMenuShortcut>⇧V</DropdownMenuShortcut>
+              <FlipVertical2 /> Flip vertical <DropdownMenuShortcut>{hint(KEYMAP.flipVertical)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={toggleLock}>
               {menu.locked ? <LockOpen /> : <Lock />} {menu.locked ? "Unlock" : "Lock"}
@@ -192,19 +184,19 @@ export function CanvasContextMenu({
               disabled={menu.locked}
               className="text-destructive focus:text-destructive [&_svg]:text-destructive"
             >
-              <Trash2 /> Delete <DropdownMenuShortcut>Del</DropdownMenuShortcut>
+              <Trash2 /> Delete <DropdownMenuShortcut>{hint(KEYMAP.delete)}</DropdownMenuShortcut>
             </DropdownMenuItem>
           </>
         ) : (
           <>
             <DropdownMenuItem onSelect={onPaste} disabled={!menu?.canPaste}>
-              <ClipboardPaste /> Paste <DropdownMenuShortcut>{MOD}V</DropdownMenuShortcut>
+              <ClipboardPaste /> Paste <DropdownMenuShortcut>{hint(KEYMAP.paste)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={selectAll}>
-              <MousePointerSquareDashed /> Select all layers <DropdownMenuShortcut>{MOD}A</DropdownMenuShortcut>
+              <MousePointerSquareDashed /> Select all layers <DropdownMenuShortcut>{hint(KEYMAP.selectAllLayers)}</DropdownMenuShortcut>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={onFit}>
-              <Maximize /> Fit to screen <DropdownMenuShortcut>{MOD}0</DropdownMenuShortcut>
+              <Maximize /> Fit to screen <DropdownMenuShortcut>{hint(KEYMAP.fitOnScreen)}</DropdownMenuShortcut>
             </DropdownMenuItem>
           </>
         )}

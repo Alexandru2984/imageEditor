@@ -19,6 +19,9 @@ interface UseUndoRedoReturn {
   redo: () => void;
   canUndo: boolean;
   canRedo: boolean;
+  /** Live versions for event handlers, which may run before a re-render. */
+  hasUndo: () => boolean;
+  hasRedo: () => boolean;
 }
 
 const snapshotsEqual = (a: CanvasSnapshot, b: CanvasSnapshot): boolean =>
@@ -273,6 +276,16 @@ export function useUndoRedo(
   const canUndo = !isRestoring && currentIndexRef.current > 0;
   const canRedo =
     !isRestoring && currentIndexRef.current < historyRef.current.length - 1;
+  const hasUndo = useCallback(
+    () => !isRestoringRef.current && currentIndexRef.current > 0,
+    []
+  );
+  const hasRedo = useCallback(
+    () =>
+      !isRestoringRef.current &&
+      currentIndexRef.current < historyRef.current.length - 1,
+    []
+  );
 
-  return { saveState, undo, redo, canUndo, canRedo };
+  return { saveState, undo, redo, canUndo, canRedo, hasUndo, hasRedo };
 }
