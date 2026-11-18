@@ -10,8 +10,12 @@ interface UseKeyboardShortcutsOptions {
   commands: readonly Command[];
 }
 
+// Inputs that take no typing: once a colour is picked, B still means brush.
+// (Range inputs stay out: their arrow keys would also nudge the layer.)
+const KEYLESS_INPUTS = new Set(["button", "checkbox", "color", "file", "image", "radio", "reset", "submit"]);
+
 const isTypingTarget = (target: HTMLElement): boolean =>
-  target.tagName === "INPUT" ||
+  (target instanceof HTMLInputElement && !KEYLESS_INPUTS.has(target.type)) ||
   target.tagName === "TEXTAREA" ||
   target.tagName === "SELECT" ||
   target.isContentEditable;

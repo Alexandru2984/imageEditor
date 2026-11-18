@@ -12,6 +12,7 @@ import { AdjustPanel } from "./AdjustPanel";
 import { LayersPanel } from "./LayersPanel";
 import { TopBar } from "./TopBar";
 import { OptionsBar } from "./OptionsBar";
+import { ColorWells } from "./ColorWells";
 import { ExportDialog } from "./ExportDialog";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Button } from "@/components/ui/button";
@@ -117,6 +118,7 @@ export const EditorWorkspace = ({
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [lastShape, setLastShape] = useSessionState<ShapeKind>("lastShape", "rectangle");
   const [activeColor, setActiveColor] = useSessionState("activeColor", "#a855f7");
+  const [backgroundColor, setBackgroundColor] = useSessionState("backgroundColor", "#ffffff");
   const [brushWidth, setBrushWidth] = useSessionState("brushWidth", 3);
   const [brushHardness, setBrushHardness] = useSessionState("brushHardness", 100);
   const [brushOpacity, setBrushOpacity] = useSessionState("brushOpacity", 100);
@@ -267,6 +269,14 @@ export const EditorWorkspace = ({
     if (fabricCanvas) setZoom(fitToScreen(fabricCanvas));
   }, [fabricCanvas]);
   const handleActualPixels = useCallback(() => setZoom(1), []);
+  const swapColors = useCallback(() => {
+    setActiveColor(backgroundColor);
+    setBackgroundColor(activeColor);
+  }, [activeColor, backgroundColor, setActiveColor, setBackgroundColor]);
+  const resetColors = useCallback(() => {
+    setActiveColor("#000000");
+    setBackgroundColor("#ffffff");
+  }, [setActiveColor, setBackgroundColor]);
   const adjustBrush = useCallback(
     (setting: "width" | "hardness", direction: 1 | -1) => {
       if (setting === "width") setBrushWidth((width) => stepBrushWidth(width, direction));
@@ -435,6 +445,8 @@ export const EditorWorkspace = ({
     openPanel,
     showShortcuts,
     adjustBrush,
+    swapColors,
+    resetColors,
   });
   const commandList = useMemo(() => Object.values(commands), [commands]);
   useKeyboardShortcuts({ canvas: fabricCanvas, commands: commandList });
@@ -561,8 +573,21 @@ export const EditorWorkspace = ({
   const desktopChrome = !isMobile;
   const mobileChrome = isMobile;
 
+  const colorWells = (large: boolean) => (
+    <ColorWells
+      foreground={activeColor}
+      background={backgroundColor}
+      onForegroundChange={setActiveColor}
+      onBackgroundChange={setBackgroundColor}
+      onSwap={swapColors}
+      onReset={resetColors}
+      large={large}
+    />
+  );
+
   const optionsBar = (
     <OptionsBar
+      colors={colorWells(true)}
       activeTool={activeTool}
       onToolChange={handleToolChange}
       compact={isMobile}
@@ -671,6 +696,7 @@ export const EditorWorkspace = ({
             lastShape={lastShape}
             fabricCanvas={fabricCanvas}
             onEyedropper={eyedropper.start}
+            colors={colorWells(false)}
           />
         ) : null}
 

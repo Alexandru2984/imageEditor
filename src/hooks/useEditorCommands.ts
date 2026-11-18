@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { KEYMAP } from "@/commands/keymap";
+import { formatShortcut } from "@/commands/shortcuts";
 import type { Command, CommandMap } from "@/commands/types";
 import {
   clearUnlockedLayers,
@@ -93,6 +94,8 @@ export interface EditorCommandContext {
   showShortcuts: () => void;
   /** [ ] and Shift+[ ]: brush size and hardness. */
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
+  swapColors: () => void;
+  resetColors: () => void;
 }
 
 /** Whether a document layer (not editor chrome) is selected. */
@@ -138,6 +141,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openPanel,
     showShortcuts,
     adjustBrush,
+    swapColors,
+    resetColors,
   } = context;
   // The AI actions object is rebuilt on every render; its parts are stable.
   const { isProcessing: aiBusy, removeBackground, extractSubject } = ai;
@@ -378,7 +383,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           if (removed === 0) toast("Nothing to clear: only the photo and locked layers remain");
           else
             toast.success(`Cleared ${removed} layer${removed === 1 ? "" : "s"}`, {
-              description: "Press Ctrl+Z to bring them back.",
+              description: `Press ${formatShortcut(KEYMAP.undo[0]!)} to bring them back.`,
             });
         },
         keywords: "remove all reset",
@@ -535,6 +540,20 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       isEnabled: setting === "width" ? painting : () => activeTool === "draw",
     });
     list.push(
+      {
+        id: "color.swap",
+        label: "Swap foreground and background colors",
+        shortcuts: KEYMAP.swapColors,
+        run: swapColors,
+        keywords: "colour exchange",
+      },
+      {
+        id: "color.reset",
+        label: "Default colors (black and white)",
+        shortcuts: KEYMAP.defaultColors,
+        run: resetColors,
+        keywords: "colour reset",
+      },
       brushKey("brush.smaller", "Smaller brush", KEYMAP.brushSmaller, "width", -1),
       brushKey("brush.larger", "Larger brush", KEYMAP.brushLarger, "width", 1),
       brushKey("brush.softer", "Softer brush", KEYMAP.brushSofter, "hardness", -1),
@@ -568,6 +587,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     redo,
     removeBackground,
     requestNew,
+    resetColors,
     requestOpenImage,
     requestOpenProject,
     rotate,
@@ -575,6 +595,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     setSnapping,
     showShortcuts,
     snapping,
+    swapColors,
     togglePanel,
     undo,
     zoomIn,

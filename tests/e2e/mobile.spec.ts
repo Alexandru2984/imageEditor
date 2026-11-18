@@ -155,6 +155,7 @@ test("brush settings sit above the tools only while drawing", async ({ page }) =
   await page.getByRole("button", { name: "Draw (B)" }).tap();
   await expectOnScreen(page, options.getByRole("slider", { name: "Brush width" }));
   await expect(options.getByRole("radio", { name: "Neon" })).toBeVisible();
+  await expectOnScreen(page, options.getByRole("group", { name: "Colors" }));
   await expectNoSidewaysScroll(page);
   await page.screenshot({ path: "test-results/mobile-options.png" });
   await page.getByRole("button", { name: "Select (V)" }).tap();

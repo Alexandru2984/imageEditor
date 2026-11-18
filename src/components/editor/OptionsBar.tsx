@@ -32,6 +32,8 @@ interface OptionsBarProps {
   /** Phones: a strip above the tools, shown only for tools with settings. */
   compact: boolean;
   activeColor: string;
+  /** Colour wells for phones, where the tools have no room for them. */
+  colors?: ReactNode;
   brush: BrushSettings;
   onBrushKindChange: (kind: BrushKind) => void;
   onBrushWidthChange: (width: number) => void;
@@ -89,6 +91,7 @@ export function OptionsBar({
   onToolChange,
   compact,
   activeColor,
+  colors,
   brush,
   onBrushKindChange,
   onBrushWidthChange,
@@ -242,6 +245,12 @@ export function OptionsBar({
             <span className={cn(options !== null && "hidden lg:inline")}>{info.name}</span>
           </span>
           {options !== null && <Separator orientation="vertical" className="h-5" />}
+        </>
+      )}
+      {compact && colors && (
+        <>
+          {colors}
+          <Separator orientation="vertical" className="h-6" />
         </>
       )}
       {options}

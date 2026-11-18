@@ -49,6 +49,9 @@ export const KEYMAP = {
   brushSofter: [{ key: "[", shift: true }],
   brushHarder: [{ key: "]", shift: true }],
 
+  swapColors: [{ key: "x" }],
+  defaultColors: [{ key: "d" }],
+
   selectTool: [{ key: "v" }],
   drawTool: [{ key: "b" }],
   eraserTool: [{ key: "e" }],

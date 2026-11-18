@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MousePointer2,
   Pencil,
@@ -7,7 +7,6 @@ import {
   Crop,
   SquareDashed,
   Trash2,
-  XCircle,
   ImagePlus,
   Pipette,
   Smile,
@@ -20,7 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { Tool } from "@/types/editor";
 import { toast } from "sonner";
 import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
-import { addImageLayer, clearUnlockedLayers } from "@/utils/canvasActions";
+import { addImageLayer } from "@/utils/canvasActions";
 import { removeSelectedObjects } from "@/utils/editorObjects";
 import { isShapeKind, type ShapeKind } from "@/utils/shapes";
 import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
@@ -35,6 +34,8 @@ interface ToolbarProps {
   fabricCanvas: FabricCanvas | null;
   orientation: "vertical" | "horizontal";
   onEyedropper: () => void;
+  /** Foreground and background colours (the vertical toolbar only). */
+  colors?: ReactNode;
 }
 
 type ToolDef = { id: Tool; icon: typeof MousePointer2; label: string };
@@ -63,6 +64,7 @@ export const Toolbar = ({
   fabricCanvas,
   orientation,
   onEyedropper,
+  colors,
 }: ToolbarProps) => {
   const vertical = orientation === "vertical";
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -116,19 +118,8 @@ export const Toolbar = ({
     else toast.error("Unlock the layer before deleting it");
   };
 
-  const handleClear = () => {
-    if (!fabricCanvas) return;
-    const removed = clearUnlockedLayers(fabricCanvas);
-    if (removed === 0) {
-      toast("Nothing to clear: only the photo and locked layers remain");
-      return;
-    }
-    toast.success(`Cleared ${removed} layer${removed === 1 ? "" : "s"}`, {
-      description: "Press Ctrl+Z to bring them back.",
-    });
-  };
-
-  const buttonSize = "h-10 w-10 shrink-0";
+  // Vertical buttons are a little smaller, so the tools fit a laptop screen.
+  const buttonSize = vertical ? "h-9 w-9 shrink-0" : "h-10 w-10 shrink-0";
 
   const renderTool = (tool: ToolDef) => {
     const Icon = tool.icon;
@@ -327,10 +318,15 @@ export const Toolbar = ({
         tabIndex={-1}
         aria-hidden="true"
       />
+      {vertical && colors && (
+        <>
+          {separator}
+          <div className="py-1">{colors}</div>
+        </>
+      )}
       <div className={vertical ? "min-h-2 flex-1" : "min-w-2 flex-1"} />
       {separator}
       {actionButton(Trash2, "Delete selected layer", "Delete selected (Del)", handleDelete, true)}
-      {actionButton(XCircle, "Clear unlocked layers", "Clear all layers", handleClear, true)}
     </nav>
   );
 };

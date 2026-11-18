@@ -31,6 +31,8 @@ const TOOL_IDS = [
   "tool.nextShape",
   "tool.text",
   "tool.eyedropper",
+  "color.swap",
+  "color.reset",
   "brush.smaller",
   "brush.larger",
   "brush.softer",

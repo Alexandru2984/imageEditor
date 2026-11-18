@@ -50,6 +50,8 @@ function editorCommands(): CommandMap {
     openPanel: noop,
     showShortcuts: noop,
     adjustBrush: noop,
+    swapColors: noop,
+    resetColors: noop,
   };
   let commands: CommandMap = {};
   const Probe = () => {

@@ -992,6 +992,35 @@ test("the options bar follows the tool, and [ ] set the brush", async ({ page })
   await expect(options.getByRole("radio", { name: "Star" })).toHaveCount(0);
 });
 
+test("X swaps the foreground and background colours, D restores black and white", async ({
+  page,
+}) => {
+  await uploadImage(page);
+  const foreground = page.getByLabel("Foreground color");
+  const background = page.getByLabel("Background color");
+  await expect(background).toHaveValue("#ffffff");
+  await page.keyboard.press("d");
+  await expect(foreground).toHaveValue("#000000");
+  await page.keyboard.press("x");
+  await expect(foreground).toHaveValue("#ffffff");
+  await expect(background).toHaveValue("#000000");
+  await page.getByRole("button", { name: "Swap colors" }).click();
+  await expect(foreground).toHaveValue("#000000");
+
+  // The brush paints with the foreground colour.
+  await background.fill("#00ff00");
+  await page.keyboard.press("x");
+  await page.keyboard.press("b");
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x - 60, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 60, center.y, { steps: 8 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await autosavedObjects(page)).find((object) => object.type === "Path")?.stroke)
+    .toBe("#00ff00");
+});
+
 test("arrow keys on a focused slider don't also move the layer", async ({ page }) => {
   await uploadImage(page);
   await addShape(page);
