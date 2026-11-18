@@ -8,11 +8,12 @@ import {
   type EditorFabricObject,
 } from "@/utils/editorObjects";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
+import { encodePng } from "./pngEncoder";
 
 /**
  * Pixel layers are ordinary image layers. While a tool paints, the layer shows
- * a working canvas; when the stroke ends the canvas is encoded to PNG off the
- * main thread and swapped back for an image, so history and autosave keep
+ * a working canvas; when the stroke ends the canvas is encoded to PNG (in a
+ * worker) and swapped back for an image, so history and autosave keep
  * sharing one source string per state instead of re-encoding every time.
  */
 
@@ -105,14 +106,6 @@ export function refreshPixelLayer(image: FabricImage, canvas: FabricCanvas): voi
   image.dirty = true;
   canvas.requestRenderAll();
 }
-
-const encodePng = (surface: HTMLCanvasElement): Promise<Blob> =>
-  new Promise((resolve, reject) => {
-    surface.toBlob((blob) => {
-      if (blob && blob.size > 0) resolve(blob);
-      else reject(new Error("The browser could not encode the painted layer"));
-    }, "image/png");
-  });
 
 const readDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {

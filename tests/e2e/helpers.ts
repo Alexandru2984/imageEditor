@@ -112,7 +112,15 @@ export async function uploadSolidImage(
     buffer: Buffer.from(base64, "base64"),
   });
   await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  // The photo is on the canvas once the document has been saved with it.
+  await expect.poll(async () => (await autosavedObjects(page)).length).toBeGreaterThan(0);
 }
+
+/** Two frames: React has run the effects of what is on screen. */
+export const settle = (page: Page) =>
+  page.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  );
 
 /**
  * RGBA values of an autosaved image layer at the given pixel positions, or

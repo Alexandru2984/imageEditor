@@ -6,6 +6,7 @@ import {
   canvasCenter,
   chooseMenu,
   menuItem,
+  settle,
   uploadSolidImage,
 } from "./helpers";
 
@@ -29,8 +30,16 @@ const layerNames = async (page: import("@playwright/test").Page) =>
 async function arm(page: import("@playwright/test").Page, key: string, name: string) {
   await page.keyboard.press(key);
   await expect(page.getByRole("group", { name: "Tool options" })).toContainText(name);
+  await settle(page);
 }
 const armBrush = (page: import("@playwright/test").Page) => arm(page, "b", "Brush");
+
+/** Drop a rectangle; the editor then switches back to Select by itself. */
+async function placeRectangle(page: import("@playwright/test").Page, x: number, y: number) {
+  await arm(page, "u", "Shape");
+  await page.mouse.click(x, y);
+  await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute("aria-pressed", "true");
+}
 
 async function stroke(page: import("@playwright/test").Page, dy = 0, span = 80) {
   const center = await canvasCenter(page);
@@ -146,8 +155,7 @@ test("painted layers survive saving and reopening the project", async ({ page })
 test("clicks pass through the transparent pixels of a pixel layer", async ({ page }) => {
   await uploadSolidImage(page, 400, 300);
   const center = await canvasCenter(page);
-  await arm(page, "u", "Shape");
-  await page.mouse.click(center.x, center.y);
+  await placeRectangle(page, center.x, center.y);
   // A stroke well away from the shape, on a layer spanning the whole photo.
   await armBrush(page);
   await stroke(page, -150);
@@ -182,8 +190,7 @@ test("layer commands create, merge, rasterize and flatten layers in one undo ste
     .toBe(255);
 
   // A shape above it, rasterized into pixels.
-  await arm(page, "u", "Shape");
-  await page.mouse.click(center.x, center.y + 60);
+  await placeRectangle(page, center.x, center.y + 60);
   await expect(current).toContainText(/rect/i);
   await chooseMenu(page, "Layer", "Rasterize layer");
   await expect
