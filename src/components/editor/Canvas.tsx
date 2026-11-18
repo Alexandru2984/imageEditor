@@ -236,6 +236,8 @@ export const Canvas = ({
       // Transparent on purpose: the workspace colour is CSS and the
       // transparency checkerboard is drawn on screen only (see workspace.ts).
       backgroundColor: "",
+      // Clicks on image layers test their pixels; allow a little slack.
+      targetFindTolerance: 4,
     });
 
     fabricCanvasRef.current = canvas;

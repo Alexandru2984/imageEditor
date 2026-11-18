@@ -493,6 +493,7 @@ export const LayersPanel = ({ fabricCanvas }: LayersPanelProps) => {
                   role="group"
                   tabIndex={0}
                   aria-label={`${layer.name} layer`}
+                  aria-current={isSelected ? "true" : undefined}
                   onClick={() => handleSelectLayer(layer)}
                   onKeyDown={(event) => {
                     if (event.target !== event.currentTarget) return;

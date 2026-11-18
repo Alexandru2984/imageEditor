@@ -134,3 +134,23 @@ test("painted layers survive saving and reopening the project", async ({ page })
     .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[150, 100]]))?.pixels[0]?.[3])
     .toBe(255);
 });
+
+test("clicks pass through the transparent pixels of a pixel layer", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  const center = await canvasCenter(page);
+  await page.keyboard.press("u");
+  await page.mouse.click(center.x, center.y);
+  // A stroke well away from the shape, on a layer spanning the whole photo.
+  await page.keyboard.press("b");
+  await stroke(page, -150);
+  await expect.poll(() => layerNames(page)).toContain("Layer 1");
+
+  await page.keyboard.press("v");
+  await page.getByRole("button", { name: "Toggle layers" }).click();
+  const current = page.locator('[data-layer-id][aria-current="true"]');
+  await expect(current).toContainText("Layer 1");
+  await page.mouse.click(center.x, center.y);
+  await expect(current).toContainText(/rect/i);
+  await page.mouse.click(center.x, center.y - 150);
+  await expect(current).toContainText("Layer 1");
+});

@@ -1,4 +1,4 @@
-import { FabricObject } from "fabric";
+import { FabricImage, FabricObject } from "fabric";
 
 /**
  * Fabric 7 changed the default object origin from left/top to center. Every
@@ -10,6 +10,10 @@ import { FabricObject } from "fabric";
 export function applyFabricDefaults(): void {
   FabricObject.ownDefaults.originX = "left";
   FabricObject.ownDefaults.originY = "top";
+  // Pixel layers often span the whole photo with mostly transparent pixels.
+  // A click picks the layer whose pixels are under it, as Photoshop's
+  // auto-select does, rather than whichever layer's box is on top.
+  FabricImage.ownDefaults.perPixelTargetFind = true;
 }
 
 applyFabricDefaults();
