@@ -44,6 +44,7 @@ import {
 import { DEFAULT_WAND_OPTIONS, type WandOptions } from "@/selection/magicWand";
 import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
+import { LayerStyleDialog } from "./LayerStyleDialog";
 import { copySource, selectionLayer } from "@/selection/actions";
 import { selectionOf } from "@/selection/state";
 import { useMaskTarget } from "@/hooks/useMaskTarget";
@@ -475,6 +476,8 @@ export const EditorWorkspace = ({
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const [selectionModification, setSelectionModification] = useState<SelectionModification | null>(null);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
+  /** The layer the Layer style dialog is open for. */
+  const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
   const maskTargetLayer = useMaskTarget(fabricCanvas);
   const leaveMask = useCallback(() => {
     if (fabricCanvas) maskTargetOf(fabricCanvas).set(null);
@@ -543,6 +546,7 @@ export const EditorWorkspace = ({
     showShortcuts,
     modifySelection: setSelectionModification,
     strokeSelection: openStrokeDialog,
+    openLayerStyle: setStyledLayer,
     colors: paintColors,
     adjustBrush,
     swapColors,
@@ -666,7 +670,11 @@ export const EditorWorkspace = ({
         <AdjustPanel fabricCanvas={fabricCanvas} />
       </TabsContent>
       <TabsContent value="layers" className="mt-0 min-h-0 flex-1">
-        <LayersPanel fabricCanvas={fabricCanvas} onAddMask={commands["layer.mask.add"]?.run} />
+        <LayersPanel
+          fabricCanvas={fabricCanvas}
+          onAddMask={commands["layer.mask.add"]?.run}
+          onLayerStyle={commands["layer.style"]?.run}
+        />
       </TabsContent>
     </Tabs>
   );
@@ -915,6 +923,7 @@ export const EditorWorkspace = ({
         defaultName={documentName}
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} commands={commands} />
+      <LayerStyleDialog canvas={fabricCanvas} layer={styledLayer} onClose={() => setStyledLayer(null)} />
       <SelectionModifyDialog
         canvas={fabricCanvas}
         modification={selectionModification}

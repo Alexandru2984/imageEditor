@@ -59,6 +59,7 @@ function editorCommands(): CommandMap {
     swapColors: noop,
     colors: { foreground: "#000000", background: "#ffffff" },
     strokeSelection: noop,
+    openLayerStyle: noop,
     resetColors: noop,
     openCommandPalette: noop,
   };

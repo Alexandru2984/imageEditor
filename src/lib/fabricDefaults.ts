@@ -1,5 +1,6 @@
 import { FabricImage, FabricObject } from "fabric";
 import { installLayerMasks } from "@/raster/layerMask";
+import { installLayerStyles } from "@/raster/layerStyle";
 
 /**
  * Fabric 7 changed the default object origin from left/top to center. Every
@@ -17,6 +18,8 @@ export function applyFabricDefaults(): void {
   FabricImage.ownDefaults.perPixelTargetFind = true;
   // Images draw through their layer masks.
   installLayerMasks();
+  // Layers draw their styles (shadow, glow, overlay, stroke).
+  installLayerStyles();
 }
 
 applyFabricDefaults();

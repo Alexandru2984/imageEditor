@@ -252,3 +252,23 @@ test("selections are made with taps, the modes and actions on screen", async ({ 
   await page.getByRole("button", { name: "Close shape" }).tap();
   await expectOnScreen(page, page.getByRole("button", { name: "Redact" }));
 });
+
+test("the layer style dialog fits the phone and styles the photo", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "Layer", exact: true }).tap();
+  await page.getByRole("menuitem", { name: /^Layer style/ }).tap();
+  const dialog = page.getByRole("dialog", { name: "Layer style" });
+  await dialog.getByLabel("Stroke", { exact: true }).tap();
+  await expectOnScreen(page, dialog.getByRole("slider", { name: "Size" }));
+  await expectOnScreen(page, dialog.getByRole("radio", { name: "Inside" }));
+  await expectNoSidewaysScroll(page);
+  await dialog.getByRole("button", { name: "OK" }).tap();
+  await expect(dialog).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const photo = (await autosavedObjects(page)).find((object) => object.type === "Image");
+      return (photo?.layerStyle as { stroke?: { enabled: boolean } } | undefined)?.stroke?.enabled;
+    })
+    .toBe(true);
+});

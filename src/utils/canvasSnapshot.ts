@@ -19,6 +19,7 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "name",
   "globalCompositeOperation",
   "layerMask",
+  "layerStyle",
 ];
 
 export interface CanvasSnapshot {

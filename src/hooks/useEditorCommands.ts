@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { Canvas as FabricCanvas } from "fabric";
+import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import {
   ArrowDownToLine,
   ArrowUpToLine,
@@ -44,6 +44,7 @@ import {
   Scaling,
   Scissors,
   CircleDot,
+  Sparkle,
   Search,
   Shapes,
   SlidersHorizontal,
@@ -67,7 +68,12 @@ import {
   toggleSelectionLock,
   type ArrangeAction,
 } from "@/utils/canvasActions";
-import { isEditorChrome, removeSelectedObjects } from "@/utils/editorObjects";
+import {
+  findBackgroundImage,
+  isEditorChrome,
+  isObjectLocked,
+  removeSelectedObjects,
+} from "@/utils/editorObjects";
 import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
 import { Mask } from "@/selection/mask";
@@ -87,6 +93,7 @@ import {
   type MaskedImage,
 } from "@/raster/layerMask";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
+import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
@@ -157,6 +164,8 @@ export interface EditorCommandContext {
   colors: { foreground: string; background: string };
   /** Edit › Stroke's dialog. */
   strokeSelection: () => void;
+  /** Layer › Layer style's dialog, for a layer. */
+  openLayerStyle: (layer: FabricObject) => void;
   resetColors: () => void;
   openCommandPalette: () => void;
 }
@@ -220,6 +229,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     swapColors,
     colors,
     strokeSelection,
+    openLayerStyle,
     resetColors,
     openCommandPalette,
   } = context;
@@ -250,6 +260,23 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         return;
       }
       void editPixels(canvas, target, pixelSelection(), { kind: "fill", color }).catch(reportFailure);
+    };
+
+    /** The layer a layer style goes on: the selected one, else the photo. */
+    const styleLayer = (): FabricObject | string => {
+      if (!canvas) return "Open a photo first";
+      const active = canvas.getActiveObject();
+      const layer = active && !isEditorChrome(active) ? active : findBackgroundImage(canvas);
+      if (!layer) return "Open a photo first";
+      if (layer instanceof ActiveSelection) return "Select a single layer first";
+      if (isObjectLocked(layer)) return "Unlock the layer first";
+      return layer;
+    };
+    const styled = () => {
+      const layer = styleLayer();
+      return typeof layer !== "string" && hasEffects((layer as FabricObject & { layerStyle?: LayerStyle }).layerStyle)
+        ? layer
+        : null;
     };
 
     /** The layer mask commands' layer, when they can act on it. */
@@ -673,6 +700,32 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: withMaskLayer((canvas, layer) => deleteLayerMask(canvas, layer)),
         isEnabled: () => !!withMask(),
         keywords: "remove mask",
+      },
+      {
+        id: "layer.style",
+        label: "Layer style…",
+        icon: Sparkle,
+        run: () => {
+          const layer = styleLayer();
+          if (typeof layer === "string") toast.error(layer);
+          else openLayerStyle(layer);
+        },
+        isEnabled: () => typeof styleLayer() !== "string",
+        keywords: "fx effects drop shadow outer glow stroke outline colour overlay",
+      },
+      {
+        id: "layer.style.clear",
+        label: "Clear layer style",
+        run: () => {
+          const layer = styled();
+          if (!canvas || !layer) return;
+          (layer as FabricObject & { layerStyle?: LayerStyle }).layerStyle = undefined;
+          layer.dirty = true;
+          canvas.requestRenderAll();
+          canvas.fire("object:modified", { target: layer });
+        },
+        isEnabled: () => !!styled(),
+        keywords: "fx effects remove",
       },
       {
         id: "layer.viaCut",
@@ -1131,6 +1184,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     swapColors,
     colors,
     strokeSelection,
+    openLayerStyle,
     togglePanel,
     undo,
     zoomIn,

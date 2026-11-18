@@ -82,6 +82,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
           "layer.mask.delete",
         ],
       },
+      "layer.style",
+      "layer.style.clear",
       "-",
       "layer.rasterize",
       "layer.mergeDown",

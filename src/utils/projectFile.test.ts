@@ -322,6 +322,35 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts a layer style the editor writes", async () => {
+    const style = {
+      dropShadow: { enabled: true, color: "#000000", opacity: 75, angle: 120, distance: 10, size: 10 },
+      stroke: { enabled: true, color: "#ff0000", opacity: 100, size: 3, position: "outside" },
+    };
+    const snapshot = {
+      json: JSON.stringify({ objects: [{ type: "rect", layerStyle: style }] }),
+      srcs: [],
+    };
+    const file = fileOf(JSON.stringify({ version: 1, snapshot }));
+    await expect(readProjectFile(file)).resolves.toEqual(snapshot);
+  });
+
+  it("rejects layer styles with unknown effects or hostile values", async () => {
+    const styles = [
+      '{"bevel":{"enabled":true}}',
+      '{"stroke":{"enabled":true,"color":"url(https://evil.example)","opacity":100,"size":3,"position":"outside"}}',
+      '{"stroke":{"enabled":true,"color":"#000000","opacity":100,"size":100000,"position":"outside"}}',
+      '{"colorOverlay":{"enabled":true,"color":"#000000","opacity":100,"src":"https://evil.example/x.png"}}',
+      '"stroke"',
+      "null",
+    ];
+    for (const style of styles) {
+      const snapshot = { json: `{"objects":[{"type":"rect","layerStyle":${style}}]}`, srcs: [] };
+      const file = fileOf(JSON.stringify({ snapshot }));
+      await expect(readProjectFile(file), style).rejects.toThrow();
+    }
+  });
+
   it("rejects an extracted src pointing at an external URL", async () => {
     const snapshot = {
       json: '{"objects":[{"type":"image","src":"__snapshot_src_0"}]}',

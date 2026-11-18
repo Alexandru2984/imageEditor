@@ -17,6 +17,7 @@ import {
   MoveRight,
   Layers,
   CircleDot,
+  Sparkle,
 } from "lucide-react";
 import { FabricImage, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import { Button } from "@/components/ui/button";
@@ -43,6 +44,7 @@ import {
   setObjectLocked,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
+import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
 import {
   hasLayerMask,
   layerMaskThumbnail,
@@ -62,6 +64,8 @@ interface LayerItem {
   thumbnail: string;
   /** The layer mask, when the layer has one. */
   mask: { thumbnail: string; enabled: boolean } | null;
+  /** Whether layer style effects are on. */
+  effects: boolean;
   fabricObject: EditorObject;
 }
 
@@ -69,6 +73,8 @@ interface LayersPanelProps {
   fabricCanvas: FabricCanvas | null;
   /** Layer › Layer mask › Add layer mask. */
   onAddMask?: () => void;
+  /** Layer › Layer style…, for the selected layer. */
+  onLayerStyle?: () => void;
 }
 
 // Generating a Fabric data URL is a real canvas render. Keep previews for the
@@ -135,7 +141,7 @@ const getLayerName = (obj: EditorObject, index: number): string => {
   }
 };
 
-export const LayersPanel = ({ fabricCanvas, onAddMask }: LayersPanelProps) => {
+export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPanelProps) => {
   const [layers, setLayers] = useState<LayerItem[]>([]);
   // Which layer's mask the paint tools work on.
   const maskTargetLayer = useMaskTarget(fabricCanvas);
@@ -175,6 +181,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask }: LayersPanelProps) => {
         isBackground,
         thumbnail: "",
         mask: hasLayerMask(obj) ? { thumbnail: layerMaskThumbnail(obj), enabled: obj.layerMask.enabled } : null,
+        effects: hasEffects((obj as EditorObject & { layerStyle?: LayerStyle }).layerStyle),
         fabricObject: obj,
       });
       if (!isBackground) counter += 1;
@@ -496,20 +503,22 @@ export const LayersPanel = ({ fabricCanvas, onAddMask }: LayersPanelProps) => {
               {selectedOpacity}
             </span>
           </div>
-          {onAddMask &&
-            selectedLayer.fabricObject instanceof FabricImage &&
-            !isObjectLocked(selectedLayer.fabricObject) &&
-            !selectedLayer.mask && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-7 w-full gap-1.5 text-xs"
-                onClick={onAddMask}
-              >
-                <CircleDot className="h-3.5 w-3.5" />
-                Add layer mask
-              </Button>
-            )}
+          {!isObjectLocked(selectedLayer.fabricObject) && (onAddMask || onLayerStyle) && (
+            <div className="flex gap-2">
+              {onAddMask && selectedLayer.fabricObject instanceof FabricImage && !selectedLayer.mask && (
+                <Button variant="outline" size="sm" className="h-7 flex-1 gap-1.5 text-xs" onClick={onAddMask}>
+                  <CircleDot className="h-3.5 w-3.5" />
+                  Add layer mask
+                </Button>
+              )}
+              {onLayerStyle && (
+                <Button variant="outline" size="sm" className="h-7 flex-1 gap-1.5 text-xs" onClick={onLayerStyle}>
+                  <Sparkle className="h-3.5 w-3.5" />
+                  Layer style
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -638,6 +647,15 @@ export const LayersPanel = ({ fabricCanvas, onAddMask }: LayersPanelProps) => {
                       }}
                     >
                       {layer.name}
+                    </span>
+                  )}
+                  {layer.effects && (
+                    <span
+                      title="Layer style"
+                      aria-label="Has a layer style"
+                      className="shrink-0 text-[10px] font-semibold italic text-muted-foreground"
+                    >
+                      fx
                     </span>
                   )}
 

@@ -17,6 +17,7 @@ import {
   surfaceToImage,
 } from "./pixelLayer";
 import { hasLayerMask } from "./layerMask";
+import { hasEffects, layerStyleMargin, type LayerStyle } from "./layerStyleData";
 import { growBox, snapToPixelGrid, unionBoxes, type Box } from "./regions";
 
 /**
@@ -107,15 +108,26 @@ export function planRasterize(canvas: FabricCanvas): MergePlan | Refusal {
     layer.filters.length === 0 &&
     !layer.clipPath &&
     !layer.shadow &&
-    !hasLayerMask(layer)
+    !hasLayerMask(layer) &&
+    !hasEffects((layer as FabricObject & { layerStyle?: LayerStyle }).layerStyle)
   ) {
     return "This layer is already pixels";
   }
   return { layers: [layer], discard: [] };
 }
 
-/** How far a shadow (also used for soft marker strokes) reaches past the box. */
+/** How far a layer's effects reach past its box, in scene units. */
 function effectMargin(object: FabricObject): number {
+  // Layer styles are in document pixels.
+  const style = (object as FabricObject & { layerStyle?: LayerStyle }).layerStyle;
+  const styled = object.canvas
+    ? layerStyleMargin(style) / nativeMultiplier(object.canvas as FabricCanvas)
+    : 0;
+  return styled + shadowMargin(object);
+}
+
+/** How far a shadow (also used for soft marker strokes) reaches past the box. */
+function shadowMargin(object: FabricObject): number {
   const shadow = object.shadow;
   if (!shadow) return 0;
   const scale = shadow.nonScaling
