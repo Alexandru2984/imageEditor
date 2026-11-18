@@ -54,14 +54,24 @@ export function documentGrid(canvas: FabricCanvas): DocumentGrid | null {
   }
 }
 
-const near = (a: number, b: number) => Math.abs(a - b) <= 1e-6 * Math.max(1, Math.abs(a), Math.abs(b));
-
-export const sameGrid = (a: DocumentGrid, b: DocumentGrid): boolean =>
-  a.width === b.width &&
-  a.height === b.height &&
-  near(a.left, b.left) &&
-  near(a.top, b.top) &&
-  near(a.scale, b.scale);
+/**
+ * Whether two grids cover the same pixels. Saved documents round positions
+ * and scales (undo reloads one), so grids match when every corner lands
+ * within a twentieth of a pixel of where it was.
+ */
+export const sameGrid = (a: DocumentGrid, b: DocumentGrid): boolean => {
+  if (a.width !== b.width || a.height !== b.height) return false;
+  const tolerance = 0.05 / Math.max(a.scale, b.scale);
+  const corners = (grid: DocumentGrid) => [
+    grid.left,
+    grid.top,
+    grid.left + grid.width / grid.scale,
+    grid.top + grid.height / grid.scale,
+  ];
+  const first = corners(a);
+  const second = corners(b);
+  return first.every((value, index) => Math.abs(value - second[index]!) <= tolerance);
+};
 
 /** Scene coordinates of a point on the grid, and back. */
 export const gridToScene = (grid: DocumentGrid, x: number, y: number) => ({
@@ -116,7 +126,10 @@ export class SelectionStore {
     const selection = this.selection;
     if (!selection) return null;
     const grid = documentGrid(this.canvas);
-    if (grid && sameGrid(grid, selection.grid)) return selection;
+    // Undo and redo reload the document, briefly without a photo; the
+    // selection outlives that, as in Photoshop.
+    if (!grid) return null;
+    if (sameGrid(grid, selection.grid)) return selection;
     this.selection = null;
     this.last = null;
     this.notify();
