@@ -4,7 +4,6 @@ import {
   Eraser,
   Type,
   Crop,
-  SquareDashed,
   Trash2,
   ImagePlus,
   Pipette,
@@ -24,7 +23,14 @@ import { isShapeKind, type ShapeKind } from "@/utils/shapes";
 import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
 import { cn } from "@/lib/utils";
 import { SHAPE_TOOLS } from "./shapeTools";
-import { BRUSH_TOOLS, FILL_TOOLS, type BrushTool, type FillTool } from "./toolGroups";
+import {
+  BRUSH_TOOLS,
+  FILL_TOOLS,
+  MARQUEE_TOOLS,
+  type BrushTool,
+  type FillTool,
+  type MarqueeTool,
+} from "./toolGroups";
 import { ToolGroupButton } from "./ToolGroupButton";
 import { ACTIVE_TOOL_CLASS, IDLE_TOOL_CLASS } from "./toolStyles";
 
@@ -37,6 +43,8 @@ interface ToolbarProps {
   lastBrushTool: BrushTool;
   /** The tool the fill button (and the G key) arms. */
   lastFillTool: FillTool;
+  /** The tool the selection button (and the M key) arms. */
+  lastMarqueeTool: MarqueeTool;
   fabricCanvas: FabricCanvas | null;
   orientation: "vertical" | "horizontal";
   onEyedropper: () => void;
@@ -52,7 +60,6 @@ const ERASER_TOOL: ToolDef = { id: "eraser", icon: Eraser, label: "Eraser (E)" }
 
 const SECONDARY_TOOLS: ToolDef[] = [
   { id: "text", icon: Type, label: "Text (T)" },
-  { id: "marquee", icon: SquareDashed, label: "Select region (M)" },
   { id: "crop", icon: Crop, label: "Crop (C)" },
 ];
 
@@ -65,6 +72,7 @@ export const Toolbar = ({
   lastShape,
   lastBrushTool,
   lastFillTool,
+  lastMarqueeTool,
   fabricCanvas,
   orientation,
   onEyedropper,
@@ -304,6 +312,14 @@ export const Toolbar = ({
       )}
     >
       {renderTool(SELECT_TOOL)}
+      <ToolGroupButton
+        tools={MARQUEE_TOOLS}
+        current={lastMarqueeTool}
+        activeTool={activeTool}
+        onToolChange={onToolChange}
+        className={buttonSize}
+        side={tooltipSide}
+      />
       <ToolGroupButton
         tools={BRUSH_TOOLS}
         current={lastBrushTool}

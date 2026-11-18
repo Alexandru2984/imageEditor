@@ -23,6 +23,7 @@ import {
   MousePointer2,
   MousePointerSquareDashed,
   Blend,
+  CircleDashed,
   Combine,
   Grid2x2,
   Highlighter,
@@ -68,8 +69,10 @@ import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
   isFillTool,
+  isMarqueeTool,
   type BrushTool,
   type FillTool,
+  type MarqueeTool,
 } from "@/components/editor/toolGroups";
 import {
   addEmptyLayer,
@@ -89,6 +92,7 @@ export interface EditorCommandContext {
   lastShape: ShapeKind;
   lastBrushTool: BrushTool;
   lastFillTool: FillTool;
+  lastMarqueeTool: MarqueeTool;
   undo: () => void;
   redo: () => void;
   /** Live checks: a shortcut can arrive before React re-renders. */
@@ -149,6 +153,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     lastShape,
     lastBrushTool,
     lastFillTool,
+    lastMarqueeTool,
     undo,
     redo,
     hasUndo,
@@ -645,7 +650,31 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => onToolChange(nextShape()),
       },
       tool("tool.text", "text", "Text", Type, KEYMAP.textTool, "type font"),
-      tool("tool.marquee", "marquee", "Select region", SquareDashed, KEYMAP.marqueeTool, "marquee rectangle"),
+      {
+        id: "tool.marquee",
+        label: "Rectangle or ellipse select",
+        icon: SquareDashed,
+        shortcuts: KEYMAP.marqueeTool,
+        keywords: "marquee region selection",
+        run: () => onToolChange(lastMarqueeTool),
+        isChecked: () => isMarqueeTool(activeTool),
+      },
+      {
+        id: "tool.nextMarquee",
+        label: "Switch between Rectangle and Ellipse select",
+        icon: SquareDashed,
+        shortcuts: KEYMAP.nextMarqueeTool,
+        run: () =>
+          onToolChange(
+            activeTool === "marquee"
+              ? "ellipseMarquee"
+              : activeTool === "ellipseMarquee"
+                ? "marquee"
+                : lastMarqueeTool
+          ),
+      },
+      tool("tool.rectSelect", "marquee", "Rectangle select", SquareDashed, undefined, "marquee rectangular"),
+      tool("tool.ellipseSelect", "ellipseMarquee", "Ellipse select", CircleDashed, undefined, "marquee elliptical oval circle"),
       tool("tool.crop", "crop", "Crop", Crop, KEYMAP.cropTool, "trim aspect ratio"),
       {
         id: "tool.eyedropper",
@@ -712,6 +741,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     hasUndo,
     lastBrushTool,
     lastFillTool,
+    lastMarqueeTool,
     lastShape,
     onToolChange,
     openCommandPalette,

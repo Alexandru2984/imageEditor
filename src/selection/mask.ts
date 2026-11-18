@@ -117,6 +117,31 @@ export class Mask {
     return new Mask(this.width, this.height, out);
   }
 
+  /** The selection moved by whole pixels; what leaves the document is lost. */
+  translated(dx: number, dy: number): Mask {
+    const { width, height } = this;
+    const out = new Mask(width, height);
+    const shiftX = Math.round(dx);
+    const shiftY = Math.round(dy);
+    const fromX = Math.max(0, -shiftX);
+    const toX = Math.min(width, width - shiftX);
+    if (toX <= fromX) return out;
+    for (let y = Math.max(0, -shiftY); y < Math.min(height, height - shiftY); y += 1) {
+      const source = y * width;
+      const target = (y + shiftY) * width + shiftX;
+      out.data.set(this.data.subarray(source + fromX, source + toX), target + fromX);
+    }
+    return out;
+  }
+
+  /** Whether the pixel under a point (pixel coordinates) is selected. */
+  includes(x: number, y: number): boolean {
+    const column = Math.floor(x);
+    const row = Math.floor(y);
+    if (column < 0 || row < 0 || column >= this.width || row >= this.height) return false;
+    return this.data[row * this.width + column]! >= SELECTED;
+  }
+
   inverted(): Mask {
     const out = new Uint8Array(this.data.length);
     for (let index = 0; index < out.length; index += 1) out[index] = 255 - this.data[index]!;

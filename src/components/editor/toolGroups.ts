@@ -1,4 +1,12 @@
-import { Blend, Highlighter, PaintBucket, Paintbrush, type LucideIcon } from "lucide-react";
+import {
+  Blend,
+  CircleDashed,
+  Highlighter,
+  PaintBucket,
+  Paintbrush,
+  SquareDashed,
+  type LucideIcon,
+} from "lucide-react";
 import type { Tool } from "@/types/editor";
 
 export interface GroupedToolDef<T extends Tool> {
@@ -53,3 +61,29 @@ export const FILL_TOOLS: GroupedToolDef<FillTool>[] = [
 ];
 
 export const isFillTool = (tool: Tool): tool is FillTool => tool === "bucket" || tool === "gradient";
+
+/** The marquee tools behind the selection button (M). */
+export type MarqueeTool = "marquee" | "ellipseMarquee";
+
+export const MARQUEE_TOOLS: GroupedToolDef<MarqueeTool>[] = [
+  {
+    id: "marquee",
+    icon: SquareDashed,
+    label: "Rectangle select (M)",
+    name: "Rectangle select",
+    description: "Drag to select a rectangle",
+  },
+  {
+    id: "ellipseMarquee",
+    icon: CircleDashed,
+    label: "Ellipse select (M)",
+    name: "Ellipse select",
+    description: "Drag to select an ellipse",
+  },
+];
+
+export const isMarqueeTool = (tool: Tool): tool is MarqueeTool =>
+  tool === "marquee" || tool === "ellipseMarquee";
+
+/** Tools that draw a pixel selection. */
+export const isSelectionTool = (tool: Tool): boolean => isMarqueeTool(tool);

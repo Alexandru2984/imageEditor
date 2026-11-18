@@ -67,6 +67,7 @@ export const KEYMAP = {
   nextShape: [{ key: "u", shift: true }],
   textTool: [{ key: "t" }],
   marqueeTool: [{ key: "m" }],
+  nextMarqueeTool: [{ key: "m", shift: true }],
   cropTool: [{ key: "c" }],
   eyedropper: [{ key: "i" }],
 } satisfies Record<string, Shortcut[]>;

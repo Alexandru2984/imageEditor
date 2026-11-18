@@ -1257,7 +1257,7 @@ test("stickers are added as scalable layers", async ({ page }) => {
 });
 
 async function dragMarquee(page: Page, half = 90) {
-  await page.getByRole("button", { name: "Select region (M)" }).click();
+  await page.getByRole("button", { name: "Rectangle select (M)" }).click();
   const center = await canvasCenter(page);
   await page.mouse.move(center.x - half, center.y - half);
   await page.mouse.down();
@@ -1359,7 +1359,7 @@ test("marquee copy and crop use the dragged region", async ({ page }) => {
   expect(Math.abs(copyWidth - copyHeight)).toBeLessThan(1);
 
   // A selection hanging past the photo edge is clamped to the photo.
-  await page.getByRole("button", { name: "Select region (M)" }).click();
+  await page.getByRole("button", { name: "Rectangle select (M)" }).click();
   const center = await canvasCenter(page);
   await page.mouse.move(center.x - 10, center.y - 10);
   await page.mouse.down();

@@ -13,7 +13,8 @@ export type Tool =
   | "arrow"
   | "text"
   | "crop"
-  | "marquee";
+  | "marquee"
+  | "ellipseMarquee";
 
 export interface HistoryEntry {
   json: string;

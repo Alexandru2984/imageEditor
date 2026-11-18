@@ -61,7 +61,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
   },
   {
     label: "Select",
-    items: ["select.allLayers", "select.deselect", "-", "tool.marquee"],
+    items: ["select.allLayers", "select.deselect", "-", "tool.rectSelect", "tool.ellipseSelect"],
   },
   {
     label: "Filter",

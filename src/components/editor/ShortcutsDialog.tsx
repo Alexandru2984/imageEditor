@@ -24,6 +24,7 @@ const CANVAS_GESTURES: [string, string][] = [
 const TOOL_IDS = [
   "tool.select",
   "tool.marquee",
+  "tool.nextMarquee",
   "tool.crop",
   "tool.brush",
   "tool.nextBrush",

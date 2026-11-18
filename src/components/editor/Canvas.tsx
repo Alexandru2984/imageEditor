@@ -5,28 +5,10 @@ import {
   PencilBrush,
   FabricImage,
   Point,
-  filters,
 } from "fabric";
 import { EraserBrush } from "@erase2d/fabric";
-import {
-  Check,
-  X,
-  Copy,
-  Crop as CropIcon,
-  SquareDashedBottom,
-  EyeOff,
-  Grid3x3,
-  Droplets,
-  Square as SquareIcon,
-} from "lucide-react";
+import { Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
 import { flattenRegion, nativeMultiplier, planRasterization } from "@/utils/flatten";
@@ -47,6 +29,13 @@ import type { Tool } from "@/types/editor";
 import type { FabricObject } from "fabric";
 import { useShapeTool } from "@/hooks/useShapeTool";
 import { usePaintTool } from "@/hooks/usePaintTool";
+import { useSelectionTool } from "@/hooks/useSelectionTool";
+import { installSelectionOverlay } from "@/selection/overlay";
+import { OUTSIDE_PHOTO } from "@/selection/actions";
+import { gridBoxToScene, selectionOf } from "@/selection/state";
+import type { SelectionMode } from "@/selection/mask";
+import { SelectionTaskBar } from "./SelectionTaskBar";
+import { isSelectionTool } from "./toolGroups";
 import type { PaintOptions } from "@/raster/paintSettings";
 import type { BucketOptions } from "@/raster/fill";
 import type { GradientOptions } from "@/raster/gradient";
@@ -65,6 +54,8 @@ interface CanvasProps {
   paint: PaintOptions;
   bucket: BucketOptions;
   gradient: GradientOptions;
+  /** How a new selection shape joins the selection. */
+  selectionMode: SelectionMode;
   uploadedImage: string | null;
   /** Autosaved state to restore instead of loading uploadedImage fresh */
   initialSnapshot?: CanvasSnapshot | null;
@@ -85,33 +76,6 @@ const abortError = (): Error => {
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof Error && error.name === "AbortError";
-
-/**
- * The scene-space area a marquee covers. Read straight from its geometry:
- * the bounding box would include the dashed stroke and depends on cached
- * corner coordinates that Fabric only refreshes on setCoords().
- */
-function marqueeRegion(canvas: FabricCanvas, rect: Rect) {
-  let left = rect.left;
-  let top = rect.top;
-  let right = left + rect.width;
-  let bottom = top + rect.height;
-  // Pixels outside the photo are never exported, so neither copy nor crop
-  // should reach past its edges.
-  const photo = findBackgroundImage(canvas);
-  if (photo) {
-    photo.setCoords();
-    const bounds = photo.getBoundingRect();
-    left = Math.max(left, bounds.left);
-    top = Math.max(top, bounds.top);
-    right = Math.min(right, bounds.left + bounds.width);
-    bottom = Math.min(bottom, bounds.top + bounds.height);
-  }
-  if (right - left < 1 || bottom - top < 1) return null;
-  return { left, top, width: right - left, height: bottom - top };
-}
-
-const OUTSIDE_PHOTO = "The selection is outside the photo";
 
 /** The scene area inside a crop frame, excluding its dashed stroke. */
 const cropFrameRegion = (rect: Rect) => ({
@@ -143,6 +107,7 @@ export const Canvas = ({
   paint,
   bucket,
   gradient,
+  selectionMode,
   uploadedImage,
   initialSnapshot,
   onCanvasReady,
@@ -168,19 +133,13 @@ export const Canvas = ({
   brushOpacityRef.current = brushOpacity;
   const brushKindRef = useRef(brushKind);
   brushKindRef.current = brushKind;
-  // Marquee selection: the drawn rect, its animation loop, and whether a
-  // committed selection currently exists (drives the floating toolbar)
-  const marqueeRef = useRef<Rect | null>(null);
-  const marqueeAnimRef = useRef<number | null>(null);
-  const [hasMarquee, setHasMarquee] = useState(false);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  /** The live Fabric canvas, for the parts that render from it. */
+  const [liveCanvas, setLiveCanvas] = useState<FabricCanvas | null>(null);
   const [cropRatio, setCropRatio] = useState<CropRatioId>("free");
   const [cropSize, setCropSize] = useState<{ width: number; height: number } | null>(null);
   /** Locked width÷height of the crop frame, or null when it is free. */
   const cropRatioRef = useRef<number | null>(null);
-  // Image layer that was selected when the marquee tool was entered — the
-  // target a "Mask" operation clips to (masking needs both a layer and a region)
-  const preMarqueeTargetRef = useRef<FabricImage | null>(null);
-  const [canMask, setCanMask] = useState(false);
 
   const loadGeneratedImage = useCallback(async (dataUrl: string) => {
     generatedImageControllerRef.current?.abort();
@@ -251,6 +210,10 @@ export const Canvas = ({
 
     fabricCanvasRef.current = canvas;
     const uninstallWorkspace = installWorkspaceRenderer(canvas);
+    const uninstallOverlay = overlayRef.current
+      ? installSelectionOverlay(canvas, overlayRef.current)
+      : () => {};
+    setLiveCanvas(canvas);
     let disposed = false;
     let ready = false;
     const loadController = new AbortController();
@@ -542,6 +505,8 @@ export const Canvas = ({
       });
       resizeObserver.disconnect();
       uninstallWorkspace();
+      uninstallOverlay();
+      setLiveCanvas((current) => (current === canvas ? null : current));
       if (fabricCanvasRef.current === canvas) fabricCanvasRef.current = null;
       canvas.dispose();
     };
@@ -572,25 +537,6 @@ export const Canvas = ({
     // Clean up crop overlay when switching away from crop
     if (prevTool === "crop" && activeTool !== "crop") {
       removeCropOverlay(canvas);
-    }
-
-    // Marquee mode disables Fabric's own drag-selection (we draw our own rect).
-    if (activeTool === "marquee") {
-      const active = canvas.getActiveObject();
-      const target =
-        active &&
-        active.type === "image" &&
-        !isBackgroundObject(active) &&
-        !isObjectLocked(active)
-          ? (active as FabricImage)
-          : null;
-      preMarqueeTargetRef.current = target;
-      setCanMask(!!target);
-      canvas.selection = false;
-      canvas.discardActiveObject();
-    } else if (prevTool === "marquee") {
-      removeMarquee(canvas);
-      canvas.selection = true;
     }
 
     // Reset drawing mode
@@ -877,321 +823,85 @@ export const Canvas = ({
     return () => window.removeEventListener("keydown", handleKey);
   }, [activeTool, applyCrop, cancelCrop]);
 
-  // ---------- Marquee selection ----------
-  const removeMarquee = (canvas: FabricCanvas) => {
-    if (marqueeAnimRef.current !== null) {
-      cancelAnimationFrame(marqueeAnimRef.current);
-      marqueeAnimRef.current = null;
+  // ---------- Pixel selection ----------
+  /** Run a pixel operation, keeping the canvas from input until it ends. */
+  const runRaster = useCallback(async (task: () => Promise<void>) => {
+    if (rasterBusyRef.current) return;
+    rasterBusyRef.current = true;
+    setIsRasterizing(true);
+    try {
+      await task();
+    } finally {
+      rasterBusyRef.current = false;
+      setIsRasterizing(false);
     }
-    if (marqueeRef.current) {
-      canvas.remove(marqueeRef.current);
-      marqueeRef.current = null;
-    }
-    setHasMarquee(false);
-  };
-
-  // Animate the dashed stroke so the selection reads as marching ants
-  const animateMarchingAnts = useCallback(() => {
-    const canvas = fabricCanvasRef.current;
-    const rect = marqueeRef.current;
-    if (!canvas || !rect) return;
-    rect.strokeDashOffset = (rect.strokeDashOffset ?? 0) - 0.5;
-    canvas.requestRenderAll();
-    marqueeAnimRef.current = requestAnimationFrame(animateMarchingAnts);
   }, []);
 
-  // Draw the marquee by dragging (scene coordinates, so it's zoom/pan correct)
-  useEffect(() => {
-    if (activeTool !== "marquee") return;
-    const canvas = fabricCanvasRef.current;
-    if (!canvas) return;
-
-    let start: { x: number; y: number } | null = null;
-
-    const onDown = (opt: { e: MouseEvent | TouchEvent }) => {
-      if (spaceDownRef.current) return; // panning
-      removeMarquee(canvas);
-      const p = canvas.getScenePoint(opt.e);
-      start = { x: p.x, y: p.y };
-      const rect = new Rect({
-        left: p.x,
-        top: p.y,
-        width: 0,
-        height: 0,
-        fill: "rgba(168, 85, 247, 0.12)",
-        stroke: "#ffffff",
-        strokeWidth: 1,
-        strokeDashArray: [4, 4],
-        strokeUniform: true,
-        selectable: false,
-        evented: false,
-        objectCaching: false,
-      });
-      (rect as unknown as Record<string, unknown>).__isMarquee = true;
-      marqueeRef.current = rect;
-      canvas.add(rect);
-    };
-
-    const onMove = (opt: { e: MouseEvent | TouchEvent }) => {
-      if (!start || !marqueeRef.current) return;
-      const p = canvas.getScenePoint(opt.e);
-      marqueeRef.current.set({
-        left: Math.min(start.x, p.x),
-        top: Math.min(start.y, p.y),
-        width: Math.abs(p.x - start.x),
-        height: Math.abs(p.y - start.y),
-      });
-      // Keep cached corners in sync for anything that hit-tests the marquee.
-      marqueeRef.current.setCoords();
-      canvas.requestRenderAll();
-    };
-
-    const onUp = () => {
-      if (!start) return;
-      start = null;
-      const rect = marqueeRef.current;
-      // Discard accidental clicks / tiny selections
-      if (!rect || rect.width < 5 || rect.height < 5) {
-        removeMarquee(canvas);
-        return;
-      }
-      setHasMarquee(true);
-      if (marqueeAnimRef.current === null) animateMarchingAnts();
-    };
-
-    canvas.on("mouse:down", onDown);
-    canvas.on("mouse:move", onMove);
-    canvas.on("mouse:up", onUp);
-    return () => {
-      canvas.off("mouse:down", onDown);
-      canvas.off("mouse:move", onMove);
-      canvas.off("mouse:up", onUp);
-      if (marqueeAnimRef.current !== null) {
-        cancelAnimationFrame(marqueeAnimRef.current);
-        marqueeAnimRef.current = null;
-      }
-    };
-  }, [activeTool, animateMarchingAnts]);
-
-  const newLayerFromSelection = useCallback(async (effect?: "pixelate" | "blur") => {
-    const canvas = fabricCanvasRef.current;
-    const rect = marqueeRef.current;
-    if (!canvas || !rect || rasterBusyRef.current) return;
-    const region = marqueeRegion(canvas, rect);
-    if (!region) {
-      toast.error(OUTSIDE_PHOTO);
-      return;
-    }
-
-    rasterBusyRef.current = true;
-    setIsRasterizing(true);
-    const revision = documentRevisionRef.current;
-
-    try {
-      // Hide the overlay so it does not tint the flattened pixels.
-      rect.visible = false;
-      let flattened: ReturnType<typeof flattenRegion>;
-      try {
-        flattened = flattenRegion(canvas, region);
-      } finally {
-        rect.visible = true;
-        canvas.requestRenderAll();
-      }
-
-      const img = await loadGeneratedImage(flattened.dataUrl);
-      if (
-        fabricCanvasRef.current !== canvas ||
-        documentRevisionRef.current !== revision ||
-        prevToolRef.current !== "marquee"
-      ) {
-        img.dispose();
-        return;
-      }
-      img.set({ left: region.left, top: region.top });
-      img.scaleToWidth(region.width);
-      if (effect) {
-        // A redaction is a copy of the region with the effect baked into its
-        // filter stack, stacked over the original pixels.
-        const side = Math.max(img.width, img.height);
-        img.filters = [
-          effect === "pixelate"
-            ? new filters.Pixelate({ blocksize: Math.min(64, Math.max(8, Math.round(side / 14))) })
-            : new filters.Blur({ blur: 0.6 }),
-        ];
-        img.applyFilters();
-        (img as EditorFabricObject).name = effect === "pixelate" ? "Pixelated" : "Blurred";
-      }
-      removeMarquee(canvas);
-      canvas.add(img);
-      canvas.setActiveObject(img);
-      canvas.renderAll();
-      onToolChange("select");
-      if (effect) {
-        toast.success("Region redacted on a new layer", {
-          description: "Exports are flattened. Project files still contain the original photo.",
-        });
-      }
-      if (flattened.limited) {
-        toast.warning(
-          `Selection was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
-        );
-      }
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error("Selection copy failed:", error);
-        toast.error(
-          error instanceof Error ? error.message : "Could not create the layer"
-        );
-      }
-    } finally {
-      rasterBusyRef.current = false;
-      setIsRasterizing(false);
-    }
-  }, [loadGeneratedImage, onToolChange]);
-
-  const blackOutSelection = useCallback(() => {
-    const canvas = fabricCanvasRef.current;
-    const rect = marqueeRef.current;
-    if (!canvas || !rect) return;
-    const region = marqueeRegion(canvas, rect);
-    if (!region) {
-      toast.error(OUTSIDE_PHOTO);
-      return;
-    }
-    const box = new Rect({
-      left: region.left,
-      top: region.top,
-      width: region.width,
-      height: region.height,
-      fill: "#000000",
-      strokeWidth: 0,
-    });
-    (box as EditorFabricObject).name = "Redaction";
-    removeMarquee(canvas);
-    canvas.add(box);
-    canvas.setActiveObject(box);
-    canvas.requestRenderAll();
-    onToolChange("select");
-  }, [onToolChange]);
-
+  /** Image › Crop with a selection: the document becomes its bounding box. */
   const cropToSelection = useCallback(async () => {
     const canvas = fabricCanvasRef.current;
-    const rect = marqueeRef.current;
-    if (!canvas || !rect || rasterBusyRef.current) return;
-    const region = marqueeRegion(canvas, rect);
-    if (!region) {
+    if (!canvas || rasterBusyRef.current) return;
+    const selection = selectionOf(canvas).current();
+    const box = selection?.mask.bounds();
+    if (!selection || !box) {
       toast.error(OUTSIDE_PHOTO);
       return;
     }
+    const region = gridBoxToScene(selection.grid, box);
 
-    rasterBusyRef.current = true;
-    setIsRasterizing(true);
-    const revision = documentRevisionRef.current;
-
-    try {
-      rect.visible = false;
-      let flattened: ReturnType<typeof flattenRegion>;
+    await runRaster(async () => {
+      const revision = documentRevisionRef.current;
       try {
-        flattened = flattenRegion(canvas, region);
-      } finally {
-        rect.visible = true;
-        canvas.requestRenderAll();
-      }
-
-      const img = await loadGeneratedImage(flattened.dataUrl);
-      if (
-        fabricCanvasRef.current !== canvas ||
-        documentRevisionRef.current !== revision ||
-        prevToolRef.current !== "marquee"
-      ) {
-        img.dispose();
-        return;
-      }
-      removeMarquee(canvas);
-      canvas.remove(...canvas.getObjects());
-      const scale = Math.min(
-        (canvas.width! * 0.85) / img.width!,
-        (canvas.height! * 0.85) / img.height!
-      );
-      img.scale(scale);
-      img.set({
-        left: canvas.width! / 2 - (img.width! * scale) / 2,
-        top: canvas.height! / 2 - (img.height! * scale) / 2,
-      });
-      markBackgroundObject(img);
-      canvas.add(img);
-      canvas.sendObjectToBack(img);
-      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
-      onZoomChange(1);
-      canvas.renderAll();
-      onToolChange("select");
-      if (flattened.limited) {
-        toast.warning(
-          `Crop was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
+        const flattened = flattenRegion(canvas, region);
+        const img = await loadGeneratedImage(flattened.dataUrl);
+        if (
+          fabricCanvasRef.current !== canvas ||
+          documentRevisionRef.current !== revision ||
+          !isSelectionTool(prevToolRef.current)
+        ) {
+          img.dispose();
+          return;
+        }
+        selectionOf(canvas).set(null);
+        canvas.discardActiveObject();
+        canvas.remove(...canvas.getObjects());
+        const scale = Math.min(
+          (canvas.width! * 0.85) / img.width!,
+          (canvas.height! * 0.85) / img.height!
         );
+        img.scale(scale);
+        img.set({
+          left: canvas.width! / 2 - (img.width! * scale) / 2,
+          top: canvas.height! / 2 - (img.height! * scale) / 2,
+        });
+        markBackgroundObject(img);
+        canvas.add(img);
+        canvas.sendObjectToBack(img);
+        canvas.setViewportTransform([1, 0, 0, 1, 0, 0]);
+        onZoomChange(1);
+        canvas.renderAll();
+        onToolChange("select");
+        if (flattened.limited) {
+          toast.warning(
+            `Crop was capped at ${flattened.outputWidth}×${flattened.outputHeight} for browser safety.`
+          );
+        }
+      } catch (error) {
+        if (!isAbortError(error)) {
+          console.error("Selection crop failed:", error);
+          toast.error(error instanceof Error ? error.message : "Crop failed");
+        }
       }
-    } catch (error) {
-      if (!isAbortError(error)) {
-        console.error("Selection crop failed:", error);
-        toast.error(error instanceof Error ? error.message : "Crop failed");
-      }
-    } finally {
-      rasterBusyRef.current = false;
-      setIsRasterizing(false);
-    }
-  }, [loadGeneratedImage, onToolChange, onZoomChange]);
-
-  // Clip the previously-selected image layer to the selection (a
-  // non-destructive mask — the pixels are untouched and it can be released).
-  const maskToSelection = useCallback(() => {
-    const canvas = fabricCanvasRef.current;
-    const rect = marqueeRef.current;
-    const target = preMarqueeTargetRef.current;
-    if (!canvas || !rect || !target || rasterBusyRef.current) return;
-
-    const region = marqueeRegion(canvas, rect);
-    if (!region) {
-      toast.error(OUTSIDE_PHOTO);
-      return;
-    }
-    const clip = new Rect({
-      left: region.left,
-      top: region.top,
-      width: region.width,
-      height: region.height,
-      absolutePositioned: true,
     });
-    target.clipPath = clip;
+  }, [loadGeneratedImage, onToolChange, onZoomChange, runRaster]);
 
-    removeMarquee(canvas);
-    canvas.setActiveObject(target);
-    canvas.fire("object:modified", { target });
-    canvas.renderAll();
-    onToolChange("select");
-  }, [onToolChange]);
-
-  const cancelMarquee = useCallback(() => {
-    generatedImageControllerRef.current?.abort();
-    const canvas = fabricCanvasRef.current;
-    if (canvas) {
-      removeMarquee(canvas);
-      canvas.renderAll();
-    }
-    onToolChange("select");
-  }, [onToolChange]);
-
-  // Escape cancels the marquee
-  useEffect(() => {
-    if (activeTool !== "marquee") return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        cancelMarquee();
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [activeTool, cancelMarquee]);
+  useSelectionTool({
+    canvasRef: fabricCanvasRef,
+    canvasKey: uploadedImage,
+    activeTool,
+    mode: selectionMode,
+    spaceDownRef,
+  });
 
   usePaintTool({
     canvasRef: fabricCanvasRef,
@@ -1221,6 +931,12 @@ export const Canvas = ({
       className="relative h-full w-full touch-none overflow-hidden bg-editor-canvas"
     >
       <canvas ref={canvasRef} role="img" aria-label="Image editing canvas" />
+      <canvas
+        ref={overlayRef}
+        aria-hidden="true"
+        data-testid="selection-overlay"
+        className="pointer-events-none absolute left-0 top-0"
+      />
 
       {isRasterizing && (
         <div
@@ -1286,78 +1002,15 @@ export const Canvas = ({
         </div>
       )}
 
-      {/* Marquee selection controls */}
-      {activeTool === "marquee" && (
-        <div className="absolute left-1/2 top-3 z-10 flex w-max max-w-[calc(100%-1.5rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-1.5 rounded-xl border border-border bg-popover/95 px-2 py-1.5 shadow-xl backdrop-blur">
-          {!hasMarquee ? (
-            <span className="text-xs text-muted-foreground px-1 py-1.5">
-              Drag to select a region
-            </span>
-          ) : (
-            <>
-              <Button
-                size="sm"
-                className="h-8"
-                onClick={() => void newLayerFromSelection()}
-                disabled={isRasterizing}
-              >
-                <Copy className="h-4 w-4 mr-1" />
-                New layer
-              </Button>
-              {canMask && (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="h-8"
-                  onClick={maskToSelection}
-                  disabled={isRasterizing}
-                >
-                  <SquareDashedBottom className="h-4 w-4 mr-1" />
-                  Mask
-                </Button>
-              )}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button size="sm" variant="ghost" className="h-8" disabled={isRasterizing}>
-                    <EyeOff className="h-4 w-4 mr-1" />
-                    Redact
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="center">
-                  <DropdownMenuLabel>Hide what is inside</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={() => void newLayerFromSelection("pixelate")}>
-                    <Grid3x3 /> Pixelate
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void newLayerFromSelection("blur")}>
-                    <Droplets /> Blur
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={blackOutSelection}>
-                    <SquareIcon /> Black out
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8"
-                onClick={() => void cropToSelection()}
-                disabled={isRasterizing}
-              >
-                <CropIcon className="h-4 w-4 mr-1" />
-                Crop to this
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8"
-                onClick={cancelMarquee}
-              >
-                <X className="h-4 w-4 mr-1" />
-                Cancel
-              </Button>
-            </>
-          )}
-        </div>
+      {isSelectionTool(activeTool) && (
+        <SelectionTaskBar
+          canvas={liveCanvas}
+          activeTool={activeTool}
+          onToolChange={onToolChange}
+          runRaster={runRaster}
+          busy={isRasterizing}
+          onCrop={() => void cropToSelection()}
+        />
       )}
     </div>
   );

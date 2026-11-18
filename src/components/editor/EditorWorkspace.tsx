@@ -31,7 +31,15 @@ import { BRUSHES, stepBrushHardness, stepBrushWidth, type BrushKind } from "@/ut
 import { DEFAULT_PAINT_OPTIONS, stepPaintSize, type PaintOptions } from "@/raster/paintSettings";
 import { DEFAULT_BUCKET_OPTIONS, type BucketOptions } from "@/raster/fill";
 import { DEFAULT_GRADIENT_OPTIONS, type GradientOptions } from "@/raster/gradient";
-import { isBrushTool, isFillTool, type BrushTool, type FillTool } from "./toolGroups";
+import {
+  isBrushTool,
+  isFillTool,
+  isMarqueeTool,
+  type BrushTool,
+  type FillTool,
+  type MarqueeTool,
+} from "./toolGroups";
+import type { SelectionMode } from "@/selection/mask";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -131,6 +139,8 @@ export const EditorWorkspace = ({
     [setGradient]
   );
   const [lastFillTool, setLastFillTool] = useSessionState<FillTool>("lastFillTool", "bucket");
+  const [lastMarqueeTool, setLastMarqueeTool] = useSessionState<MarqueeTool>("lastMarqueeTool", "marquee");
+  const [selectionMode, setSelectionMode] = useSessionState<SelectionMode>("selectionMode", "replace");
   const updateBucket = useCallback(
     (change: Partial<BucketOptions>) => setBucket((current) => ({ ...current, ...change })),
     [setBucket]
@@ -229,8 +239,9 @@ export const EditorWorkspace = ({
       if (isShapeKind(tool)) setLastShape(tool);
       if (isBrushTool(tool)) setLastBrushTool(tool);
       if (isFillTool(tool)) setLastFillTool(tool);
+      if (isMarqueeTool(tool)) setLastMarqueeTool(tool);
     },
-    [setLastShape, setLastBrushTool, setLastFillTool]
+    [setLastShape, setLastBrushTool, setLastFillTool, setLastMarqueeTool]
   );
 
   const handleZoomChange = useCallback((newZoom: number) => {
@@ -453,6 +464,7 @@ export const EditorWorkspace = ({
     lastShape,
     lastBrushTool,
     lastFillTool,
+    lastMarqueeTool,
     undo,
     redo,
     hasUndo,
@@ -645,6 +657,8 @@ export const EditorWorkspace = ({
       secondaryColor={backgroundColor}
       snapping={snapping}
       onSnappingChange={handleSnappingChange}
+      selectionMode={selectionMode}
+      onSelectionModeChange={setSelectionMode}
     />
   );
 
@@ -742,6 +756,7 @@ export const EditorWorkspace = ({
             lastShape={lastShape}
             lastBrushTool={lastBrushTool}
             lastFillTool={lastFillTool}
+            lastMarqueeTool={lastMarqueeTool}
             fabricCanvas={fabricCanvas}
             onEyedropper={eyedropper.start}
             colors={colorWells(false)}
@@ -759,6 +774,7 @@ export const EditorWorkspace = ({
             paint={paint}
             bucket={bucket}
             gradient={gradient}
+            selectionMode={selectionMode}
             secondaryColor={backgroundColor}
             uploadedImage={uploadedImage}
             initialSnapshot={initialSnapshot}
@@ -827,6 +843,7 @@ export const EditorWorkspace = ({
           lastShape={lastShape}
           lastBrushTool={lastBrushTool}
           lastFillTool={lastFillTool}
+          lastMarqueeTool={lastMarqueeTool}
           fabricCanvas={fabricCanvas}
           onEyedropper={eyedropper.start}
         />

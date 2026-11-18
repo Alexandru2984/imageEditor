@@ -16,6 +16,7 @@ function editorCommands(): CommandMap {
     lastShape: "rectangle",
     lastBrushTool: "brush",
     lastFillTool: "bucket",
+    lastMarqueeTool: "marquee",
     undo: noop,
     redo: noop,
     hasUndo: () => false,

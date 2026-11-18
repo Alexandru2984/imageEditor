@@ -4,6 +4,7 @@ import {
   Eraser,
   ArrowLeftRight,
   Blend,
+  CircleDashed,
   Layers,
   Magnet,
   MousePointer2,
@@ -31,7 +32,9 @@ import {
 import type { BucketOptions } from "@/raster/fill";
 import type { GradientColors, GradientOptions, GradientType } from "@/raster/gradient";
 import type { Tool } from "@/types/editor";
+import type { SelectionMode } from "@/selection/mask";
 import { cn } from "@/lib/utils";
+import { isSelectionTool } from "./toolGroups";
 
 export interface BrushSettings {
   kind: BrushKind;
@@ -64,6 +67,9 @@ interface OptionsBarProps {
   secondaryColor: string;
   snapping: boolean;
   onSnappingChange: (enabled: boolean) => void;
+  /** How a new selection shape joins the selection. */
+  selectionMode: SelectionMode;
+  onSelectionModeChange: (mode: SelectionMode) => void;
 }
 
 const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }> = {
@@ -89,8 +95,13 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   text: { icon: Type, name: "Text", hint: "Click to add text · Double-click a text layer to edit it" },
   marquee: {
     icon: SquareDashed,
-    name: "Select region",
-    hint: "Drag over the image, then blur, pixelate, copy or crop the region",
+    name: "Rectangle select",
+    hint: "Shift adds · Alt subtracts · drag inside to move the selection",
+  },
+  ellipseMarquee: {
+    icon: CircleDashed,
+    name: "Ellipse select",
+    hint: "Shift adds · Alt subtracts · drag inside to move the selection",
   },
   crop: { icon: Crop, name: "Crop", hint: "Drag the frame · Enter applies · Esc cancels" },
 };
@@ -124,6 +135,39 @@ function ToggleOption({
       <Icon />
       {label}
     </button>
+  );
+}
+
+const SELECTION_MODES: { value: SelectionMode; label: string }[] = [
+  { value: "replace", label: "New selection" },
+  { value: "add", label: "Add to selection" },
+  { value: "subtract", label: "Subtract from selection" },
+  { value: "intersect", label: "Intersect with selection" },
+];
+
+/** Two overlapping squares, filled to show what each selection mode keeps. */
+function SelectionModeIcon({ mode }: { mode: SelectionMode }) {
+  const first = "M1.5 1.5h8v8h-8z";
+  const second = "M6.5 6.5h8v8h-8z";
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className="size-4" fill="none" stroke="currentColor" strokeWidth="1">
+      {mode === "replace" && <path d="M2.5 2.5h11v11h-11z" fill="currentColor" fillOpacity="0.45" />}
+      {mode === "add" && <path d="M1.5 1.5h8v5h5v8h-8v-5h-5z" fill="currentColor" fillOpacity="0.45" />}
+      {mode === "subtract" && (
+        <>
+          <path d="M1.5 1.5h8v5h-3v3h-5z" fill="currentColor" fillOpacity="0.45" stroke="none" />
+          <path d={first} />
+          <path d={second} strokeDasharray="1.5 1" />
+        </>
+      )}
+      {mode === "intersect" && (
+        <>
+          <path d="M6.5 6.5h3v3h-3z" fill="currentColor" fillOpacity="0.7" stroke="none" />
+          <path d={first} strokeDasharray="1.5 1" />
+          <path d={second} strokeDasharray="1.5 1" />
+        </>
+      )}
+    </svg>
   );
 }
 
@@ -214,6 +258,8 @@ export function OptionsBar({
   secondaryColor,
   snapping,
   onSnappingChange,
+  selectionMode,
+  onSelectionModeChange,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
@@ -226,8 +272,10 @@ export function OptionsBar({
   const brushOption = BRUSHES.find((option) => option.kind === brush.kind);
   const sliderClass = compact ? "w-16" : "w-20 xl:w-28";
 
+  const selecting = isSelectionTool(activeTool);
   // On a phone, space goes to the canvas unless there is something to set.
-  if (compact && !painting && !shape) return null;
+  // The selection modes stand in for the modifier keys phones lack.
+  if (compact && !painting && !shape && !selecting) return null;
 
   const widthSetting = (
     <Setting label="Size" value={`${brush.width}px`} keys="[ and ] change the size">
@@ -459,6 +507,16 @@ export function OptionsBar({
           </button>
         ))}
       </div>
+    );
+  } else if (selecting) {
+    options = (
+      <Choice
+        label="Selection mode"
+        value={selectionMode}
+        onChange={onSelectionModeChange}
+        options={SELECTION_MODES}
+        render={(option) => <SelectionModeIcon mode={option.value} />}
+      />
     );
   } else if (activeTool === "select") {
     options = (

@@ -37,6 +37,21 @@ describe("Mask", () => {
     expect(a.combine(half, "subtract").data[0]).toBe(127);
   });
 
+  it("moves by whole pixels, dropping what leaves the document", () => {
+    const mask = Mask.rect(6, 4, 1, 1, 4, 3);
+    const moved = mask.translated(3, -1);
+    expect(moved.bounds()).toEqual({ x: 4, y: 0, width: 2, height: 2 });
+    expect(mask.translated(-10, 0).isEmpty()).toBe(true);
+    expect(mask.translated(0.4, 0).bounds()).toEqual(mask.bounds());
+  });
+
+  it("tells whether a point is selected", () => {
+    const mask = Mask.rect(6, 4, 1, 1, 4, 3);
+    expect(mask.includes(1.2, 2.9)).toBe(true);
+    expect(mask.includes(4.1, 2)).toBe(false);
+    expect(mask.includes(-1, 2)).toBe(false);
+  });
+
   it("inverts", () => {
     const mask = Mask.rect(4, 1, 0, 0, 1, 1).inverted();
     expect([...mask.data]).toEqual([0, 255, 255, 255]);
