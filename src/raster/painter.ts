@@ -14,6 +14,11 @@ export interface PaintSettings {
   erase: boolean;
   /** Keep a copy of the original pixels so the stroke can be cancelled. */
   cancellable?: boolean;
+  /**
+   * Where the stroke may paint: a canvas the size of the surface whose alpha
+   * scales the stroke (the selection, in the layer's pixels).
+   */
+  clip?: HTMLCanvasElement | null;
 }
 
 interface Rect {
@@ -69,6 +74,8 @@ export class StrokePainter {
   private readonly buffer: CanvasRenderingContext2D | null = null;
   private dirty: Rect | null = null;
   private last: StrokePoint | null = null;
+  /** The stroke's dirty area cut to the clip, reused between flushes. */
+  private clipped: CanvasRenderingContext2D | null = null;
 
   constructor(
     private readonly surface: HTMLCanvasElement,
@@ -79,7 +86,7 @@ export class StrokePainter {
     this.target = context;
     this.spacer = new DabSpacer(settings.diameter);
     this.tip = renderTip(settings.diameter, settings.hardness, settings.color);
-    if (settings.opacity < 1 || settings.cancellable) {
+    if (settings.opacity < 1 || settings.cancellable || settings.clip) {
       const base = createCanvas(surface.width, surface.height);
       base.context.drawImage(surface, 0, 0);
       this.base = base.element;
@@ -145,9 +152,31 @@ export class StrokePainter {
     target.drawImage(this.base, left, top, width, height, left, top, width, height);
     target.globalAlpha = this.settings.opacity;
     target.globalCompositeOperation = this.settings.erase ? "destination-out" : "source-over";
-    target.drawImage(this.buffer.canvas, left, top, width, height, left, top, width, height);
+    target.drawImage(this.clippedStroke(rect) ?? this.buffer.canvas, left, top, width, height, left, top, width, height);
     target.restore();
     return true;
+  }
+
+  /** The stroke within `rect`, faded by the clip, at the same coordinates. */
+  private clippedStroke(rect: Rect): HTMLCanvasElement | null {
+    const clip = this.settings.clip;
+    if (!clip || !this.buffer) return null;
+    if (!this.clipped) this.clipped = createCanvas(this.surface.width, this.surface.height).context;
+    const context = this.clipped;
+    const { left, top } = rect;
+    const width = rect.right - rect.left;
+    const height = rect.bottom - rect.top;
+    context.save();
+    // Both operations would otherwise touch the whole canvas, every frame.
+    context.beginPath();
+    context.rect(left, top, width, height);
+    context.clip();
+    context.globalCompositeOperation = "copy";
+    context.drawImage(this.buffer.canvas, left, top, width, height, left, top, width, height);
+    context.globalCompositeOperation = "destination-in";
+    context.drawImage(clip, left, top, width, height, left, top, width, height);
+    context.restore();
+    return context.canvas;
   }
 
   /** Put the original pixels back (only for cancellable strokes). */
@@ -176,6 +205,11 @@ export class StrokePainter {
     if (this.buffer) {
       this.buffer.canvas.width = 0;
       this.buffer.canvas.height = 0;
+    }
+    if (this.clipped) {
+      this.clipped.canvas.width = 0;
+      this.clipped.canvas.height = 0;
+      this.clipped = null;
     }
   }
 }

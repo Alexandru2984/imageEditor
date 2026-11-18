@@ -19,6 +19,8 @@ import type { PaintOptions } from "@/raster/paintSettings";
 import type { StrokePoint } from "@/raster/stroke";
 import { ensureLayerId, type EditorFabricObject } from "@/utils/editorObjects";
 import { nativeMultiplier } from "@/utils/flatten";
+import { releaseCanvas, restrictToClip, selectionClip, snapshotSurface } from "@/selection/clip";
+import { sceneToGrid, selectionOf } from "@/selection/state";
 import type { Tool } from "@/types/editor";
 
 interface UsePaintToolOptions {
@@ -196,6 +198,35 @@ export function usePaintTool({
       return { layer: created, created: true };
     };
 
+    // With a pixel selection, tools only change what is selected.
+    const store = selectionOf(canvas);
+    /** The selection in a layer's pixels, when there is one. */
+    const clipFor = (layer: FabricImage, surface: HTMLCanvasElement) => {
+      const selection = store.current();
+      return selection ? selectionClip(layer, selection, surface.width, surface.height) : null;
+    };
+    /** Run an edit that draws straight onto the layer, then undo it outside the selection. */
+    const withinSelection = (layer: FabricImage, change: () => boolean): boolean => {
+      const selection = store.current();
+      if (!selection) return change();
+      const { surface } = beginPixelEdit(layer);
+      const before = snapshotSurface(surface);
+      try {
+        const changed = change();
+        if (changed) restrictToClip(surface, before, selectionClip(layer, selection, surface.width, surface.height));
+        return changed;
+      } finally {
+        releaseCanvas(before);
+      }
+    };
+    /** Whether a scene point is outside the selection (never, without one). */
+    const outsideSelection = (point: { x: number; y: number }) => {
+      const selection = store.current();
+      if (!selection) return false;
+      const pixel = sceneToGrid(selection.grid, point.x, point.y);
+      return !selection.mask.includes(pixel.x, pixel.y);
+    };
+
     const commit = (layer: FabricImage) => {
       void commitPixelEdit(canvas, layer)
         .then((committed) => {
@@ -209,12 +240,17 @@ export function usePaintTool({
     };
 
     const fillAt = (event: Event) => {
+      const point = canvas.getScenePoint(event as PointerEvent);
+      // As in Photoshop, a click outside the selection fills nothing.
+      if (outsideSelection(point)) return;
       const target = resolveTarget();
       if (!target) return;
       const { color: fillColor, bucket: options } = settingsRef.current;
       let filled = false;
       try {
-        filled = bucketFill(canvas, target.layer, canvas.getScenePoint(event as PointerEvent), fillColor, options);
+        filled = withinSelection(target.layer, () =>
+          bucketFill(canvas, target.layer, point, fillColor, options)
+        );
       } catch (error) {
         console.error("Paint bucket failed:", error);
         toast.error(error instanceof Error ? error.message : "Could not fill there");
@@ -275,7 +311,10 @@ export function usePaintTool({
       if (!target) return;
       const { color: foreground, secondaryColor: background, gradient: options } = settingsRef.current;
       try {
-        drawGradient(target.layer, current.start, current.end, foreground, background, options);
+        withinSelection(target.layer, () => {
+          drawGradient(target.layer, current.start, current.end, foreground, background, options);
+          return true;
+        });
       } catch (error) {
         console.error("Gradient failed:", error);
         toast.error("Could not draw the gradient");
@@ -303,6 +342,7 @@ export function usePaintTool({
         erase: erasing,
         // A second finger turns the stroke into a pinch; it must be undone.
         cancellable: (event as PointerEvent).pointerType === "touch",
+        clip: clipFor(layer, session.surface),
       });
       stroke = { layer, painter, createdLayer: target.created, frame: null };
       const point = layerPoint(layer, event);

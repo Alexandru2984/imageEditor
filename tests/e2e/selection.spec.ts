@@ -378,3 +378,58 @@ test("Select subject selects the subject with the on-device model", async ({ pag
   const bottom = (await autosavedLayerPixels(page, "Layer 1", [[Math.floor(copy.width / 2), copy.height - 40]]))!;
   expect(bottom.pixels[0]![3]).toBeGreaterThan(200);
 });
+
+test("painting, filling and gradients stay inside the selection", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff");
+  await arm(page, "m", "Rectangle select");
+  // The left half of a box around the middle of the photo.
+  await drag(page, [-60, -40], [0, 40]);
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const scale = photo.scaleX as number;
+  const inside = Math.round(200 - 15 / scale);
+  const outside = Math.round(200 + 15 / scale);
+
+  // A brush stroke right across the middle.
+  await arm(page, "b", "Brush");
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x - 100, center.y);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 100, center.y, { steps: 12 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[inside, 150]]))?.pixels[0]?.[3])
+    .toBe(255);
+  const stroke = (await autosavedLayerPixels(page, "Layer 1", [
+    [outside, 150],
+    [Math.round(200 - 80 / scale), 150],
+  ]))!.pixels;
+  expect(stroke[0]![3]).toBe(0);
+  expect(stroke[1]![3]).toBe(0);
+
+  // The bucket fills nothing outside the selection, and only the selection inside it.
+  await arm(page, "g", "Paint bucket");
+  await page.mouse.click(center.x + 100, center.y + 20);
+  await page.waitForTimeout(500);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[outside, 170]]))!.pixels[0]![3]).toBe(0);
+  await page.mouse.click(center.x - 30, center.y + 30);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[inside, 170]]))?.pixels[0]?.[3])
+    .toBe(255);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[outside, 170]]))!.pixels[0]![3]).toBe(0);
+
+  // A gradient across the photo lands in the selection only.
+  await arm(page, "Shift+G", "Gradient");
+  await page.mouse.move(center.x - 150, center.y - 100);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 150, center.y - 100, { steps: 6 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Layer 1", [[inside, 130]]))?.pixels[0]?.[3])
+    .toBe(255);
+  const after = (await autosavedLayerPixels(page, "Layer 1", [
+    [outside, 130],
+    [inside, 50],
+  ]))!.pixels;
+  expect(after[0]![3]).toBe(0);
+  expect(after[1]![3]).toBe(0);
+});
