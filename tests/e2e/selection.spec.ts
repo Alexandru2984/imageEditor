@@ -1,5 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
-import { autosavedLayerPixels, autosavedObjects, canvasCenter, settle, uploadSolidImage } from "./helpers";
+import {
+  autosavedLayerPixels,
+  autosavedObjects,
+  canvasCenter,
+  chooseMenu,
+  menuItem,
+  settle,
+  uploadSolidImage,
+} from "./helpers";
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Desktop pointer tests");
@@ -149,4 +157,75 @@ test("dragging inside the selection moves it; a click or Escape deselects", asyn
   await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Drag to select a region")).toBeVisible();
+});
+
+test("Select menu: all, inverse, deselect and reselect", async ({ page }) => {
+  await uploadSolidImage(page, 200, 100, "#ff00ff");
+  await arm(page, "m", "Rectangle select");
+
+  await page.keyboard.press("Control+a");
+  await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
+  await page.keyboard.press("Control+d");
+  await expect(page.getByText("Drag to select a region")).toBeVisible();
+  await page.keyboard.press("Control+Shift+d");
+  await expect(page.getByRole("button", { name: "Redact" })).toBeVisible();
+  // All of the photo, at its own resolution.
+  await copyLayer(page);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))).toMatchObject({ width: 200, height: 100 });
+
+  // Everything but a rectangle in the middle.
+  await page.keyboard.press("Escape");
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-30, -20], [30, 20]);
+  await chooseMenu(page, "Select", "Inverse");
+  await copyLayer(page, "Layer 2");
+  const inverse = (await autosavedLayerPixels(page, "Layer 2", [
+    [2, 2],
+    [100, 50],
+  ]))!;
+  expect(inverse.width).toBe(200);
+  expect(inverse.pixels[0]![3]).toBe(255);
+  expect(inverse.pixels[1]![3]).toBe(0);
+});
+
+test("Select › Modify feathers and expands the selection", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#000000");
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-40, -40], [40, 40]);
+  await copyLayer(page);
+  const plainSize = (await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))!;
+
+  await page.keyboard.press("Escape");
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-40, -40], [40, 40]);
+  await page.getByRole("menuitem", { name: "Select", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Modify" }).click();
+  await menuItem(page, "Expand…").click();
+  const dialog = page.getByRole("dialog", { name: "Expand selection" });
+  await dialog.getByLabel("Expand by").fill("10");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await copyLayer(page, "Layer 2");
+  const grown = (await autosavedLayerPixels(page, "Layer 2", [[0, 0]]))!;
+  expect(grown.width).toBe(plainSize.width + 20);
+  expect(grown.height).toBe(plainSize.height + 20);
+
+  await page.keyboard.press("Escape");
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-40, -40], [40, 40]);
+  await page.keyboard.press("Shift+F6");
+  const feather = page.getByRole("dialog", { name: "Feather selection" });
+  await feather.getByLabel("Feather radius").fill("8");
+  await feather.getByLabel("Feather radius").press("Enter");
+  await expect(feather).toBeHidden();
+  await copyLayer(page, "Layer 3");
+  const soft = (await autosavedLayerPixels(page, "Layer 3", [[0, 0]]))!;
+  const { width, height } = soft;
+  const edge = (await autosavedLayerPixels(page, "Layer 3", [
+    [Math.floor(width / 2), Math.floor(height / 2)],
+    [Math.floor(width / 2), 2],
+  ]))!.pixels;
+  // Solid in the middle, fading out towards the edge.
+  expect(edge[0]![3]).toBe(255);
+  expect(edge[1]![3]).toBeGreaterThan(0);
+  expect(edge[1]![3]).toBeLessThan(128);
 });

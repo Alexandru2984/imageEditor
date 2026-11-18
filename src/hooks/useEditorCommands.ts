@@ -25,6 +25,7 @@ import {
   Blend,
   CircleDashed,
   Combine,
+  Contrast,
   Grid2x2,
   Highlighter,
   Layers2,
@@ -65,6 +66,9 @@ import {
 import { isEditorChrome, removeSelectedObjects } from "@/utils/editorObjects";
 import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
+import { Mask } from "@/selection/mask";
+import { documentGrid, selectionOf } from "@/selection/state";
+import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
@@ -123,6 +127,8 @@ export interface EditorCommandContext {
   togglePanel: (tab: PanelTab) => void;
   openPanel: (tab: PanelTab) => void;
   showShortcuts: () => void;
+  /** Opens Select › Modify's dialog. */
+  modifySelection: (modification: SelectionModification) => void;
   /** [ ] and Shift+[ ]: brush size and hardness. */
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
   swapColors: () => void;
@@ -183,6 +189,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     togglePanel,
     openPanel,
     showShortcuts,
+    modifySelection,
     adjustBrush,
     swapColors,
     resetColors,
@@ -193,6 +200,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
 
   return useMemo(() => {
     const selected = () => hasSelection(canvas);
+    const pixelSelection = () => (canvas ? selectionOf(canvas).current() : null);
     const aiIdle = () => !aiBusy;
 
     const removeSelection = (): number => {
@@ -484,6 +492,51 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
 
       // ---------- Select ----------
       {
+        id: "select.all",
+        label: "All",
+        icon: SquareDashed,
+        shortcuts: KEYMAP.selectAll,
+        run: () => {
+          const grid = canvas ? documentGrid(canvas) : null;
+          if (canvas && grid) selectionOf(canvas).set(Mask.full(grid.width, grid.height), grid);
+        },
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "select everything pixels",
+      },
+      {
+        id: "select.deselect",
+        label: "Deselect",
+        shortcuts: KEYMAP.deselect,
+        // The pixel selection first, as in Photoshop; then the layers.
+        run: () => {
+          if (!canvas) return;
+          if (pixelSelection()) selectionOf(canvas).set(null);
+          else deselect(canvas);
+        },
+        isEnabled: () => !!pixelSelection() || selected(),
+      },
+      {
+        id: "select.reselect",
+        label: "Reselect",
+        shortcuts: KEYMAP.reselect,
+        run: () => {
+          if (canvas) selectionOf(canvas).reselect();
+        },
+        isEnabled: () => !!canvas && !pixelSelection() && selectionOf(canvas).canReselect(),
+      },
+      {
+        id: "select.inverse",
+        label: "Inverse",
+        icon: Contrast,
+        shortcuts: KEYMAP.selectInverse,
+        run: () => {
+          const current = pixelSelection();
+          if (canvas && current) selectionOf(canvas).set(current.mask.inverted(), current.grid);
+        },
+        isEnabled: () => !!pixelSelection(),
+        keywords: "invert selection",
+      },
+      {
         id: "select.allLayers",
         label: "All layers",
         icon: MousePointerSquareDashed,
@@ -494,13 +547,26 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         keywords: "select everything",
       },
       {
-        id: "select.deselect",
-        label: "Deselect",
-        shortcuts: KEYMAP.deselect,
-        run: () => {
-          if (canvas) deselect(canvas);
-        },
-        isEnabled: selected,
+        id: "select.feather",
+        label: "Feather…",
+        shortcuts: KEYMAP.featherSelection,
+        run: () => modifySelection("feather"),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "soften blur edge selection",
+      },
+      {
+        id: "select.expand",
+        label: "Expand…",
+        run: () => modifySelection("expand"),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "grow selection",
+      },
+      {
+        id: "select.contract",
+        label: "Contract…",
+        run: () => modifySelection("contract"),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "shrink selection",
       },
 
       // ---------- Filter ----------
@@ -760,6 +826,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     saveProject,
     setSnapping,
     showShortcuts,
+    modifySelection,
     snapping,
     swapColors,
     togglePanel,

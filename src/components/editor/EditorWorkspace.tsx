@@ -40,6 +40,7 @@ import {
   type MarqueeTool,
 } from "./toolGroups";
 import type { SelectionMode } from "@/selection/mask";
+import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -437,6 +438,7 @@ export const EditorWorkspace = ({
   );
   const openPanel = useCallback((tab: PanelTab) => setPanel(tab), [setPanel]);
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
+  const [selectionModification, setSelectionModification] = useState<SelectionModification | null>(null);
   const openCommandPalette = useCallback(() => setPaletteOpen(true), []);
   const requestNew = useCallback(() => setDiscardAction("new"), []);
   const requestOpenImage = useCallback(() => setDiscardAction("openImage"), []);
@@ -494,6 +496,7 @@ export const EditorWorkspace = ({
     togglePanel,
     openPanel,
     showShortcuts,
+    modifySelection: setSelectionModification,
     adjustBrush,
     swapColors,
     resetColors,
@@ -856,6 +859,11 @@ export const EditorWorkspace = ({
         defaultName={documentName}
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} commands={commands} />
+      <SelectionModifyDialog
+        canvas={fabricCanvas}
+        modification={selectionModification}
+        onClose={() => setSelectionModification(null)}
+      />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}

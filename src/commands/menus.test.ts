@@ -52,6 +52,7 @@ function editorCommands(): CommandMap {
     togglePanel: noop,
     openPanel: noop,
     showShortcuts: noop,
+    modifySelection: noop,
     adjustBrush: noop,
     swapColors: noop,
     resetColors: noop,

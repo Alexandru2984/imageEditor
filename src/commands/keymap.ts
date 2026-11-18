@@ -33,11 +33,15 @@ export const KEYMAP = {
   flipHorizontal: [{ key: "h", shift: true }],
   flipVertical: [{ key: "v", shift: true }],
 
-  selectAllLayers: [
-    { key: "a", mod: true, alt: true },
-    { key: "a", mod: true },
-  ],
+  selectAll: [{ key: "a", mod: true }],
+  selectAllLayers: [{ key: "a", mod: true, alt: true }],
   deselect: [{ key: "d", mod: true }],
+  reselect: [{ key: "d", mod: true, shift: true }],
+  selectInverse: [
+    { key: "i", mod: true, shift: true },
+    { key: "F7", shift: true },
+  ],
+  featherSelection: [{ key: "F6", shift: true }],
 
   zoomIn: [{ key: "=", mod: true }, { key: "+", mod: true }, { key: "+" }, { key: "=" }],
   zoomOut: [{ key: "-", mod: true }, { key: "-" }],
