@@ -11,6 +11,7 @@ import { PropertiesPanel } from "./PropertiesPanel";
 import { AdjustPanel } from "./AdjustPanel";
 import { LayersPanel } from "./LayersPanel";
 import { TopBar } from "./TopBar";
+import { OptionsBar } from "./OptionsBar";
 import { ExportDialog } from "./ExportDialog";
 import { ShortcutsDialog } from "./ShortcutsDialog";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,7 @@ import { useAiActions } from "@/hooks/useAiActions";
 import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
 import { useSmartGuides } from "@/hooks/useSmartGuides";
-import { BRUSHES, type BrushKind } from "@/utils/brushes";
+import { BRUSHES, stepBrushHardness, stepBrushWidth, type BrushKind } from "@/utils/brushes";
 import {
   SNAP_PREFERENCE_KEY,
   readBooleanPreference,
@@ -266,6 +267,13 @@ export const EditorWorkspace = ({
     if (fabricCanvas) setZoom(fitToScreen(fabricCanvas));
   }, [fabricCanvas]);
   const handleActualPixels = useCallback(() => setZoom(1), []);
+  const adjustBrush = useCallback(
+    (setting: "width" | "hardness", direction: 1 | -1) => {
+      if (setting === "width") setBrushWidth((width) => stepBrushWidth(width, direction));
+      else setBrushHardness((hardness) => stepBrushHardness(hardness, direction));
+    },
+    [setBrushWidth, setBrushHardness]
+  );
 
   const handleRotate = useCallback(
     (degrees: number) => {
@@ -426,6 +434,7 @@ export const EditorWorkspace = ({
     togglePanel,
     openPanel,
     showShortcuts,
+    adjustBrush,
   });
   const commandList = useMemo(() => Object.values(commands), [commands]);
   useKeyboardShortcuts({ canvas: fabricCanvas, commands: commandList });
@@ -537,14 +546,6 @@ export const EditorWorkspace = ({
         <PropertiesPanel
           activeColor={activeColor}
           onColorChange={setActiveColor}
-          brushWidth={brushWidth}
-          onBrushWidthChange={setBrushWidth}
-          brushHardness={brushHardness}
-          onBrushHardnessChange={setBrushHardness}
-          brushOpacity={brushOpacity}
-          onBrushOpacityChange={setBrushOpacity}
-          brushKind={brushKind}
-          onBrushKindChange={handleBrushKindChange}
           fabricCanvas={fabricCanvas}
         />
       </TabsContent>
@@ -559,6 +560,22 @@ export const EditorWorkspace = ({
 
   const desktopChrome = !isMobile;
   const mobileChrome = isMobile;
+
+  const optionsBar = (
+    <OptionsBar
+      activeTool={activeTool}
+      onToolChange={handleToolChange}
+      compact={isMobile}
+      activeColor={activeColor}
+      brush={{ kind: brushKind, width: brushWidth, hardness: brushHardness, opacity: brushOpacity }}
+      onBrushKindChange={handleBrushKindChange}
+      onBrushWidthChange={setBrushWidth}
+      onBrushHardnessChange={setBrushHardness}
+      onBrushOpacityChange={setBrushOpacity}
+      snapping={snapping}
+      onSnappingChange={handleSnappingChange}
+    />
+  );
 
   // The canvas <main> keeps the same position in this tree at every width so
   // crossing the mobile breakpoint never remounts (and never resets) it.
@@ -643,6 +660,8 @@ export const EditorWorkspace = ({
         </AlertDialogContent>
       </AlertDialog>
 
+      {desktopChrome ? optionsBar : null}
+
       <div className="relative flex min-h-0 flex-1">
         {desktopChrome ? (
           <Toolbar
@@ -721,6 +740,7 @@ export const EditorWorkspace = ({
         </section>
       ) : null}
 
+      {mobileChrome ? optionsBar : null}
       {mobileChrome ? (
         <Toolbar
           orientation="horizontal"

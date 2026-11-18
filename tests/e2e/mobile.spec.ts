@@ -147,3 +147,16 @@ test("the menu reaches every command on the phone, on screen", async ({ page }) 
   await expect(page.getByRole("menu")).toHaveCount(0);
   await expect(page.getByRole("tab", { name: "Layers", selected: true })).toBeVisible();
 });
+
+test("brush settings sit above the tools only while drawing", async ({ page }) => {
+  await openPhoto(page);
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expect(options).toHaveCount(0);
+  await page.getByRole("button", { name: "Draw (B)" }).tap();
+  await expectOnScreen(page, options.getByRole("slider", { name: "Brush width" }));
+  await expect(options.getByRole("radio", { name: "Neon" })).toBeVisible();
+  await expectNoSidewaysScroll(page);
+  await page.screenshot({ path: "test-results/mobile-options.png" });
+  await page.getByRole("button", { name: "Select (V)" }).tap();
+  await expect(options).toHaveCount(0);
+});

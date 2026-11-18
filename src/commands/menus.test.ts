@@ -49,6 +49,7 @@ function editorCommands(): CommandMap {
     togglePanel: noop,
     openPanel: noop,
     showShortcuts: noop,
+    adjustBrush: noop,
   };
   let commands: CommandMap = {};
   const Probe = () => {

@@ -44,6 +44,11 @@ export const KEYMAP = {
   shortcuts: [{ key: "?" }],
   commandPalette: [{ key: "k", mod: true }],
 
+  brushSmaller: [{ key: "[" }],
+  brushLarger: [{ key: "]" }],
+  brushSofter: [{ key: "[", shift: true }],
+  brushHarder: [{ key: "]", shift: true }],
+
   selectTool: [{ key: "v" }],
   drawTool: [{ key: "b" }],
   eraserTool: [{ key: "e" }],

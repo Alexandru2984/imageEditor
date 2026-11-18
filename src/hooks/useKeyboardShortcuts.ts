@@ -32,6 +32,8 @@ export function useKeyboardShortcuts({ canvas, commands }: UseKeyboardShortcutsO
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // A control already used the key (a slider's arrows, a tab list's).
+      if (e.defaultPrevented) return;
       const target = e.target as HTMLElement;
       // Typing in a field, and dialogs and menus, own the keyboard.
       if (isTypingTarget(target)) return;

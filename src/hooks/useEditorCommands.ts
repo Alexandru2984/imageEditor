@@ -91,6 +91,8 @@ export interface EditorCommandContext {
   togglePanel: (tab: PanelTab) => void;
   openPanel: (tab: PanelTab) => void;
   showShortcuts: () => void;
+  /** [ ] and Shift+[ ]: brush size and hardness. */
+  adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
 }
 
 /** Whether a document layer (not editor chrome) is selected. */
@@ -135,6 +137,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     togglePanel,
     openPanel,
     showShortcuts,
+    adjustBrush,
   } = context;
   // The AI actions object is rebuilt on every render; its parts are stable.
   const { isProcessing: aiBusy, removeBackground, extractSubject } = ai;
@@ -516,12 +519,35 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
     ];
 
+    const painting = () => activeTool === "draw" || activeTool === "eraser";
+    const brushKey = (
+      id: string,
+      label: string,
+      shortcuts: Command["shortcuts"],
+      setting: "width" | "hardness",
+      direction: 1 | -1
+    ): Command => ({
+      id,
+      label,
+      shortcuts,
+      repeat: true,
+      run: () => adjustBrush(setting, direction),
+      isEnabled: setting === "width" ? painting : () => activeTool === "draw",
+    });
+    list.push(
+      brushKey("brush.smaller", "Smaller brush", KEYMAP.brushSmaller, "width", -1),
+      brushKey("brush.larger", "Larger brush", KEYMAP.brushLarger, "width", 1),
+      brushKey("brush.softer", "Softer brush", KEYMAP.brushSofter, "hardness", -1),
+      brushKey("brush.harder", "Harder brush", KEYMAP.brushHarder, "hardness", 1)
+    );
+
     return Object.fromEntries(list.map((command) => [command.id, command]));
   }, [
     activeTool,
     aiBusy,
     arrange,
     actualPixels,
+    adjustBrush,
     canPaste,
     canvas,
     copy,

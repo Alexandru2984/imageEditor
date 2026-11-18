@@ -963,6 +963,49 @@ test("menu commands that replace the document ask first", async ({ page }) => {
     .toBe(false);
 });
 
+test("the options bar follows the tool, and [ ] set the brush", async ({ page }) => {
+  await uploadImage(page);
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expect(options).toContainText("Move");
+
+  await page.keyboard.press("b");
+  await expect(options).toContainText("Brush");
+  await expect(options.getByText("3px")).toBeVisible();
+  await page.keyboard.press("]");
+  await page.keyboard.press("]");
+  await expect(options.getByText("5px")).toBeVisible();
+  await page.keyboard.press("[");
+  await expect(options.getByText("4px")).toBeVisible();
+  await page.keyboard.press("Shift+BracketLeft");
+  await expect(options.getByText("75%")).toBeVisible();
+
+  // The eraser has a size and nothing else.
+  await page.keyboard.press("e");
+  await expect(options.getByRole("slider", { name: "Brush width" })).toBeVisible();
+  await expect(options.getByRole("slider", { name: "Brush hardness" })).toHaveCount(0);
+
+  // Shapes are picked from the bar too.
+  await page.keyboard.press("u");
+  await options.getByRole("radio", { name: "Star" }).click();
+  await expect(options.getByRole("radio", { name: "Star" })).toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("v");
+  await expect(options.getByRole("radio", { name: "Star" })).toHaveCount(0);
+});
+
+test("arrow keys on a focused slider don't also move the layer", async ({ page }) => {
+  await uploadImage(page);
+  await addShape(page);
+  const rectangle = async () =>
+    (await autosavedObjects(page)).find((object) => object.type === "Rect");
+  await expect.poll(async () => (await rectangle())?.left).toBeDefined();
+  const left = (await rectangle())!.left;
+
+  await page.getByRole("slider", { name: "Object opacity" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(async () => (await rectangle())?.opacity).toBe(0.99);
+  expect((await rectangle())!.left).toBe(left);
+});
+
 test("dropping an image onto the editor adds it as a layer", async ({ page }) => {
   await uploadImage(page);
   const center = await canvasCenter(page);

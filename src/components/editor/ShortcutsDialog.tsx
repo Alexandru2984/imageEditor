@@ -31,6 +31,10 @@ const TOOL_IDS = [
   "tool.nextShape",
   "tool.text",
   "tool.eyedropper",
+  "brush.smaller",
+  "brush.larger",
+  "brush.softer",
+  "brush.harder",
 ];
 
 function commandIds(entries: readonly MenuEntry[]): string[] {

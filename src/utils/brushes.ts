@@ -18,6 +18,32 @@ export const BRUSHES: BrushOption[] = [
   { kind: "dashed", label: "Dashed", minWidth: 2, usesHardness: true },
 ];
 
+export const BRUSH_WIDTH_MIN = 1;
+export const BRUSH_WIDTH_MAX = 50;
+
+/**
+ * The next brush size for [ and ]: single pixels while the brush is fine,
+ * then steps of 5, so both ends of the range are a few presses away.
+ */
+export function stepBrushWidth(width: number, direction: 1 | -1): number {
+  const step = direction > 0 ? (width < 10 ? 1 : 5) : width <= 10 ? 1 : 5;
+  // Off-grid sizes (from the slider) land on the grid first.
+  const next =
+    step === 5
+      ? direction > 0
+        ? Math.floor(width / 5) * 5 + 5
+        : Math.ceil(width / 5) * 5 - 5
+      : width + direction;
+  return Math.min(BRUSH_WIDTH_MAX, Math.max(BRUSH_WIDTH_MIN, next));
+}
+
+/** Shift+[ and Shift+]: hardness in quarters, as in Photoshop. */
+export function stepBrushHardness(hardness: number, direction: 1 | -1): number {
+  const next =
+    direction > 0 ? Math.floor(hardness / 25) * 25 + 25 : Math.ceil(hardness / 25) * 25 - 25;
+  return Math.min(100, Math.max(0, next));
+}
+
 export const HIGHLIGHTER_ALPHA = 0.45;
 
 const HEX = /^#([0-9a-f]{6})$/i;

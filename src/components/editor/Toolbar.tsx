@@ -3,12 +3,6 @@ import {
   MousePointer2,
   Pencil,
   Eraser,
-  Square,
-  Circle,
-  Triangle,
-  Star,
-  Minus,
-  MoveUpRight,
   Type,
   Crop,
   SquareDashed,
@@ -31,6 +25,7 @@ import { removeSelectedObjects } from "@/utils/editorObjects";
 import { isShapeKind, type ShapeKind } from "@/utils/shapes";
 import { STICKER_FONT, STICKER_GROUPS, addSticker } from "@/utils/stickers";
 import { cn } from "@/lib/utils";
+import { SHAPE_TOOLS } from "./shapeTools";
 
 interface ToolbarProps {
   activeTool: Tool;
@@ -50,14 +45,6 @@ const PRIMARY_TOOLS: ToolDef[] = [
   { id: "eraser", icon: Eraser, label: "Eraser (E)" },
 ];
 
-const SHAPE_TOOLS: (ToolDef & { id: ShapeKind; name: string })[] = [
-  { id: "rectangle", icon: Square, label: "Rectangle (U)", name: "Rectangle" },
-  { id: "circle", icon: Circle, label: "Ellipse (U)", name: "Ellipse" },
-  { id: "triangle", icon: Triangle, label: "Triangle (U)", name: "Triangle" },
-  { id: "star", icon: Star, label: "Star (U)", name: "Star" },
-  { id: "line", icon: Minus, label: "Line (U)", name: "Line" },
-  { id: "arrow", icon: MoveUpRight, label: "Arrow (U)", name: "Arrow" },
-];
 
 const SECONDARY_TOOLS: ToolDef[] = [
   { id: "text", icon: Type, label: "Text (T)" },
@@ -166,7 +153,7 @@ export const Toolbar = ({
   };
 
   const shapeActive = isShapeKind(activeTool);
-  const ShapeIcon = SHAPE_TOOLS.find((tool) => tool.id === lastShape)?.icon ?? Square;
+  const ShapeIcon = (SHAPE_TOOLS.find((tool) => tool.id === lastShape) ?? SHAPE_TOOLS[0]!).icon;
 
   const shapesButton = (
     <Popover open={shapesOpen} onOpenChange={setShapesOpen}>
