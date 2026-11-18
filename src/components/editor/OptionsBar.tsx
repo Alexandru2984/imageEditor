@@ -75,7 +75,7 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   brush: {
     icon: Paintbrush,
     name: "Brush",
-    hint: "Paints on the selected pixel layer, or on a new one · Shift-click draws a line",
+    hint: "Shift-click draws a straight line",
   },
   draw: { icon: Highlighter, name: "Marker", hint: "" },
   bucket: { icon: PaintBucket, name: "Paint bucket", hint: "" },
@@ -83,7 +83,7 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   eraser: {
     icon: Eraser,
     name: "Eraser",
-    hint: "Erases pixels on the selected layer, otherwise drawings · The photo is protected",
+    hint: "Erases pixels, or drawings when no pixel layer is selected",
   },
   shape: { icon: Shapes, name: "Shape", hint: "Click to place a shape, or drag to size it" },
   text: { icon: Type, name: "Text", hint: "Click to add text · Double-click a text layer to edit it" },
