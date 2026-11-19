@@ -142,6 +142,12 @@ const isTypingTarget = (target: EventTarget | null): boolean => {
 const isProjectFile = (file: File): boolean =>
   file.type === "application/json" || /\.json$/i.test(file.name);
 
+/** How many image files one drop or Place adds. */
+const MAX_FILES_AT_ONCE = 20;
+
+/** A placed file's layer is named after it, as in Photoshop. */
+const layerNameFromFile = (file: File) => file.name.replace(/\.[^.]+$/, "").trim().slice(0, 100) || "Image";
+
 const dragHasFiles = (event: DragEvent): boolean =>
   !!event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files");
 
@@ -382,34 +388,51 @@ export const EditorWorkspace = ({
   }, []);
 
   /** Decode and validate an image file, then add it as a layer. */
-  const addImageFileAsLayer = useCallback(
-    async (file: File, dropEvent?: DragEvent) => {
+  /** Add image files as new layers, one after another, the last one selected. */
+  const addImageFilesAsLayers = useCallback(
+    async (files: File[], dropEvent?: DragEvent) => {
       const canvas = fabricCanvas;
-      if (!canvas) return;
+      if (!canvas || files.length === 0) return;
       layerLoadControllerRef.current?.abort();
       const controller = new AbortController();
       layerLoadControllerRef.current = controller;
+      // Dropped files land under the pointer when it is over the canvas.
+      let point;
+      if (dropEvent) {
+        const rect = canvas.upperCanvasEl.getBoundingClientRect();
+        const inside =
+          dropEvent.clientX >= rect.left &&
+          dropEvent.clientX <= rect.right &&
+          dropEvent.clientY >= rect.top &&
+          dropEvent.clientY <= rect.bottom;
+        if (inside) point = canvas.getScenePoint(dropEvent);
+      }
+      const batch = files.slice(0, MAX_FILES_AT_ONCE);
+      const failed: string[] = [];
+      let added = 0;
       try {
-        const { dataUrl } = await readSafeRasterImage(file, controller.signal);
-        if (controller.signal.aborted) return;
-        // Dropped files land under the pointer when it is over the canvas.
-        let point;
-        if (dropEvent) {
-          const rect = canvas.upperCanvasEl.getBoundingClientRect();
-          const inside =
-            dropEvent.clientX >= rect.left &&
-            dropEvent.clientX <= rect.right &&
-            dropEvent.clientY >= rect.top &&
-            dropEvent.clientY <= rect.bottom;
-          if (inside) point = canvas.getScenePoint(dropEvent);
+        for (const file of batch) {
+          try {
+            const { dataUrl } = await readSafeRasterImage(file, controller.signal);
+            if (controller.signal.aborted) return;
+            const image = await addImageLayer(canvas, dataUrl, {
+              signal: controller.signal,
+              at: point,
+              name: layerNameFromFile(file),
+            });
+            if (image) added += 1;
+          } catch (error) {
+            if (controller.signal.aborted || isAbortError(error)) return;
+            if (batch.length === 1) throw error;
+            failed.push(file.name);
+          }
         }
-        const image = await addImageLayer(canvas, dataUrl, {
-          signal: controller.signal,
-          at: point,
-        });
-        if (!image) return;
-        setActiveTool("select");
-        toast.success("Image added as a new layer");
+        if (added) setActiveTool("select");
+        if (failed.length) {
+          toast.error(`${failed.length === 1 ? "One file" : `${failed.length} files`} could not be added: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}`);
+        }
+        if (added) toast.success(added === 1 ? "Image added as a new layer" : `${added} images added as layers`);
+        if (files.length > batch.length) toast.info(`Only the first ${MAX_FILES_AT_ONCE} files were added`);
       } catch (error) {
         if (controller.signal.aborted || isAbortError(error)) return;
         toast.error(error instanceof Error ? error.message : "Failed to add the image");
@@ -735,7 +758,7 @@ export const EditorWorkspace = ({
       const file = imageItem?.getAsFile();
       if (file) {
         event.preventDefault();
-        void addImageFileAsLayer(file);
+        void addImageFilesAsLayers([file]);
         return;
       }
       if (clipboardRef.current) {
@@ -748,7 +771,7 @@ export const EditorWorkspace = ({
     };
     document.addEventListener("paste", handlePaste);
     return () => document.removeEventListener("paste", handlePaste);
-  }, [addImageFileAsLayer, fabricCanvas, pasteLayers]);
+  }, [addImageFilesAsLayers, fabricCanvas, pasteLayers]);
 
   useEffect(() => {
     const handleDragEnter = (event: DragEvent) => {
@@ -772,13 +795,17 @@ export const EditorWorkspace = ({
       event.preventDefault();
       dragDepthRef.current = 0;
       setDragActive(false);
-      const file = event.dataTransfer?.files?.[0];
-      if (!file) return;
-      if (isProjectFile(file)) {
+      const files = Array.from(event.dataTransfer?.files ?? []);
+      if (files.length === 0) return;
+      if (files.some(isProjectFile)) {
         toast("Use “Open project file” in the menu to replace the current project");
         return;
       }
-      void addImageFileAsLayer(file, event);
+      if (files.some((file) => /\.ps[db]$/i.test(file.name))) {
+        toast("Use File › Open image to open a Photoshop file");
+        return;
+      }
+      void addImageFilesAsLayers(files, event);
     };
     window.addEventListener("dragenter", handleDragEnter);
     window.addEventListener("dragover", handleDragOver);
@@ -790,7 +817,7 @@ export const EditorWorkspace = ({
       window.removeEventListener("dragleave", handleDragLeave);
       window.removeEventListener("drop", handleDrop);
     };
-  }, [addImageFileAsLayer]);
+  }, [addImageFilesAsLayers]);
 
   // ---------- Layout ----------
 
@@ -950,13 +977,14 @@ export const EditorWorkspace = ({
         ref={layerInputRef}
         type="file"
         accept={RASTER_FILE_ACCEPT}
+        multiple
         className="hidden"
         tabIndex={-1}
         aria-hidden="true"
         onChange={(event) => {
-          const file = event.target.files?.[0];
+          const files = Array.from(event.target.files ?? []);
           event.target.value = "";
-          if (file) void addImageFileAsLayer(file);
+          void addImageFilesAsLayers(files);
         }}
       />
       <AlertDialog

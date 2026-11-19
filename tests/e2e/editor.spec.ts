@@ -1120,6 +1120,31 @@ test("dropping an image onto the editor adds it as a layer", async ({ page }) =>
     .toBe(2);
 });
 
+test("dropping several images adds each as a layer named after its file, and names the ones that fail", async ({ page }) => {
+  await uploadImage(page);
+  const center = await canvasCenter(page);
+  await page.evaluate(
+    async ({ base64, x, y }) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], "first.png", { type: "image/png" }));
+      transfer.items.add(new File([new Uint8Array([1, 2, 3])], "broken.png", { type: "image/png" }));
+      transfer.items.add(new File([bytes], "second photo.png", { type: "image/png" }));
+      const init = { dataTransfer: transfer, clientX: x, clientY: y, bubbles: true, cancelable: true };
+      const target = document.querySelector("canvas.upper-canvas")!;
+      target.dispatchEvent(new DragEvent("dragenter", init));
+      target.dispatchEvent(new DragEvent("dragover", init));
+      target.dispatchEvent(new DragEvent("drop", init));
+    },
+    { base64: PNG_BASE64, x: center.x, y: center.y }
+  );
+  await expect
+    .poll(async () => (await autosavedObjects(page)).filter((o) => !o.__isBackground).map((o) => o.name))
+    .toEqual(["first", "second photo"]);
+  await expect(page.getByText(/One file could not be added: broken\.png/)).toBeVisible();
+  await expect(page.getByText("2 images added as layers")).toBeVisible();
+});
+
 test("blank canvas presets open a document of the preset size", async ({ page }) => {
   await page.getByRole("button", { name: /New Video thumbnail canvas/ }).click();
   await expect(page.getByText("Remove BG")).toBeVisible();
