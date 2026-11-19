@@ -50,6 +50,7 @@ import {
   Save,
   Scaling,
   Proportions,
+  FileDown,
   History,
   Spline,
   Move3d,
@@ -193,6 +194,8 @@ export interface EditorCommandContext {
   requestOpenProject: () => void;
   placeImage: () => void;
   saveProject: () => void;
+  /** File › Save as Photoshop (PSD). */
+  savePsd: () => void;
   exportImage: () => void;
   ai: AiActions;
   pickColor: () => void;
@@ -279,6 +282,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     requestOpenProject,
     placeImage,
     saveProject,
+    savePsd,
     exportImage,
     ai,
     pickColor,
@@ -614,6 +618,14 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         icon: Save,
         shortcuts: KEYMAP.saveProject,
         run: saveProject,
+      },
+      {
+        id: "file.savePsd",
+        label: "Save as Photoshop (PSD)",
+        icon: FileDown,
+        run: savePsd,
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "psd photoshop layers download",
       },
       {
         id: "file.export",
@@ -1650,6 +1662,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     requestOpenProject,
     rotate,
     saveProject,
+    savePsd,
     setSnapping,
     showShortcuts,
     modifySelection,

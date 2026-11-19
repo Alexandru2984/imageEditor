@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { initializeCanvas, writePsd, type Psd } from "ag-psd";
-import { blendFromPsd, blendToPsd, decodePsd } from "./psdDocument";
+import { blendFromPsd, blendToPsd, decodePsd, encodePsd } from "./psdDocument";
 
 const solid = (width: number, height: number, rgba: [number, number, number, number]) => {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -79,5 +79,27 @@ describe("decodePsd", () => {
     expect(blendToPsd("soft-light")).toBe("soft light");
     expect(blendToPsd("source-over")).toBe("normal");
     expect(blendToPsd("lighter")).toBe("normal");
+  });
+
+  it("writes what it reads back: layers with their settings, the composite and the guides", () => {
+    const pixels = (width: number, height: number, rgba: [number, number, number, number]) => solid(width, height, rgba).data;
+    const written = encodePsd({
+      width: 6,
+      height: 4,
+      layers: [
+        { name: "Background", left: 0, top: 0, width: 6, height: 4, opacity: 1, visible: true, blend: "source-over", pixels: pixels(6, 4, [255, 255, 255, 255]) },
+        { name: "Spot", left: 1, top: 2, width: 2, height: 1, opacity: 0.4, visible: false, blend: "screen", pixels: pixels(2, 1, [0, 128, 0, 255]) },
+      ],
+      composite: pixels(6, 4, [255, 255, 255, 255]),
+      guides: [{ axis: "y", position: 2 }],
+    });
+    const back = decodePsd(written);
+    expect(back.layers.map(({ name, left, top, width, height, visible, blend }) => ({ name, left, top, width, height, visible, blend }))).toEqual([
+      { name: "Background", left: 0, top: 0, width: 6, height: 4, visible: true, blend: "source-over" },
+      { name: "Spot", left: 1, top: 2, width: 2, height: 1, visible: false, blend: "screen" },
+    ]);
+    expect(back.layers[1]!.opacity).toBeCloseTo(0.4, 2);
+    expect([...back.layers[1]!.pixels.slice(0, 4)]).toEqual([0, 128, 0, 255]);
+    expect(back.guides).toEqual([{ axis: "y", position: 2 }]);
   });
 });

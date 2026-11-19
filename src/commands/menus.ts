@@ -12,6 +12,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "file.placeImage",
       "-",
       "file.saveProject",
+      "file.savePsd",
       "file.export",
     ],
   },

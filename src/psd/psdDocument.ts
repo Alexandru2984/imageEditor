@@ -4,6 +4,7 @@ import {
   getLayerMaskImageData,
   initializeCanvas,
   readPsd,
+  writePsd,
   type BlendMode,
   type Layer,
   type PixelData,
@@ -227,4 +228,54 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
   if (counts.blend) notes.push("some blend modes became Normal");
   if (counts.groupBlend) notes.push("groups were flattened into their layers");
   return { width, height, layers, composite, guides, notes };
+}
+
+/** A document to write: its layers' pixels in document pixels, bottom to top. */
+export interface PsdToWrite {
+  width: number;
+  height: number;
+  layers: Omit<DecodedLayer, "mask">[];
+  /** The flattened document, what other programs show. */
+  composite: Uint8ClampedArray;
+  /** In document pixels from the top-left corner. */
+  guides: Guide[];
+}
+
+const pixelData = (width: number, height: number, data: Uint8ClampedArray) =>
+  ({ width, height, data, colorSpace: "srgb" }) as unknown as ImageData;
+
+export function encodePsd(document: PsdToWrite): ArrayBuffer {
+  initialize();
+  return writePsd(
+    {
+      width: document.width,
+      height: document.height,
+      imageData: pixelData(document.width, document.height, document.composite),
+      children: document.layers.map((layer) => ({
+        name: layer.name,
+        left: layer.left,
+        top: layer.top,
+        right: layer.left + layer.width,
+        bottom: layer.top + layer.height,
+        opacity: layer.opacity,
+        hidden: !layer.visible,
+        blendMode: blendToPsd(layer.blend),
+        imageData: pixelData(layer.width, layer.height, layer.pixels),
+      })),
+      ...(document.guides.length
+        ? {
+            imageResources: {
+              gridAndGuidesInformation: {
+                guides: document.guides.map((guide) => ({
+                  location: guide.position,
+                  direction: guide.axis === "x" ? ("vertical" as const) : ("horizontal" as const),
+                })),
+              },
+            },
+          }
+        : {}),
+    },
+    // Even an opaque bottom layer stays a layer, as the editor has it.
+    { generateThumbnail: false, noBackground: true }
+  );
 }

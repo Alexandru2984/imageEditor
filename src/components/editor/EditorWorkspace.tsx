@@ -1,5 +1,7 @@
 // Fabric defaults must be set before any Fabric object is constructed; this
 // module is the editor chunk's entry point.
+import { documentAsPsd } from "@/psd/savePsd";
+import { downloadBlob } from "@/utils/download";
 import { HistoryPanel } from "./HistoryPanel";
 import { describeChange, forgetStepName, takeStepName, toolStepName } from "@/utils/historySteps";
 import { GuideDialog, type GuideDialogKind } from "@/components/editor/GuideDialog";
@@ -428,6 +430,25 @@ export const EditorWorkspace = ({
     }
   }, [fabricCanvas]);
 
+  const savingPsdRef = useRef(false);
+  const handleSavePsd = useCallback(() => {
+    if (!fabricCanvas || savingPsdRef.current) return;
+    savingPsdRef.current = true;
+    const notice = toast.loading("Writing the Photoshop file…");
+    documentAsPsd(fabricCanvas)
+      .then((blob) => {
+        downloadBlob(blob, `${documentName}.psd`);
+        toast.success("Saved as a Photoshop file", { id: notice });
+      })
+      .catch((error: unknown) => {
+        console.error("Could not write the PSD file:", error);
+        toast.error(error instanceof Error ? error.message : "Couldn't write the Photoshop file", { id: notice });
+      })
+      .finally(() => {
+        savingPsdRef.current = false;
+      });
+  }, [fabricCanvas, documentName]);
+
   // ---------- Canvas commands ----------
 
   const handleZoomIn = useCallback(() => setZoom((value) => clampZoom(value + 0.1)), []);
@@ -669,6 +690,7 @@ export const EditorWorkspace = ({
     requestOpenProject,
     placeImage,
     saveProject: handleSaveProjectFile,
+    savePsd: handleSavePsd,
     exportImage: openExport,
     ai,
     pickColor: eyedropper.start,

@@ -5,6 +5,7 @@ import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { validateProjectSnapshot } from "@/utils/projectFile";
 import { throwIfAborted } from "@/utils/abort";
 import type { DecodedLayer, DecodedPsd } from "./psdDocument";
+import { runPsdWorker } from "./psdWorkerClient";
 
 /** Photoshop files larger than this are not read at all. */
 const MAX_PSD_BYTES = 300 * 1024 * 1024;
@@ -18,29 +19,12 @@ export async function isPsdFile(file: File): Promise<boolean> {
   return head[0] === 0x38 && head[1] === 0x42 && head[2] === 0x50 && head[3] === 0x53; // "8BPS"
 }
 
-function decodeInWorker(buffer: ArrayBuffer, signal?: AbortSignal): Promise<DecodedPsd> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./psd.worker.ts", import.meta.url), { type: "module" });
-    const stop = (error?: Error, result?: DecodedPsd) => {
-      window.clearTimeout(timer);
-      signal?.removeEventListener("abort", onAbort);
-      worker.terminate();
-      if (error) reject(error);
-      else resolve(result!);
-    };
-    const onAbort = () => stop(new DOMException("Aborted", "AbortError"));
-    const timer = window.setTimeout(() => stop(new Error("The Photoshop file took too long to read")), READ_TIMEOUT_MS);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    worker.addEventListener("message", (event: MessageEvent) => {
-      const { result, error } = event.data as { result?: DecodedPsd; error?: string };
-      if (result) stop(undefined, result);
-      else stop(new Error(error ?? "The Photoshop file could not be read"));
-    });
-    // Out of memory, most likely: the file asked for more than the page can give.
-    worker.addEventListener("error", () => stop(new Error("The Photoshop file could not be read")));
-    worker.postMessage({ buffer }, [buffer]);
+const decodeInWorker = (buffer: ArrayBuffer, signal?: AbortSignal) =>
+  runPsdWorker<DecodedPsd>({ type: "read", buffer }, [buffer], {
+    signal,
+    timeoutMs: READ_TIMEOUT_MS,
+    failure: "The Photoshop file could not be read",
   });
-}
 
 const readDataUrl = (blob: Blob): Promise<string> =>
   new Promise((resolve, reject) => {

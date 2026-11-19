@@ -40,6 +40,7 @@ function editorCommands(): CommandMap {
     requestOpenProject: noop,
     placeImage: noop,
     saveProject: noop,
+    savePsd: noop,
     exportImage: noop,
     ai: {
       isProcessing: false,
