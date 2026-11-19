@@ -307,3 +307,35 @@ test("the Histogram panel opens from the menu and fits over the phone's canvas",
   await panel.getByRole("button", { name: "Close histogram" }).tap();
   await expect(panel).toHaveCount(0);
 });
+
+test("the clone stamp takes its source from a tap after Set source", async ({ page }) => {
+  // Red on the left half, grey on the right.
+  await uploadSolidImage(page, 400, 300, "#808080", [{ x: 0, y: 0, width: 200, height: 300, color: "#ff0000" }]);
+  await page.getByRole("button", { name: "Clone stamp (S)" }).tap();
+  const options = page.getByRole("group", { name: "Tool options" });
+  await options.getByRole("button", { name: "Set source" }).tap();
+  await expectNoSidewaysScroll(page);
+  const center = await canvasCenter(page);
+  await page.touchscreen.tap(center.x - 60, center.y);
+  await expect(options.getByRole("button", { name: "Set source" })).toHaveAttribute("aria-pressed", "false");
+  await page.touchscreen.tap(center.x + 60, center.y);
+  // The tap landed on the grey and copied the red there.
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ x, y }) => {
+          const lower = document.querySelector("canvas.lower-canvas") as HTMLCanvasElement;
+          const box = lower.getBoundingClientRect();
+          const ratio = lower.width / box.width;
+          return [
+            ...lower
+              .getContext("2d")!
+              .getImageData(Math.round((x - box.left) * ratio), Math.round((y - box.top) * ratio), 1, 1)
+              .data.slice(0, 3),
+          ];
+        },
+        { x: center.x + 60, y: center.y }
+      )
+    )
+    .toEqual([255, 0, 0]);
+});

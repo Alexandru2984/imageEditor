@@ -17,7 +17,8 @@ export type Tool =
   | "ellipseMarquee"
   | "lasso"
   | "polygonLasso"
-  | "magicWand";
+  | "magicWand"
+  | "cloneStamp";
 
 export interface HistoryEntry {
   json: string;

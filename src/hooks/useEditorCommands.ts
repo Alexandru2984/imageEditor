@@ -51,6 +51,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   SquareDashed,
+  Stamp,
   Trash2,
   Type,
   Undo2,
@@ -102,6 +103,7 @@ import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentD
 import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
+  usesPaintBrush,
   isFillTool,
   isMarqueeTool,
   isSelectionTool,
@@ -1125,6 +1127,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
       tool("tool.draw", "draw", "Marker", Highlighter, undefined, "draw pen highlighter neon dashed strokes"),
       tool("tool.eraser", "eraser", "Eraser", Eraser, KEYMAP.eraserTool),
+      tool("tool.cloneStamp", "cloneStamp", "Clone stamp", Stamp, KEYMAP.cloneStampTool, "clone copy retouch duplicate"),
       {
         id: "tool.fill",
         label: "Paint bucket or gradient",
@@ -1217,7 +1220,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
     ];
 
-    const painting = () => isBrushTool(activeTool) || activeTool === "eraser";
+    const painting = () => activeTool === "draw" || usesPaintBrush(activeTool);
     const brushKey = (
       id: string,
       label: string,

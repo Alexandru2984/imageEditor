@@ -29,6 +29,8 @@ import type { Tool } from "@/types/editor";
 import type { FabricObject } from "fabric";
 import { useShapeTool } from "@/hooks/useShapeTool";
 import { usePaintTool } from "@/hooks/usePaintTool";
+import { useRetouchTool } from "@/hooks/useRetouchTool";
+import type { RetouchOptions } from "@/raster/retouchSettings";
 import { useSelectionTool } from "@/hooks/useSelectionTool";
 import { installSelectionOverlay } from "@/selection/overlay";
 import { OUTSIDE_PHOTO } from "@/selection/actions";
@@ -58,6 +60,9 @@ interface CanvasProps {
   /** How a new selection shape joins the selection. */
   selectionMode: SelectionMode;
   wand: WandOptions;
+  retouch: RetouchOptions;
+  pickingSource: boolean;
+  onPickingSourceChange: (picking: boolean) => void;
   /** Select › Subject, offered while nothing is selected. */
   onSelectSubject: () => void;
   aiBusy: boolean;
@@ -114,6 +119,9 @@ export const Canvas = ({
   gradient,
   selectionMode,
   wand,
+  retouch,
+  pickingSource,
+  onPickingSourceChange,
   onSelectSubject,
   aiBusy,
   uploadedImage,
@@ -921,6 +929,17 @@ export const Canvas = ({
     paint,
     bucket,
     gradient,
+    spaceDownRef,
+  });
+
+  useRetouchTool({
+    canvasRef: fabricCanvasRef,
+    canvasKey: uploadedImage,
+    activeTool,
+    paint,
+    retouch,
+    pickingSource,
+    onPickingSourceChange,
     spaceDownRef,
   });
 

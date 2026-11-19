@@ -24,6 +24,7 @@ import { nativeMultiplier } from "@/utils/flatten";
 import { releaseCanvas, restrictToClip, selectionClip, snapshotSurface } from "@/selection/clip";
 import { sceneToGrid, selectionOf } from "@/selection/state";
 import type { Tool } from "@/types/editor";
+import { pressureOf, strokeBrushOutline } from "./brushPointer";
 
 interface UsePaintToolOptions {
   canvasRef: MutableRefObject<FabricCanvas | null>;
@@ -53,12 +54,6 @@ const findLayer = (canvas: FabricCanvas, id: string | null): FabricObject | unde
   id === null
     ? undefined
     : canvas.getObjects().find((object) => (object as EditorFabricObject).__layerId === id);
-
-function pressureOf(event: Event): number {
-  const pointer = event as PointerEvent;
-  // Only pens report real pressure; mice and fingers paint at full size.
-  return pointer.pointerType === "pen" && pointer.pressure > 0 ? pointer.pressure : 1;
-}
 
 const PIXEL_TOOLS: ReadonlySet<Tool> = new Set<Tool>(["brush", "eraser", "bucket", "gradient"]);
 
@@ -166,20 +161,7 @@ export function usePaintTool({
       if (!outline) return;
       const multiplier = nativeMultiplier(canvas);
       const radius = (settingsRef.current.paint.size / 2 / multiplier) * canvas.getZoom();
-      if (radius < 2) return;
-      const ratio = canvas.getRetinaScaling();
-      top.save();
-      top.setTransform(ratio, 0, 0, ratio, 0, 0);
-      top.lineWidth = 1;
-      top.beginPath();
-      top.arc(outline.x, outline.y, radius, 0, Math.PI * 2);
-      top.strokeStyle = "rgba(0, 0, 0, 0.7)";
-      top.stroke();
-      top.beginPath();
-      top.arc(outline.x, outline.y, radius + 1, 0, Math.PI * 2);
-      top.strokeStyle = "rgba(255, 255, 255, 0.8)";
-      top.stroke();
-      top.restore();
+      strokeBrushOutline(canvas, outline.x, outline.y, radius);
     };
 
     const render = () => {

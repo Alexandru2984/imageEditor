@@ -8,6 +8,7 @@ import {
   SquareDashed,
   WandSparkles,
   Pentagon,
+  Stamp,
   type LucideIcon,
 } from "lucide-react";
 import type { Tool } from "@/types/editor";
@@ -117,6 +118,23 @@ export const LASSO_TOOLS: GroupedToolDef<LassoTool>[] = [
 
 export const isLassoTool = (tool: Tool): tool is LassoTool =>
   tool === "lasso" || tool === "polygonLasso" || tool === "magicWand";
+
+export const CLONE_STAMP_TOOL: GroupedToolDef<"cloneStamp"> = {
+  id: "cloneStamp",
+  icon: Stamp,
+  label: "Clone stamp (S)",
+  name: "Clone stamp",
+  description: "Alt-click a source, then paint its pixels elsewhere",
+};
+
+/** Tools that rework a layer's own pixels as they paint. */
+export const isRetouchTool = (tool: Tool): boolean => tool === "cloneStamp";
+
+/** Retouching tools that copy from a source the user sets (Alt-click). */
+export const needsCloneSource = (tool: Tool): boolean => tool === "cloneStamp";
+
+/** Tools that paint with the pixel brush's size and hardness. */
+export const usesPaintBrush = (tool: Tool): boolean => tool === "brush" || tool === "eraser" || isRetouchTool(tool);
 
 /** Tools that draw a pixel selection. */
 export const isSelectionTool = (tool: Tool): boolean => isMarqueeTool(tool) || isLassoTool(tool);

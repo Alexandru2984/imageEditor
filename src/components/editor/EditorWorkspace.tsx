@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionState } from "@/hooks/useSessionState";
+import { DEFAULT_RETOUCH_OPTIONS, type RetouchOptions } from "@/raster/retouchSettings";
 import { HistogramPanel } from "./HistogramPanel";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -156,6 +157,12 @@ export const EditorWorkspace = ({
   const [selectionMode, setSelectionMode] = useSessionState<SelectionMode>("selectionMode", "replace");
   const [lastLassoTool, setLastLassoTool] = useSessionState<LassoTool>("lastLassoTool", "lasso");
   const [wand, setWand] = useSessionState<WandOptions>("wand", DEFAULT_WAND_OPTIONS);
+  const [retouch, setRetouch] = useSessionState<RetouchOptions>("retouch", DEFAULT_RETOUCH_OPTIONS);
+  const updateRetouch = useCallback(
+    (change: Partial<RetouchOptions>) => setRetouch((current) => ({ ...current, ...change })),
+    [setRetouch]
+  );
+  const [pickingSource, setPickingSource] = useState(false);
   const updateWand = useCallback(
     (change: Partial<WandOptions>) => setWand((current) => ({ ...current, ...change })),
     [setWand]
@@ -727,6 +734,10 @@ export const EditorWorkspace = ({
       onSelectionModeChange={setSelectionMode}
       wand={wand}
       onWandChange={updateWand}
+      retouch={retouch}
+      onRetouchChange={updateRetouch}
+      pickingSource={pickingSource}
+      onPickingSourceChange={setPickingSource}
       maskLayerName={maskTargetLayer ? (maskTargetLayer as EditorFabricObject).name ?? "the layer" : null}
       onLeaveMask={leaveMask}
     />
@@ -847,6 +858,9 @@ export const EditorWorkspace = ({
             gradient={gradient}
             selectionMode={selectionMode}
             wand={wand}
+            retouch={retouch}
+            pickingSource={pickingSource}
+            onPickingSourceChange={setPickingSource}
             onSelectSubject={() => void ai.selectSubject()}
             aiBusy={ai.isProcessing}
             secondaryColor={backgroundColor}

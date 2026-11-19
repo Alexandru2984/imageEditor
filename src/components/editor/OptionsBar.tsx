@@ -19,6 +19,9 @@ import {
   SquareDashed,
   Type,
   CircleDot,
+  Crosshair,
+  Link2,
+  Stamp,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -40,7 +43,8 @@ import type { Tool } from "@/types/editor";
 import type { SelectionMode } from "@/selection/mask";
 import type { WandOptions } from "@/selection/magicWand";
 import { cn } from "@/lib/utils";
-import { isSelectionTool } from "./toolGroups";
+import { isSelectionTool, usesPaintBrush } from "./toolGroups";
+import type { RetouchOptions } from "@/raster/retouchSettings";
 
 export interface BrushSettings {
   kind: BrushKind;
@@ -78,6 +82,11 @@ interface OptionsBarProps {
   onSelectionModeChange: (mode: SelectionMode) => void;
   wand: WandOptions;
   onWandChange: (change: Partial<WandOptions>) => void;
+  retouch: RetouchOptions;
+  onRetouchChange: (change: Partial<RetouchOptions>) => void;
+  /** The clone source is set by the next click (phones have no Alt key). */
+  pickingSource: boolean;
+  onPickingSourceChange: (picking: boolean) => void;
   /** The layer whose mask the pixel tools paint on, if any. */
   maskLayerName?: string | null;
   onLeaveMask?: () => void;
@@ -130,6 +139,11 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     hint: "Click a colour · Shift adds · Alt subtracts",
   },
   crop: { icon: Crop, name: "Crop", hint: "Drag the frame · Enter applies · Esc cancels" },
+  cloneStamp: {
+    icon: Stamp,
+    name: "Clone stamp",
+    hint: "Alt-click sets the source · Shift-click draws a straight line",
+  },
 };
 
 function ToggleOption({
@@ -288,17 +302,17 @@ export function OptionsBar({
   onSelectionModeChange,
   wand,
   onWandChange,
+  retouch,
+  onRetouchChange,
+  pickingSource,
+  onPickingSourceChange,
   maskLayerName,
   onLeaveMask,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
   const painting =
-    activeTool === "draw" ||
-    activeTool === "brush" ||
-    activeTool === "eraser" ||
-    activeTool === "bucket" ||
-    activeTool === "gradient";
+    activeTool === "draw" || usesPaintBrush(activeTool) || activeTool === "bucket" || activeTool === "gradient";
   const brushOption = BRUSHES.find((option) => option.kind === brush.kind);
   const sliderClass = compact ? "w-16" : "w-20 xl:w-28";
 
@@ -340,8 +354,67 @@ export function OptionsBar({
     </Setting>
   );
 
+  const retouchPercent = (label: string, key: "opacity" | "flow", aria: string) => (
+    <Setting label={label} value={`${retouch[key]}%`}>
+      <Slider
+        value={[retouch[key]]}
+        aria-label={aria}
+        min={1}
+        max={100}
+        step={1}
+        onValueChange={(value) => onRetouchChange({ [key]: value[0] ?? retouch[key] })}
+        className={sliderClass}
+      />
+    </Setting>
+  );
+
+  const sizeSetting = (
+    <Setting label="Size" value={`${paint.size}px`} keys="[ and ] change the size">
+      <Slider
+        value={[paintSizeToSlider(paint.size)]}
+        aria-label="Brush size"
+        aria-valuetext={`${paint.size} pixels`}
+        min={0}
+        max={PAINT_SLIDER_STEPS}
+        step={1}
+        onValueChange={(value) => onPaintChange({ size: sliderToPaintSize(value[0] ?? paintSizeToSlider(paint.size)) })}
+        className={sliderClass}
+      />
+    </Setting>
+  );
+
   let options: ReactNode = null;
-  if (activeTool === "brush" || activeTool === "eraser") {
+  if (activeTool === "cloneStamp") {
+    options = (
+      <>
+        <ToggleOption
+          pressed={pickingSource}
+          onChange={onPickingSourceChange}
+          icon={Crosshair}
+          label="Set source"
+          title="The next click picks where to copy from (or Alt-click)"
+        />
+        {sizeSetting}
+        {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
+        {retouchPercent("Opacity", "opacity", "Clone opacity")}
+        {retouchPercent("Flow", "flow", "Clone flow")}
+        <ToggleOption
+          pressed={retouch.aligned}
+          onChange={(aligned) => onRetouchChange({ aligned })}
+          icon={Link2}
+          label="Aligned"
+          title="The source follows the brush from stroke to stroke"
+        />
+        <ToggleOption
+          pressed={retouch.sampleAll}
+          onChange={(sampleAll) => onRetouchChange({ sampleAll })}
+          icon={Layers}
+          label="All layers"
+          title="Copy from everything visible, not only this layer"
+        />
+      </>
+    );
+  } else if (activeTool === "brush" || activeTool === "eraser") {
     options = (
       <>
         <Setting label="Size" value={`${paint.size}px`} keys="[ and ] change the size">

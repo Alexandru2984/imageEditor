@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { SHAPE_TOOLS } from "./shapeTools";
 import {
   BRUSH_TOOLS,
+  CLONE_STAMP_TOOL,
   FILL_TOOLS,
   LASSO_TOOLS,
   MARQUEE_TOOLS,
@@ -341,6 +342,7 @@ export const Toolbar = ({
         className={buttonSize}
         side={tooltipSide}
       />
+      {renderTool(CLONE_STAMP_TOOL)}
       {renderTool(ERASER_TOOL)}
       <ToolGroupButton
         tools={FILL_TOOLS}
