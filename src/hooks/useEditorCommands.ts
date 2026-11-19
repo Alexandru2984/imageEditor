@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { DocumentDialogKind } from "@/components/editor/DocumentDialog";
 import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import {
   ArrowDownToLine,
@@ -43,6 +44,7 @@ import {
   RotateCw,
   Save,
   Scaling,
+  Proportions,
   Scissors,
   CircleDot,
   Sparkle,
@@ -190,6 +192,8 @@ export interface EditorCommandContext {
   strokeSelection: () => void;
   /** Layer › Layer style's dialog, for a layer. */
   openLayerStyle: (layer: FabricObject) => void;
+  /** An Image menu dialog that changes the whole document. */
+  openDocumentDialog: (kind: DocumentDialogKind) => void;
   /** An Image › Adjustments dialog. */
   openAdjustment: (kind: AdjustmentKind) => void;
   resetColors: () => void;
@@ -260,6 +264,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     colors,
     strokeSelection,
     openLayerStyle,
+    openDocumentDialog,
     openAdjustment,
     resetColors,
     openCommandPalette,
@@ -674,6 +679,15 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.flipHorizontal,
         run: () => flip("x"),
         keywords: "mirror",
+      },
+      {
+        id: "image.imageSize",
+        label: "Image Size…",
+        icon: Proportions,
+        shortcuts: KEYMAP.imageSize,
+        run: () => openDocumentDialog("imageSize"),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "resize resample scale dimensions pixels",
       },
       {
         id: "image.flipVertical",
@@ -1427,6 +1441,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     colors,
     strokeSelection,
     openLayerStyle,
+    openDocumentDialog,
     openAdjustment,
     togglePanel,
     undo,

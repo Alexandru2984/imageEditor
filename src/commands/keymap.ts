@@ -20,6 +20,7 @@ export const KEYMAP = {
   fillForeground: [{ key: "Backspace", alt: true }],
   fillBackground: [{ key: "Backspace", mod: true }],
   contentAwareFill: [{ key: "Backspace", shift: true }],
+  imageSize: [{ key: "i", mod: true, alt: true }],
 
   duplicate: [{ key: "j", mod: true }],
   layerViaCut: [{ key: "j", mod: true, shift: true }],

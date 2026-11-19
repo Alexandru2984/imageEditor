@@ -64,6 +64,7 @@ function editorCommands(): CommandMap {
     colors: { foreground: "#000000", background: "#ffffff" },
     strokeSelection: noop,
     openLayerStyle: noop,
+    openDocumentDialog: noop,
     openAdjustment: noop,
     resetColors: noop,
     openCommandPalette: noop,

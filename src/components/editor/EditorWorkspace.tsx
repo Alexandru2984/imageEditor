@@ -54,6 +54,7 @@ import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import { LayerStyleDialog } from "./LayerStyleDialog";
 import { AdjustmentDialog, type AdjustmentKind } from "./adjustments/AdjustmentDialog";
+import { DocumentDialog, type DocumentDialogKind } from "./DocumentDialog";
 import { copySource, selectionLayer } from "@/selection/actions";
 import { selectionOf } from "@/selection/state";
 import { useMaskTarget } from "@/hooks/useMaskTarget";
@@ -502,6 +503,7 @@ export const EditorWorkspace = ({
   const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
   /** The Image › Adjustments dialog that is open. */
   const [adjustment, setAdjustment] = useState<AdjustmentKind | null>(null);
+  const [documentDialog, setDocumentDialog] = useState<DocumentDialogKind | null>(null);
   const maskTargetLayer = useMaskTarget(fabricCanvas);
   const leaveMask = useCallback(() => {
     if (fabricCanvas) maskTargetOf(fabricCanvas).set(null);
@@ -575,6 +577,7 @@ export const EditorWorkspace = ({
     modifySelection: setSelectionModification,
     strokeSelection: openStrokeDialog,
     openLayerStyle: setStyledLayer,
+    openDocumentDialog: setDocumentDialog,
     openAdjustment: setAdjustment,
     colors: paintColors,
     adjustBrush,
@@ -973,6 +976,12 @@ export const EditorWorkspace = ({
         kind={adjustment}
         colors={{ foreground: activeColor, background: backgroundColor }}
         onClose={() => setAdjustment(null)}
+      />
+      <DocumentDialog
+        canvas={fabricCanvas}
+        kind={documentDialog}
+        onClose={() => setDocumentDialog(null)}
+        onResized={handleFit}
       />
       <SelectionModifyDialog
         canvas={fabricCanvas}

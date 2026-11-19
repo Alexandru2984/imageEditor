@@ -40,6 +40,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "image.flipHorizontal",
       "image.flipVertical",
       "-",
+      "image.imageSize",
+      "-",
       {
         label: "Adjustments",
         items: [
