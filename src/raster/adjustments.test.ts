@@ -28,6 +28,7 @@ import {
   invertLut,
   posterizeLut,
   threshold,
+  histogramStats,
 } from "./adjustments";
 
 const pixels = (...values: number[][]) => new Uint8ClampedArray(values.flat());
@@ -198,5 +199,20 @@ describe("colour adjustments", () => {
     colorBalance(pixels([128, 128, 128, 255]), out, settings);
     const lightness = (Math.max(out[0]!, out[1]!, out[2]!) + Math.min(out[0]!, out[1]!, out[2]!)) / 2;
     expect(Math.abs(lightness - 128)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("histogram figures", () => {
+  it("gives the mean, spread and median", () => {
+    const bins = new Uint32Array(256);
+    bins[0] = 2;
+    bins[100] = 1;
+    bins[200] = 1;
+    const stats = histogramStats(bins);
+    expect(stats.count).toBe(4);
+    expect(stats.mean).toBe(75);
+    expect(stats.median).toBe(0);
+    expect(stats.stdDev).toBeCloseTo(Math.sqrt((2 * 75 ** 2 + 25 ** 2 + 125 ** 2) / 4));
+    expect(histogramStats(new Uint32Array(256)).count).toBe(0);
   });
 });

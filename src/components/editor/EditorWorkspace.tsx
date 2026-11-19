@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSessionState } from "@/hooks/useSessionState";
+import { HistogramPanel } from "./HistogramPanel";
 import { useUndoRedo } from "@/hooks/useUndoRedo";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useEditorCommands } from "@/hooks/useEditorCommands";
@@ -143,6 +144,7 @@ export const EditorWorkspace = ({
   const [lastShape, setLastShape] = useSessionState<ShapeKind>("lastShape", "rectangle");
   const [lastBrushTool, setLastBrushTool] = useSessionState<BrushTool>("lastBrushTool", "brush");
   const [paint, setPaint] = useSessionState<PaintOptions>("paint", DEFAULT_PAINT_OPTIONS);
+  const [histogramOpen, setHistogramOpen] = useSessionState<boolean>("histogram", false);
   const [bucket, setBucket] = useSessionState<BucketOptions>("bucket", DEFAULT_BUCKET_OPTIONS);
   const [gradient, setGradient] = useSessionState<GradientOptions>("gradient", DEFAULT_GRADIENT_OPTIONS);
   const updateGradient = useCallback(
@@ -545,6 +547,8 @@ export const EditorWorkspace = ({
     setSnapping: handleSnappingChange,
     panel,
     togglePanel,
+    histogram: histogramOpen,
+    setHistogram: setHistogramOpen,
     openPanel,
     showShortcuts,
     modifySelection: setSelectionModification,
@@ -854,6 +858,8 @@ export const EditorWorkspace = ({
             onToolChange={handleToolChange}
             onLoadError={onLoadError}
           />
+
+          {histogramOpen && <HistogramPanel canvas={fabricCanvas} onClose={() => setHistogramOpen(false)} />}
 
           {eyedropper.picking && !("EyeDropper" in window) && (
             <div

@@ -17,6 +17,7 @@ import {
   FolderOpen,
   ImageIcon,
   ImagePlus,
+  ChartArea,
   Keyboard,
   Lock,
   Maximize,
@@ -157,6 +158,9 @@ export interface EditorCommandContext {
   setSnapping: (enabled: boolean) => void;
   panel: PanelTab | null;
   togglePanel: (tab: PanelTab) => void;
+  /** View › Histogram, which floats over the canvas. */
+  histogram: boolean;
+  setHistogram: (open: boolean) => void;
   openPanel: (tab: PanelTab) => void;
   showShortcuts: () => void;
   /** Opens Select › Modify's dialog. */
@@ -228,6 +232,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     setSnapping,
     panel,
     togglePanel,
+    histogram,
+    setHistogram,
     openPanel,
     showShortcuts,
     modifySelection,
@@ -1073,6 +1079,14 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         isChecked: () => panel === "layers",
         toggle: true,
       },
+      {
+        id: "view.histogram",
+        label: "Histogram",
+        icon: ChartArea,
+        run: () => setHistogram(!histogram),
+        isChecked: () => histogram,
+        toggle: true,
+      },
 
       // ---------- Help ----------
       {
@@ -1266,6 +1280,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openCommandPalette,
     openPanel,
     panel,
+    histogram,
+    setHistogram,
     paste,
     pickColor,
     placeImage,

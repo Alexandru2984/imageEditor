@@ -291,3 +291,19 @@ test("Levels opens from the menu, fits the phone and applies", async ({ page }) 
     .poll(async () => (await autosavedLayerPixels(page, "Background", [[200, 150]]))?.pixels[0]?.slice(0, 3))
     .toEqual([0, 0, 0]);
 });
+
+test("the Histogram panel opens from the menu and fits over the phone's canvas", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#808080");
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "View", exact: true }).tap();
+  await page.getByRole("menuitemcheckbox", { name: "Histogram" }).tap();
+  await page.keyboard.press("Escape");
+  const panel = page.getByRole("region", { name: "Histogram" });
+  await expectOnScreen(page, panel);
+  await expectNoSidewaysScroll(page);
+  await expect(panel.getByRole("term").filter({ hasText: "Mean" }).locator("xpath=following-sibling::dd")).toHaveText(
+    "128.00"
+  );
+  await panel.getByRole("button", { name: "Close histogram" }).tap();
+  await expect(panel).toHaveCount(0);
+});

@@ -160,6 +160,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "view.propertiesPanel",
       "view.adjustPanel",
       "view.layersPanel",
+      "view.histogram",
       "-",
       "theme",
     ],

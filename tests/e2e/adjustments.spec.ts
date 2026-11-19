@@ -214,3 +214,49 @@ test("each filter in the Filter menu changes the photo", async ({ page }) => {
     await expect.poll(async () => JSON.stringify(await photoPixels(page, probe)), { message: item }).not.toBe(before);
   }
 });
+
+async function toggleHistogram(page: Page) {
+  await page.getByRole("menuitem", { name: "View", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Histogram" }).click();
+  // Toggles leave the menu open.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+}
+
+test("the Histogram panel measures the image, follows its changes and counts only the selection", async ({ page }) => {
+  // Half mid grey, half white.
+  await uploadSolidImage(page, 400, 300, "#808080", [{ x: 200, y: 0, width: 200, height: 300, color: "#ffffff" }]);
+  await settle(page);
+  await toggleHistogram(page);
+  const panel = page.getByRole("region", { name: "Histogram" });
+  const figure = (label: string) => panel.getByRole("term").filter({ hasText: label }).locator("xpath=following-sibling::dd");
+  await expect(figure("Mean")).toHaveText("191.50");
+  await expect(figure("Median")).toHaveText("128");
+  await expect(figure("Std Dev")).toHaveText("63.50");
+
+  // Changes show up by themselves.
+  await page.keyboard.press("Control+i");
+  await expect(figure("Mean")).toHaveText("63.50");
+
+  // With a selection, only its pixels count.
+  await page.keyboard.press("m");
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x - 400, center.y - 280);
+  await page.mouse.down();
+  await page.mouse.move(center.x - 200, center.y, { steps: 4 });
+  await page.mouse.move(center.x, center.y + 280, { steps: 4 });
+  await page.mouse.up();
+  await expect(figure("Mean")).toHaveText("127.00");
+  await expect(panel).toContainText("Selected pixels only");
+
+  // Pointing at the chart reads one level.
+  const chart = panel.getByRole("img", { name: /histogram, mean/ });
+  const box = (await chart.boundingBox())!;
+  await page.mouse.move(box.x + box.width * (127.5 / 256), box.y + box.height / 2);
+  await expect(figure("Level")).toHaveText("127");
+  await expect(figure("Percentile")).toHaveText("100.0%");
+
+  // The menu item closes it again.
+  await toggleHistogram(page);
+  await expect(panel).toHaveCount(0);
+});

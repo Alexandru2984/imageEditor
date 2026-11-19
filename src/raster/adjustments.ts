@@ -576,3 +576,31 @@ export function colorBalance(source: Uint8ClampedArray, target: Uint8ClampedArra
     target[offset + 3] = source[offset + 3]!;
   }
 }
+
+export interface HistogramStats {
+  mean: number;
+  stdDev: number;
+  median: number;
+  count: number;
+}
+
+/** Photoshop's histogram figures for one channel. */
+export function histogramStats(bins: Uint32Array): HistogramStats {
+  let count = 0;
+  let sum = 0;
+  for (let level = 0; level < 256; level += 1) {
+    count += bins[level]!;
+    sum += bins[level]! * level;
+  }
+  if (count === 0) return { mean: 0, stdDev: 0, median: 0, count: 0 };
+  const mean = sum / count;
+  let variance = 0;
+  let median = -1;
+  let seen = 0;
+  for (let level = 0; level < 256; level += 1) {
+    variance += bins[level]! * (level - mean) ** 2;
+    seen += bins[level]!;
+    if (median < 0 && seen * 2 >= count) median = level;
+  }
+  return { mean, stdDev: Math.sqrt(variance / count), median, count };
+}

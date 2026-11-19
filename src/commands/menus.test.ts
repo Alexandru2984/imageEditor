@@ -52,6 +52,8 @@ function editorCommands(): CommandMap {
     setSnapping: noop,
     panel: null,
     togglePanel: noop,
+    histogram: false,
+    setHistogram: noop,
     openPanel: noop,
     showShortcuts: noop,
     modifySelection: noop,
