@@ -62,7 +62,8 @@ interface CloneSource {
 }
 
 /**
- * The retouching tools (Clone stamp, Healing brushes): strokes that rework the selected
+ * The retouching tools (Clone stamp, Healing brushes, Dodge, Burn, Sponge):
+ * strokes that rework the selected
  * layer's own pixels, or the photo's when no layer is selected.
  */
 export function useRetouchTool({
@@ -237,6 +238,16 @@ export function useRetouchTool({
       let retouchStroke: RetouchStroke;
       if (activeTool === "spotHealing") {
         retouchStroke = { kind: "spot" };
+      } else if (activeTool === "dodge" || activeTool === "burn") {
+        retouchStroke = {
+          kind: "tone",
+          mode: activeTool,
+          range: options.range,
+          exposure: options.exposure / 100,
+          protectTones: options.protectTones,
+        };
+      } else if (activeTool === "sponge") {
+        retouchStroke = { kind: "sponge", mode: options.spongeMode, flow: options.spongeFlow / 100 };
       } else if (cloning && source) {
         if (options.aligned && source.offset) {
           sourceOffset = source.offset;

@@ -11,6 +11,9 @@ import {
   Stamp,
   Bandage,
   Syringe,
+  Lollipop,
+  Hand,
+  Droplets,
   type LucideIcon,
 } from "lucide-react";
 import type { Tool } from "@/types/editor";
@@ -151,8 +154,19 @@ export const HEALING_TOOLS: GroupedToolDef<HealingTool>[] = [
 
 export const isHealingTool = (tool: Tool): tool is HealingTool => tool === "spotHealing" || tool === "healingBrush";
 
+/** Photoshop's toning group (O). */
+export type ToningTool = "dodge" | "burn" | "sponge";
+
+export const TONING_TOOLS: GroupedToolDef<ToningTool>[] = [
+  { id: "dodge", icon: Lollipop, label: "Dodge (O)", name: "Dodge", description: "Paint to lighten" },
+  { id: "burn", icon: Hand, label: "Burn (O)", name: "Burn", description: "Paint to darken" },
+  { id: "sponge", icon: Droplets, label: "Sponge (O)", name: "Sponge", description: "Paint to add or take away colour" },
+];
+
+export const isToningTool = (tool: Tool): tool is ToningTool => tool === "dodge" || tool === "burn" || tool === "sponge";
+
 /** Tools that rework a layer's own pixels as they paint. */
-export const isRetouchTool = (tool: Tool): boolean => tool === "cloneStamp" || isHealingTool(tool);
+export const isRetouchTool = (tool: Tool): boolean => tool === "cloneStamp" || isHealingTool(tool) || isToningTool(tool);
 
 /** Retouching tools that copy from a source the user sets (Alt-click). */
 export const needsCloneSource = (tool: Tool): boolean => tool === "cloneStamp" || tool === "healingBrush";

@@ -24,6 +24,10 @@ import {
   Stamp,
   Bandage,
   Syringe,
+  Lollipop,
+  Hand,
+  Droplets,
+  ShieldCheck,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -47,6 +51,7 @@ import type { WandOptions } from "@/selection/magicWand";
 import { cn } from "@/lib/utils";
 import { isSelectionTool, usesPaintBrush } from "./toolGroups";
 import type { RetouchOptions } from "@/raster/retouchSettings";
+import type { ToneRange } from "@/raster/retouchPainter";
 
 export interface BrushSettings {
   kind: BrushKind;
@@ -156,6 +161,9 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     name: "Healing brush",
     hint: "Alt-click sets the source · the copy takes on the light where it lands",
   },
+  dodge: { icon: Lollipop, name: "Dodge", hint: "Paint to lighten · stroke again to go further" },
+  burn: { icon: Hand, name: "Burn", hint: "Paint to darken · stroke again to go further" },
+  sponge: { icon: Droplets, name: "Sponge", hint: "Paint to take colour away, or add it" },
 };
 
 function ToggleOption({
@@ -395,8 +403,67 @@ export function OptionsBar({
     </Setting>
   );
 
+  const retouchSlider = (label: string, key: "exposure" | "spongeFlow", aria: string) => (
+    <Setting label={label} value={`${retouch[key]}%`}>
+      <Slider
+        value={[retouch[key]]}
+        aria-label={aria}
+        min={1}
+        max={100}
+        step={1}
+        onValueChange={(value) => onRetouchChange({ [key]: value[0] ?? retouch[key] })}
+        className={sliderClass}
+      />
+    </Setting>
+  );
+  const textChoice = (option: { label: string }) => <span className="text-xs">{option.label}</span>;
+
   let options: ReactNode = null;
-  if (activeTool === "spotHealing") {
+  if (activeTool === "dodge" || activeTool === "burn") {
+    options = (
+      <>
+        {sizeSetting}
+        {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
+        <Choice
+          label="Range"
+          value={retouch.range}
+          onChange={(range) => onRetouchChange({ range })}
+          options={[
+            { value: "shadows" as ToneRange, label: "Shadows" },
+            { value: "midtones" as ToneRange, label: "Midtones" },
+            { value: "highlights" as ToneRange, label: "Highlights" },
+          ]}
+          render={textChoice}
+        />
+        {retouchSlider("Exposure", "exposure", `${activeTool === "dodge" ? "Dodge" : "Burn"} exposure`)}
+        <ToggleOption
+          pressed={retouch.protectTones}
+          onChange={(protectTones) => onRetouchChange({ protectTones })}
+          icon={ShieldCheck}
+          label="Protect tones"
+          title="Change brightness only, so colours do not shift"
+        />
+      </>
+    );
+  } else if (activeTool === "sponge") {
+    options = (
+      <>
+        {sizeSetting}
+        {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
+        <Choice
+          label="Sponge mode"
+          value={retouch.spongeMode}
+          onChange={(spongeMode) => onRetouchChange({ spongeMode })}
+          options={[
+            { value: "desaturate" as const, label: "Desaturate" },
+            { value: "saturate" as const, label: "Saturate" },
+          ]}
+          render={textChoice}
+        />
+        {retouchSlider("Flow", "spongeFlow", "Sponge flow")}
+      </>
+    );
+  } else if (activeTool === "spotHealing") {
     options = (
       <>
         {sizeSetting}

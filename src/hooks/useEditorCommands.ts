@@ -54,6 +54,9 @@ import {
   Stamp,
   Bandage,
   Syringe,
+  Lollipop,
+  Hand,
+  Droplets,
   Trash2,
   Type,
   Undo2,
@@ -106,8 +109,10 @@ import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
   isHealingTool,
+  isToningTool,
   usesPaintBrush,
   type HealingTool,
+  type ToningTool,
   isFillTool,
   isMarqueeTool,
   isSelectionTool,
@@ -135,6 +140,7 @@ export interface EditorCommandContext {
   lastBrushTool: BrushTool;
   lastFillTool: FillTool;
   lastHealingTool: HealingTool;
+  lastToningTool: ToningTool;
   lastMarqueeTool: MarqueeTool;
   lastLassoTool: LassoTool;
   undo: () => void;
@@ -211,6 +217,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     lastBrushTool,
     lastFillTool,
     lastHealingTool,
+    lastToningTool,
     lastMarqueeTool,
     lastLassoTool,
     undo,
@@ -1213,6 +1220,28 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           ),
       },
       tool("tool.spotHealing", "spotHealing", "Spot healing brush", Bandage, undefined, "heal blemish remove spot content aware"),
+      {
+        id: "tool.toning",
+        label: "Dodge, burn or sponge",
+        icon: Lollipop,
+        shortcuts: KEYMAP.toningTool,
+        keywords: "lighten darken saturate desaturate toning",
+        run: () => onToolChange(lastToningTool),
+        isChecked: () => isToningTool(activeTool),
+      },
+      {
+        id: "tool.nextToning",
+        label: "Next of Dodge, Burn and Sponge",
+        icon: Lollipop,
+        shortcuts: KEYMAP.nextToningTool,
+        run: () =>
+          onToolChange(
+            activeTool === "dodge" ? "burn" : activeTool === "burn" ? "sponge" : activeTool === "sponge" ? "dodge" : lastToningTool
+          ),
+      },
+      tool("tool.dodge", "dodge", "Dodge", Lollipop, undefined, "lighten brighten"),
+      tool("tool.burn", "burn", "Burn", Hand, undefined, "darken"),
+      tool("tool.sponge", "sponge", "Sponge", Droplets, undefined, "saturate desaturate colour color"),
       tool("tool.healingBrush", "healingBrush", "Healing brush", Syringe, undefined, "heal repair retouch source"),
       {
         id: "tool.fill",
@@ -1363,6 +1392,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     lastBrushTool,
     lastFillTool,
     lastHealingTool,
+    lastToningTool,
     lastMarqueeTool,
     lastLassoTool,
     lastShape,

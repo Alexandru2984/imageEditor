@@ -37,7 +37,48 @@ export interface SpotStroke {
   kind: "spot";
 }
 
-export type RetouchStroke = CloneStroke | HealStroke | SpotStroke;
+/** Which tones dodging and burning work on most. */
+export type ToneRange = "shadows" | "midtones" | "highlights";
+
+/** Dodge (lighten) or burn (darken), as a darkroom printer would. */
+export interface ToneStroke {
+  kind: "tone";
+  mode: "dodge" | "burn";
+  range: ToneRange;
+  /** Strength, 0–1. */
+  exposure: number;
+  /** Change brightness alone, keeping hues and saturation. */
+  protectTones: boolean;
+}
+
+/** Sponge: more or less colour. */
+export interface SpongeStroke {
+  kind: "sponge";
+  mode: "saturate" | "desaturate";
+  /** Strength, 0–1. */
+  flow: number;
+}
+
+export type RetouchStroke = CloneStroke | HealStroke | SpotStroke | ToneStroke | SpongeStroke;
+
+/**
+ * What a full dodge or burn does to a level (0–1) at an exposure (0–1): each
+ * range changes its own tones most and leaves black and white (mostly) be.
+ */
+export function toneCurve(mode: "dodge" | "burn", range: ToneRange, exposure: number): (value: number) => number {
+  const e = exposure;
+  if (mode === "dodge") {
+    if (range === "shadows") return (v) => v + e * 0.5 * (1 - v) * (1 - v);
+    if (range === "highlights") return (v) => Math.min(1, v * (1 + e * v));
+    return (v) => Math.pow(v, 1 / (1 + e));
+  }
+  if (range === "shadows") return (v) => v * (1 - e * (1 - v));
+  if (range === "highlights") return (v) => v * (1 - 0.5 * e * v);
+  return (v) => Math.pow(v, 1 + e);
+}
+
+/** How much of the full effect each dab of a toning stroke adds. */
+const TONE_DAB_SHARE = 0.5;
 
 /** The part of a spot-healing stroke to rebuild, and what surrounds it. */
 export interface SpotRequest {
@@ -110,6 +151,9 @@ export class RetouchPainter {
   private touched: PixelRect | null = null;
   private last: StrokePoint | null = null;
 
+  /** A toning stroke's full effect on each level. */
+  private readonly toneTable: Float32Array | null = null;
+
   constructor(
     private readonly pixels: Pixels,
     private readonly settings: RetouchSettings
@@ -117,6 +161,12 @@ export class RetouchPainter {
     this.original = pixels.data.slice();
     this.coverage = new Uint16Array(pixels.width * pixels.height);
     this.spacer = new DabSpacer(settings.diameter);
+    const stroke = settings.stroke;
+    if (stroke.kind === "tone") {
+      const curve = toneCurve(stroke.mode, stroke.range, stroke.exposure);
+      this.toneTable = new Float32Array(256);
+      for (let level = 0; level < 256; level += 1) this.toneTable[level] = curve(level / 255) * 255;
+    }
   }
 
   /** The last point reached, for Shift-click straight lines. */
@@ -184,8 +234,19 @@ export class RetouchPainter {
           weight *= clip[index]! / 255;
           if (weight <= 0) continue;
         }
-        if (this.settings.stroke.kind === "spot") this.markSpot(index, weight);
-        else this.clonePixel(x, y, index, weight);
+        switch (this.settings.stroke.kind) {
+          case "spot":
+            this.markSpot(index, weight);
+            break;
+          case "tone":
+            this.tonePixel(index, weight);
+            break;
+          case "sponge":
+            this.spongePixel(index, weight);
+            break;
+          default:
+            this.clonePixel(x, y, index, weight);
+        }
       }
     }
   }
@@ -206,6 +267,53 @@ export class RetouchPainter {
       const before = this.original[at + channel]!;
       data[at + channel] = before + (SPOT_TINT - before) * shade;
     }
+  }
+
+  /**
+   * Dodge and burn: the stroke moves each pixel from how it was towards the
+   * curve's result, as far as it has covered it.
+   */
+  private tonePixel(index: number, weight: number) {
+    const stroke = this.settings.stroke as ToneStroke;
+    const table = this.toneTable!;
+    const amount = this.cover(index, weight, TONE_DAB_SHARE);
+    const at = index * 4;
+    const { data } = this.pixels;
+    const original = this.original;
+    if (stroke.protectTones) {
+      // Shift every channel by the change in brightness: hues stay put.
+      const red = original[at]!;
+      const green = original[at + 1]!;
+      const blue = original[at + 2]!;
+      const luma = 0.299 * red + 0.587 * green + 0.114 * blue;
+      const level = Math.min(255, Math.round(luma));
+      const shift = (table[level]! - luma) * amount;
+      data[at] = red + shift;
+      data[at + 1] = green + shift;
+      data[at + 2] = blue + shift;
+      return;
+    }
+    for (let channel = 0; channel < 3; channel += 1) {
+      const before = original[at + channel]!;
+      data[at + channel] = before + (table[before]! - before) * amount;
+    }
+  }
+
+  /** Sponge: push each colour away from (or towards) its grey. */
+  private spongePixel(index: number, weight: number) {
+    const stroke = this.settings.stroke as SpongeStroke;
+    const amount = this.cover(index, weight, TONE_DAB_SHARE) * stroke.flow;
+    const factor = stroke.mode === "saturate" ? 1 + amount : 1 - amount;
+    const at = index * 4;
+    const original = this.original;
+    const red = original[at]!;
+    const green = original[at + 1]!;
+    const blue = original[at + 2]!;
+    const luma = 0.299 * red + 0.587 * green + 0.114 * blue;
+    const { data } = this.pixels;
+    data[at] = luma + (red - luma) * factor;
+    data[at + 1] = luma + (green - luma) * factor;
+    data[at + 2] = luma + (blue - luma) * factor;
   }
 
   private clonePixel(x: number, y: number, index: number, weight: number) {

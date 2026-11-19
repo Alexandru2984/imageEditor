@@ -141,3 +141,84 @@ describe("spot healing", () => {
     expect(pixel(layer, 1, 6)).toEqual([255, 0, 0, 255]);
   });
 });
+
+describe("dodge, burn and sponge", () => {
+  const grey = (value: number, width = 20, height = 20): Pixels => {
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let index = 0; index < width * height; index += 1) data.set([value, value, value, 255], index * 4);
+    return { data, width, height };
+  };
+  const scrub = (painter: RetouchPainter) => {
+    for (let pass = 0; pass < 3; pass += 1) for (let x = 2; x <= 18; x += 0.5) painter.add({ x, y: 10, pressure: 1 });
+  };
+
+  it("dodges midtones lighter and burns them darker, up to the curve within a stroke", () => {
+    const light = grey(128);
+    const dodge = new RetouchPainter(light, {
+      diameter: 10,
+      hardness: 1,
+      stroke: { kind: "tone", mode: "dodge", range: "midtones", exposure: 0.5, protectTones: false },
+    });
+    scrub(dodge);
+    // 128 to the curve's 161, and no further however long the stroke.
+    expect(pixel(light, 10, 10)[0]).toBe(Math.round(Math.pow(128 / 255, 1 / 1.5) * 255));
+
+    const dark = grey(128);
+    const burn = new RetouchPainter(dark, {
+      diameter: 10,
+      hardness: 1,
+      stroke: { kind: "tone", mode: "burn", range: "midtones", exposure: 0.5, protectTones: true },
+    });
+    scrub(burn);
+    expect(pixel(dark, 10, 10)[0]).toBe(Math.round(Math.pow(128 / 255, 1.5) * 255));
+  });
+
+  it("burns highlights more than shadows", () => {
+    const shadows = grey(40);
+    const highlights = grey(220);
+    for (const layer of [shadows, highlights]) {
+      scrub(
+        new RetouchPainter(layer, {
+          diameter: 10,
+          hardness: 1,
+          stroke: { kind: "tone", mode: "burn", range: "highlights", exposure: 0.5, protectTones: false },
+        })
+      );
+    }
+    expect(40 - pixel(shadows, 10, 10)[0]!).toBeLessThan(220 - pixel(highlights, 10, 10)[0]!);
+  });
+
+  it("keeps hues when protecting tones", () => {
+    const data = new Uint8ClampedArray(20 * 20 * 4);
+    for (let index = 0; index < 400; index += 1) data.set([200, 100, 50, 255], index * 4);
+    const layer = { data, width: 20, height: 20 };
+    scrub(
+      new RetouchPainter(layer, {
+        diameter: 10,
+        hardness: 1,
+        stroke: { kind: "tone", mode: "dodge", range: "midtones", exposure: 0.3, protectTones: true },
+      })
+    );
+    const [red, green, blue] = pixel(layer, 10, 10);
+    // Lighter by the same amount in every channel.
+    expect(red! - 200).toBeGreaterThan(5);
+    expect(green! - 100).toBe(red! - 200);
+    expect(blue! - 50).toBe(red! - 200);
+  });
+
+  it("desaturates to grey with a full sponge and saturates the other way", () => {
+    const data = new Uint8ClampedArray(20 * 20 * 4);
+    for (let index = 0; index < 400; index += 1) data.set([200, 100, 50, 255], index * 4);
+    const layer = { data, width: 20, height: 20 };
+    scrub(new RetouchPainter(layer, { diameter: 10, hardness: 1, stroke: { kind: "sponge", mode: "desaturate", flow: 1 } }));
+    const [red, green, blue] = pixel(layer, 10, 10);
+    expect(red).toBe(green);
+    expect(green).toBe(blue);
+
+    const vivid = { data: data.slice().fill(0), width: 20, height: 20 };
+    for (let index = 0; index < 400; index += 1) vivid.data.set([150, 100, 100, 255], index * 4);
+    scrub(new RetouchPainter(vivid, { diameter: 10, hardness: 1, stroke: { kind: "sponge", mode: "saturate", flow: 0.5 } }));
+    const [r2, g2] = pixel(vivid, 10, 10);
+    expect(r2! - g2!).toBeGreaterThan(50);
+  });
+});

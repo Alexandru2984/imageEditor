@@ -168,3 +168,41 @@ test("Content-Aware Fill rebuilds the selection from around it", async ({ page }
   await page.keyboard.press("Control+z");
   await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0, 0, 0]]);
 });
+
+async function dragOnPhoto(page: Page, from: [number, number], to: [number, number]) {
+  const start = await onPhoto(page, from[0], from[1], SIZE);
+  const end = await onPhoto(page, to[0], to[1], SIZE);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 12 });
+  await page.mouse.up();
+}
+
+test("dodge lightens, burn darkens and the sponge takes colour away", async ({ page }) => {
+  // Grey on the right, red on the left.
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#808080", [
+    { x: 0, y: 0, width: 200, height: 300, color: "#c83232" },
+  ]);
+  await expect.poll(() => photoPixels(page, [[300, 150]])).toEqual([[128, 128, 128]]);
+
+  await arm(page, "o", "Dodge");
+  await dragOnPhoto(page, [230, 150], [370, 150]);
+  await expect.poll(async () => (await photoPixels(page, [[300, 150]]))?.[0]?.[0]).toBeGreaterThan(150);
+
+  await arm(page, "Shift+o", "Burn");
+  await dragOnPhoto(page, [230, 220], [370, 220]);
+  await expect.poll(async () => (await photoPixels(page, [[300, 220]]))?.[0]?.[0]).toBeLessThan(105);
+
+  await arm(page, "Shift+o", "Sponge");
+  await dragOnPhoto(page, [40, 150], [160, 150]);
+  await expect
+    .poll(async () => {
+      const [red, green] = (await photoPixels(page, [[100, 150]]))?.[0] ?? [];
+      return red! - green!;
+    })
+    .toBeLessThan(90);
+  // Each stroke is its own step.
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[100, 150]])).toEqual([[200, 50, 50]]);
+  await expect.poll(async () => (await photoPixels(page, [[300, 220]]))?.[0]?.[0]).toBeLessThan(105);
+});

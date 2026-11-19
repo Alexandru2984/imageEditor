@@ -20,7 +20,10 @@ export type Tool =
   | "magicWand"
   | "cloneStamp"
   | "spotHealing"
-  | "healingBrush";
+  | "healingBrush"
+  | "dodge"
+  | "burn"
+  | "sponge";
 
 export interface HistoryEntry {
   json: string;
