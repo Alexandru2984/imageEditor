@@ -106,3 +106,32 @@ test("Canvas Size, Trim and Reveal All move the document's edges and keep the la
   await page.keyboard.press("Control+z");
   await expect.poll(() => layerOf(page, "Background")).toMatchObject({ size: [200, 150] });
 });
+
+test("Rotate Canvas turns the document by any angle, filling the new corners", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#808080", [{ x: 0, y: 0, width: 200, height: 150, color: "#ff0000" }]);
+  await expect.poll(() => layerOf(page, "Background")).toMatchObject({ size: [400, 300] });
+  await settle(page);
+
+  const rotateBy = async (angle: string, direction: "Clockwise" | "Counter-clockwise") => {
+    await openImageMenu(page, /^Rotate Canvas/);
+    const dialog = page.getByRole("dialog", { name: "Rotate canvas" });
+    await dialog.getByLabel("Angle", { exact: true }).fill(angle);
+    await dialog.getByRole("radio", { name: direction, exact: true }).click();
+    await dialog.getByRole("button", { name: "OK" }).click();
+  };
+
+  // A quarter turn clockwise: the red top-left corner goes to the top right, exactly.
+  await rotateBy("90", "Clockwise");
+  await expect
+    .poll(() => layerOf(page, "Background", [[150, 0], [299, 199], [149, 0], [150, 200]]))
+    .toEqual({ size: [300, 400], pixels: [[255, 0, 0], [255, 0, 0], [128, 128, 128], [128, 128, 128]] });
+
+  // Back by 45°: the canvas grows to hold the photo and the corners are white.
+  await rotateBy("45", "Counter-clockwise");
+  await expect
+    .poll(() => layerOf(page, "Background", [[3, 3], [491, 491], [265, 371], [230, 124]]))
+    .toEqual({ size: [495, 495], pixels: [[255, 255, 255], [255, 255, 255], [128, 128, 128], [255, 0, 0]] });
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => layerOf(page, "Background")).toMatchObject({ size: [300, 400] });
+});

@@ -17,6 +17,7 @@ import {
   fitsLimits,
   recanvas,
   resizeImage,
+  rotateDocument,
   trim,
   type Anchor,
   type Refusal,
@@ -27,7 +28,7 @@ import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
 import { cn } from "@/lib/utils";
 
 /** The Image menu's document dialogs. */
-export type DocumentDialogKind = "imageSize" | "canvasSize" | "trim";
+export type DocumentDialogKind = "imageSize" | "canvasSize" | "trim" | "rotate";
 
 const RESAMPLE_METHODS: { value: ResampleMethod; label: string }[] = [
   { value: "bicubic", label: "Smooth" },
@@ -250,6 +251,17 @@ const EXTENSIONS: { value: Extension; label: string }[] = [
   { value: "transparent", label: "Transparent" },
 ];
 
+const fillOf = (extension: Extension, colors: { foreground: string; background: string }): string | null =>
+  extension === "transparent"
+    ? null
+    : extension === "background"
+      ? colors.background
+      : extension === "foreground"
+        ? colors.foreground
+        : extension === "white"
+          ? "#ffffff"
+          : "#000000";
+
 function CanvasSizeForm({ canvas, onClose, run, colors }: FormProps & { colors: { foreground: string; background: string } }) {
   const original = useDocumentSize(canvas);
   const [width, setWidth] = useState(original ? String(original.width) : "");
@@ -268,16 +280,7 @@ function CanvasSizeForm({ canvas, onClose, run, colors }: FormProps & { colors: 
   const apply = (event: FormEvent) => {
     event.preventDefault();
     if (!original || !fits || same || newWidth === null || newHeight === null) return;
-    const fill =
-      extension === "transparent"
-        ? null
-        : extension === "background"
-          ? colors.background
-          : extension === "foreground"
-            ? colors.foreground
-            : extension === "white"
-              ? "#ffffff"
-              : "#000000";
+    const fill = fillOf(extension, colors);
     const rect = anchoredRect(original, { width: newWidth, height: newHeight }, anchor);
     run("resize the canvas", (target) => recanvas(target, rect, fill));
   };
@@ -339,6 +342,63 @@ function CanvasSizeForm({ canvas, onClose, run, colors }: FormProps & { colors: 
   );
 }
 
+type Direction = "clockwise" | "counterClockwise";
+
+function RotateForm({ canvas, onClose, run, colors }: FormProps & { colors: { foreground: string; background: string } }) {
+  const id = useId();
+  const [angle, setAngle] = useState("15");
+  const [direction, setDirection] = useState<Direction>("clockwise");
+  const [extension, setExtension] = useState<Extension>("background");
+  const degrees = Number(angle);
+  const valid = angle.trim() !== "" && Number.isFinite(degrees) && degrees > 0 && degrees < 360;
+  const apply = (event: FormEvent) => {
+    event.preventDefault();
+    if (!valid) return;
+    const fill = fillOf(extension, colors);
+    run("rotate", (target) => rotateDocument(target, direction === "clockwise" ? degrees : -degrees, fill));
+  };
+  return (
+    <form onSubmit={apply} className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>Rotate canvas</DialogTitle>
+        <DialogDescription>
+          Turn the whole document by any angle. The canvas grows to hold the photo; its new corners are filled.
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex items-center gap-3">
+        <label htmlFor={id} className="w-14 text-sm">
+          Angle
+        </label>
+        <input
+          id={id}
+          type="number"
+          inputMode="decimal"
+          min={0.01}
+          max={359.99}
+          step={0.01}
+          value={angle}
+          autoFocus
+          onChange={(event) => setAngle(event.target.value)}
+          aria-invalid={!valid}
+          className={inputClass}
+        />
+        <span className="text-sm text-muted-foreground">degrees</span>
+      </div>
+      <Segmented
+        label="Direction"
+        value={direction}
+        options={[
+          { value: "clockwise", label: "Clockwise" },
+          { value: "counterClockwise", label: "Counter-clockwise" },
+        ]}
+        onChange={setDirection}
+      />
+      <Segmented label="Corners" value={extension} options={EXTENSIONS} onChange={setExtension} />
+      <Footer onClose={onClose} disabled={!canvas || !valid} />
+    </form>
+  );
+}
+
 const TRIM_BASES: { value: TrimBasis; label: string }[] = [
   { value: "transparent", label: "Transparent pixels" },
   { value: "topLeft", label: "Top-left colour" },
@@ -374,7 +434,7 @@ interface DocumentDialogProps {
   onResized: () => void;
 }
 
-/** Image › Image Size, Canvas Size and Trim. */
+/** Image › Image Size, Canvas Size, Rotate Canvas and Trim. */
 export function DocumentDialog({ canvas, kind, colors, onClose, onResized }: DocumentDialogProps) {
   const run: FormProps["run"] = (label, change) => {
     if (!canvas) return;
@@ -400,6 +460,7 @@ export function DocumentDialog({ canvas, kind, colors, onClose, onResized }: Doc
         {kind === "imageSize" && <ImageSizeForm {...props} />}
         {kind === "canvasSize" && <CanvasSizeForm {...props} colors={colors} />}
         {kind === "trim" && <TrimForm {...props} />}
+        {kind === "rotate" && <RotateForm {...props} colors={colors} />}
       </DialogContent>
     </Dialog>
   );

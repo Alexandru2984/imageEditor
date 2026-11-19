@@ -432,3 +432,139 @@ export async function revealAll(canvas: FabricCanvas, fill: string | null): Prom
   }
   return recanvas(canvas, { left, top, width: right - left, height: bottom - top }, fill);
 }
+
+// ---------- Rotate Canvas ----------
+
+/**
+ * Image › Rotate Canvas by any angle (clockwise for positive degrees): every
+ * layer turns around the photo's centre, and the photo's pixels are turned
+ * onto an upright canvas big enough for them, its corners filled with `fill`
+ * (or left transparent), so the document stays a rectangle.
+ */
+export async function rotateDocument(
+  canvas: FabricCanvas,
+  degrees: number,
+  fill: string | null
+): Promise<boolean | Refusal> {
+  const refused = refusal(canvas);
+  if (refused) return refused;
+  if (!Number.isFinite(degrees) || degrees % 360 === 0) return "Choose an angle to rotate by";
+  const photo = findBackgroundImage(canvas)!;
+  busy.add(canvas);
+  try {
+    canvas.discardActiveObject();
+    const objects = documentObjects(canvas);
+    const pivot = photo.getCenterPoint();
+    const radians = (degrees * Math.PI) / 180;
+    const turn: TMat2D = [
+      Math.cos(radians),
+      Math.sin(radians),
+      -Math.sin(radians),
+      Math.cos(radians),
+      pivot.x - pivot.x * Math.cos(radians) + pivot.y * Math.sin(radians),
+      pivot.y - pivot.x * Math.sin(radians) - pivot.y * Math.cos(radians),
+    ];
+
+    // The photo's pixels, turned as they will show, onto an upright canvas.
+    const after = util.multiplyTransformMatrices(turn, photo.calcTransformMatrix());
+    const scale = Math.sqrt(Math.abs(after[0] * after[3] - after[1] * after[2]));
+    // Quarter turns land exactly on whole pixels.
+    const exact = (value: number) => (Math.abs(value - Math.round(value)) < 1e-9 ? Math.round(value) : value);
+    const linear: TMat2D = [
+      exact(after[0] / scale),
+      exact(after[1] / scale),
+      exact(after[2] / scale),
+      exact(after[3] / scale),
+      0,
+      0,
+    ];
+    const from = shownRect(photo);
+    const corners = [
+      [-1, -1],
+      [1, -1],
+      [1, 1],
+      [-1, 1],
+    ].map(([x, y]) => util.transformPoint(new Point((x! * from.width) / 2, (y! * from.height) / 2), linear));
+    const spanX = Math.max(...corners.map((point) => Math.abs(point.x))) * 2;
+    const spanY = Math.max(...corners.map((point) => Math.abs(point.y))) * 2;
+    const width = Math.max(1, Math.ceil(spanX - 1e-6));
+    const height = Math.max(1, Math.ceil(spanY - 1e-6));
+    if (!fitsLimits(width, height)) return "The rotated photo would be too big for the editor";
+
+    const turned = (source: CanvasImageSource, colour: string | null, cornersOnly: boolean) => {
+      const surface = document.createElement("canvas");
+      surface.width = width;
+      surface.height = height;
+      const context = surface.getContext("2d");
+      if (!context) throw new Error("The browser could not prepare the rotated photo");
+      // Bilinear: Chrome's "high" filter softens even pixels that land
+      // exactly on pixels.
+      context.imageSmoothingQuality = "low";
+      if (colour) {
+        context.fillStyle = colour;
+        context.beginPath();
+        context.rect(0, 0, width, height);
+        if (cornersOnly) {
+          // Leave out the photo (less half a pixel, which the photo covers
+          // again), so its own transparency stays.
+          const inset = [
+            [-1, -1],
+            [1, -1],
+            [1, 1],
+            [-1, 1],
+          ].map(([x, y]) =>
+            util.transformPoint(new Point(x! * (from.width / 2 - 0.5), y! * (from.height / 2 - 0.5)), linear)
+          );
+          context.moveTo(width / 2 + inset[0]!.x, height / 2 + inset[0]!.y);
+          for (const point of inset.slice(1)) context.lineTo(width / 2 + point.x, height / 2 + point.y);
+          context.closePath();
+        }
+        context.fill("evenodd");
+      }
+      context.setTransform(linear[0], linear[1], linear[2], linear[3], width / 2, height / 2);
+      context.drawImage(
+        source,
+        from.x,
+        from.y,
+        from.width,
+        from.height,
+        -from.width / 2,
+        -from.height / 2,
+        from.width,
+        from.height
+      );
+      return surface;
+    };
+    const element = await encode(turned(sourceOf(photo), fill, true));
+    let mask: string | undefined;
+    if (hasLayerMask(photo)) {
+      // The new corners show.
+      mask = (await encode(turned(await decode(photo.layerMask.src), "#ffffff", false))).src;
+    }
+    if (!unchanged(canvas, objects)) return false;
+
+    for (const object of objects) {
+      if (object === photo) continue;
+      const centre = util.transformPoint(object.getCenterPoint(), turn);
+      object.rotate((((object.angle ?? 0) + degrees) % 360 + 360) % 360);
+      object.setPositionByOrigin(centre, "center", "center");
+      object.setCoords();
+    }
+    photo.set({ angle: 0, flipX: false, flipY: false, skewX: 0, skewY: 0, cropX: 0, cropY: 0, scaleX: scale, scaleY: scale });
+    photo.setElement(element, { width, height });
+    const masked = photo as MaskedImage;
+    if (mask && masked.layerMask) {
+      masked.layerMask = { src: mask, enabled: masked.layerMask.enabled };
+      void hydrateLayerMask(photo).then(() => canvas.requestRenderAll());
+    }
+    photo.setPositionByOrigin(pivot, "center", "center");
+    photo.setCoords();
+    photo.dirty = true;
+    selectionOf(canvas).set(null);
+    canvas.fire("object:modified", { target: photo });
+    canvas.requestRenderAll();
+    return true;
+  } finally {
+    busy.delete(canvas);
+  }
+}

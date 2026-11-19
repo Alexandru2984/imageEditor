@@ -37,6 +37,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
     items: [
       "image.rotateCounterClockwise",
       "image.rotateClockwise",
+      "image.rotate180",
+      "image.rotateArbitrary",
       "image.flipHorizontal",
       "image.flipVertical",
       "-",
