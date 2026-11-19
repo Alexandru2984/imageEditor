@@ -88,10 +88,11 @@ export function HistogramPanel({ canvas, onClose }: { canvas: FabricCanvas | nul
     </div>
   );
 
+  // On wide screens it sits on the left, clear of the adjustment dialogs.
   return (
     <section
       aria-label="Histogram"
-      className="absolute right-2 top-2 z-10 w-56 rounded-lg border border-border bg-popover/95 p-2.5 text-popover-foreground shadow-lg backdrop-blur sm:right-3 sm:top-3 sm:w-64 sm:p-3"
+      className="absolute right-2 top-2 z-10 w-56 rounded-lg border border-border bg-popover/95 p-2.5 text-popover-foreground shadow-lg backdrop-blur sm:left-3 sm:right-auto sm:top-3 sm:w-64 sm:p-3"
     >
       <div className="mb-2 flex items-center justify-between">
         <h2 className="text-xs font-semibold">Histogram</h2>

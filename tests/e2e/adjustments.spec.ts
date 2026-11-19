@@ -241,10 +241,11 @@ test("the Histogram panel measures the image, follows its changes and counts onl
   // With a selection, only its pixels count.
   await page.keyboard.press("m");
   const center = await canvasCenter(page);
-  await page.mouse.move(center.x - 400, center.y - 280);
+  // From the bottom corner: the panel covers the top left of the canvas.
+  await page.mouse.move(center.x - 400, center.y + 280);
   await page.mouse.down();
   await page.mouse.move(center.x - 200, center.y, { steps: 4 });
-  await page.mouse.move(center.x, center.y + 280, { steps: 4 });
+  await page.mouse.move(center.x, center.y - 280, { steps: 4 });
   await page.mouse.up();
   await expect(figure("Mean")).toHaveText("127.00");
   await expect(panel).toContainText("Selected pixels only");
