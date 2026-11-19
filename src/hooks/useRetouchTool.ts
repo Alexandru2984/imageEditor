@@ -12,6 +12,7 @@ import {
   type PixelRect,
 } from "@/raster/pixelLayer";
 import { adjustTarget } from "@/raster/pixelPreview";
+import { runPixelJob } from "@/raster/pixelJobClient";
 import { RetouchPainter, type RetouchStroke } from "@/raster/retouchPainter";
 import type { RetouchOptions } from "@/raster/retouchSettings";
 import { visibleInLayerPixels } from "@/raster/sampleAll";
@@ -50,6 +51,8 @@ interface ActiveStroke {
   /** Scene offset from the brush to the pixels it copies. */
   sourceOffset: ScenePoint | null;
   frame: number | null;
+  /** Tip diameter in layer pixels. */
+  diameter: number;
 }
 
 /** The clone source: where it was set, and once a stroke ties it to the brush, the offset. */
@@ -59,7 +62,7 @@ interface CloneSource {
 }
 
 /**
- * The retouching tools (Clone stamp): strokes that rework the selected
+ * The retouching tools (Clone stamp, Healing brushes): strokes that rework the selected
  * layer's own pixels, or the photo's when no layer is selected.
  */
 export function useRetouchTool({
@@ -103,6 +106,9 @@ export function useRetouchTool({
     canvas.requestRenderAll();
 
     let stroke: ActiveStroke | null = null;
+    /** Spot heals still being rebuilt. */
+    let busy = 0;
+    let released = false;
     /** Where the pointer is, in screen and scene pixels. */
     let pointer: { view: ScenePoint; scene: ScenePoint } | null = null;
     const lastPoints = new WeakMap<FabricImage, StrokePoint>();
@@ -229,7 +235,9 @@ export function useRetouchTool({
 
       let sourceOffset: ScenePoint | null = null;
       let retouchStroke: RetouchStroke;
-      if (cloning && source) {
+      if (activeTool === "spotHealing") {
+        retouchStroke = { kind: "spot" };
+      } else if (cloning && source) {
         if (options.aligned && source.offset) {
           sourceOffset = source.offset;
         } else {
@@ -238,14 +246,13 @@ export function useRetouchTool({
         }
         const from = sceneToLayerPixel(pixels, { x: down.x + sourceOffset.x, y: down.y + sourceOffset.y });
         const to = sceneToLayerPixel(pixels, down);
-        retouchStroke = {
-          kind: "clone",
-          opacity: options.opacity / 100,
-          flow: options.flow / 100,
-          offset: { x: Math.round(from.x - to.x), y: Math.round(from.y - to.y) },
-          sample,
-        };
+        const offset = { x: Math.round(from.x - to.x), y: Math.round(from.y - to.y) };
+        retouchStroke =
+          activeTool === "healingBrush"
+            ? { kind: "heal", offset, sample }
+            : { kind: "clone", opacity: options.opacity / 100, flow: options.flow / 100, offset, sample };
       } else {
+        if (fresh) abandonPixelEdit(canvas, pixels);
         return;
       }
 
@@ -260,11 +267,54 @@ export function useRetouchTool({
           stroke: retouchStroke,
         }
       );
-      stroke = { pixels, context, image, painter, fresh, sourceOffset, frame: null };
+      stroke = { pixels, context, image, painter, fresh, sourceOffset, frame: null, diameter: Math.max(1, brush.size * layerPerImagePixel) };
       const previousEnd = lastPoints.get(pixels);
       if (event.shiftKey && previousEnd) painter.add(previousEnd);
       painter.add(layerPoint(pixels, event));
       scheduleFlush();
+    };
+
+    const commit = (current: ActiveStroke) => {
+      void commitPixelEdit(canvas, current.pixels).catch((error) => {
+        console.error("Could not save the retouched layer:", error);
+        toast.error("That change could not be saved");
+      });
+    };
+
+    /** Spot healing: rebuild the stroke from around it, in a worker. */
+    const rebuild = (current: ActiveStroke) => {
+      const request = current.painter.spotRequest(Math.max(24, Math.round(current.diameter * 2)));
+      if (!request) return;
+      const width = request.rect.right - request.rect.left;
+      const height = request.rect.bottom - request.rect.top;
+      busy += 1;
+      canvas.defaultCursor = "progress";
+      void runPixelJob(
+        { op: "inpaint", hole: request.hole, reach: 0 },
+        { data: request.pixels, width, height, x: 0, y: 0 },
+        width,
+        height,
+        { x: 0, y: 0 }
+      )
+        .then((rebuilt) => {
+          if (canvas.disposed) return;
+          current.painter.applySpot(request.rect, rebuilt);
+          show(current, current.painter.takeChanged() ?? request.rect);
+          commit(current);
+        })
+        .catch((error) => {
+          console.error("Spot healing failed:", error);
+          toast.error("That spot could not be healed");
+          if (canvas.disposed) return;
+          current.painter.cancel();
+          const changed = current.painter.takeChanged();
+          if (changed) show(current, changed);
+          if (current.fresh) abandonPixelEdit(canvas, current.pixels);
+        })
+        .finally(() => {
+          busy -= 1;
+          if (busy === 0 && !released) canvas.defaultCursor = "crosshair";
+        });
     };
 
     const finishStroke = () => {
@@ -272,6 +322,7 @@ export function useRetouchTool({
       if (!current) return;
       stroke = null;
       if (current.frame !== null) cancelAnimationFrame(current.frame);
+      current.painter.heal();
       const changed = current.painter.takeChanged();
       if (changed) show(current, changed);
       const end = current.painter.lastPoint;
@@ -281,10 +332,8 @@ export function useRetouchTool({
         if (current.fresh) abandonPixelEdit(canvas, current.pixels);
         return;
       }
-      void commitPixelEdit(canvas, current.pixels).catch((error) => {
-        console.error("Could not save the retouched layer:", error);
-        toast.error("That change could not be saved");
-      });
+      if (activeTool === "spotHealing") rebuild(current);
+      else commit(current);
     };
 
     const cancelStroke = () => {
@@ -300,7 +349,7 @@ export function useRetouchTool({
 
     const onDown = (opt: PointerInfo) => {
       const event = opt.e;
-      if (spaceDownRef.current || stroke) return;
+      if (spaceDownRef.current || stroke || busy > 0) return;
       if ("button" in event && event.button !== 0) return;
       if (cloning && (event.altKey || settingsRef.current.pickingSource)) {
         setSource(canvas.getScenePoint(event as PointerEvent));
@@ -345,6 +394,7 @@ export function useRetouchTool({
 
     return () => {
       finishStroke();
+      released = true;
       canvas.off("mouse:down", onDown);
       canvas.off("mouse:move", onMove);
       canvas.off("mouse:up", finishStroke);

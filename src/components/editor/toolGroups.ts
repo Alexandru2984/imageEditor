@@ -9,6 +9,8 @@ import {
   WandSparkles,
   Pentagon,
   Stamp,
+  Bandage,
+  Syringe,
   type LucideIcon,
 } from "lucide-react";
 import type { Tool } from "@/types/editor";
@@ -127,11 +129,33 @@ export const CLONE_STAMP_TOOL: GroupedToolDef<"cloneStamp"> = {
   description: "Alt-click a source, then paint its pixels elsewhere",
 };
 
+/** Photoshop's healing group (J). */
+export type HealingTool = "spotHealing" | "healingBrush";
+
+export const HEALING_TOOLS: GroupedToolDef<HealingTool>[] = [
+  {
+    id: "spotHealing",
+    icon: Bandage,
+    label: "Spot healing brush (J)",
+    name: "Spot healing brush",
+    description: "Paint over a blemish to rebuild it from around it",
+  },
+  {
+    id: "healingBrush",
+    icon: Syringe,
+    label: "Healing brush (J)",
+    name: "Healing brush",
+    description: "Alt-click a source; the copy blends into where it lands",
+  },
+];
+
+export const isHealingTool = (tool: Tool): tool is HealingTool => tool === "spotHealing" || tool === "healingBrush";
+
 /** Tools that rework a layer's own pixels as they paint. */
-export const isRetouchTool = (tool: Tool): boolean => tool === "cloneStamp";
+export const isRetouchTool = (tool: Tool): boolean => tool === "cloneStamp" || isHealingTool(tool);
 
 /** Retouching tools that copy from a source the user sets (Alt-click). */
-export const needsCloneSource = (tool: Tool): boolean => tool === "cloneStamp";
+export const needsCloneSource = (tool: Tool): boolean => tool === "cloneStamp" || tool === "healingBrush";
 
 /** Tools that paint with the pixel brush's size and hardness. */
 export const usesPaintBrush = (tool: Tool): boolean => tool === "brush" || tool === "eraser" || isRetouchTool(tool);

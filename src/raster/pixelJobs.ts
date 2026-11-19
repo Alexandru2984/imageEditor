@@ -25,6 +25,7 @@ import {
   type NoiseSettings,
   type UnsharpSettings,
 } from "./filters";
+import { inpaint } from "./inpaint";
 import { motionBlur } from "./motionBlur";
 
 /**
@@ -46,7 +47,12 @@ export type PixelJob =
   | { op: "addNoise"; settings: NoiseSettings }
   | { op: "mosaic"; size: number }
   | { op: "emboss"; settings: EmbossSettings }
-  | { op: "findEdges" };
+  | { op: "findEdges" }
+  /**
+   * Content-aware fill of `hole` (non-zero where to fill, the region's size)
+   * from up to `reach` pixels around it.
+   */
+  | { op: "inpaint"; hole: Uint8Array; reach: number; seed?: number };
 
 /** How many pixels around each one a job looks at. */
 export function jobReach(job: PixelJob): number {
@@ -64,6 +70,8 @@ export function jobReach(job: PixelJob): number {
       return job.settings.height + 1;
     case "findEdges":
       return 1;
+    case "inpaint":
+      return job.reach;
     default:
       return 0;
   }
@@ -102,6 +110,14 @@ export function runJob(job: PixelJob, area: JobArea, width: number, height: numb
       return filtered(emboss(area, job.settings));
     case "findEdges":
       return filtered(findEdges(area));
+    case "inpaint": {
+      // The hole covers the region; the rest of the area is what fills it.
+      const hole = new Uint8Array(area.width * area.height);
+      for (let y = 0; y < height; y += 1) {
+        hole.set(job.hole.subarray(y * width, (y + 1) * width), (area.y + y) * area.width + area.x);
+      }
+      return filtered(inpaint(area.data, area.width, area.height, hole, job.seed));
+    }
   }
   // Pixel by pixel: only the region itself.
   let source = area.data;

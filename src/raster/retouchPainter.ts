@@ -1,3 +1,4 @@
+import { membraneFill } from "./heal";
 import { DabSpacer, tipAlpha, type Dab, type StrokePoint } from "./stroke";
 import type { PixelRect } from "./pixelLayer";
 
@@ -21,7 +22,34 @@ export interface CloneStroke {
   sample?: Uint8ClampedArray | null;
 }
 
-export type RetouchStroke = CloneStroke;
+/**
+ * Healing brush: copies like the clone stamp, then on release blends the
+ * copy into its surroundings, keeping its texture but their colour and light.
+ */
+export interface HealStroke {
+  kind: "heal";
+  offset: { x: number; y: number };
+  sample?: Uint8ClampedArray | null;
+}
+
+/** Spot healing: marks what to rebuild; the rebuilding happens on release. */
+export interface SpotStroke {
+  kind: "spot";
+}
+
+export type RetouchStroke = CloneStroke | HealStroke | SpotStroke;
+
+/** The part of a spot-healing stroke to rebuild, and what surrounds it. */
+export interface SpotRequest {
+  rect: PixelRect;
+  /** The layer's pixels there as the stroke began (rect-sized RGBA). */
+  pixels: Uint8ClampedArray;
+  /** 1 where the stroke went. */
+  hole: Uint8Array;
+}
+
+/** The colour a spot-healing stroke is shown in until it is rebuilt. */
+const SPOT_TINT = 60;
 
 export interface RetouchSettings {
   /** Tip diameter in layer pixels. */
@@ -156,23 +184,152 @@ export class RetouchPainter {
           weight *= clip[index]! / 255;
           if (weight <= 0) continue;
         }
-        this.clonePixel(x, y, index, weight);
+        if (this.settings.stroke.kind === "spot") this.markSpot(index, weight);
+        else this.clonePixel(x, y, index, weight);
       }
     }
   }
 
-  private clonePixel(x: number, y: number, index: number, weight: number) {
-    const stroke = this.settings.stroke;
-    const { width, height, data } = this.pixels;
-    // Build up coverage as the brush does: dabs add flow, never past full.
+  /** Build up coverage as the brush does: dabs add flow, never past full. */
+  private cover(index: number, weight: number, flow: number): number {
     const covered = this.coverage[index]! / COVERAGE_MAX;
-    const coverage = covered + weight * stroke.flow * (1 - covered);
+    const coverage = covered + weight * flow * (1 - covered);
     this.coverage[index] = Math.round(coverage * COVERAGE_MAX);
+    return coverage;
+  }
+
+  private markSpot(index: number, weight: number) {
+    const shade = this.cover(index, weight, 1) * 0.5;
+    const at = index * 4;
+    const { data } = this.pixels;
+    for (let channel = 0; channel < 3; channel += 1) {
+      const before = this.original[at + channel]!;
+      data[at + channel] = before + (SPOT_TINT - before) * shade;
+    }
+  }
+
+  private clonePixel(x: number, y: number, index: number, weight: number) {
+    const stroke = this.settings.stroke as CloneStroke | HealStroke;
+    const { width, height, data } = this.pixels;
+    const clone = stroke.kind === "clone";
+    const coverage = this.cover(index, weight, clone ? stroke.flow : 1);
     const sourceX = x + stroke.offset.x;
     const sourceY = y + stroke.offset.y;
     // Nothing to copy from outside the layer.
     if (sourceX < 0 || sourceY < 0 || sourceX >= width || sourceY >= height) return;
     const at = index * 4;
-    mixInto(data, at, this.original, at, stroke.sample ?? this.original, (sourceY * width + sourceX) * 4, coverage * stroke.opacity);
+    mixInto(
+      data,
+      at,
+      this.original,
+      at,
+      stroke.sample ?? this.original,
+      (sourceY * width + sourceX) * 4,
+      clone ? coverage * stroke.opacity : coverage
+    );
+  }
+
+  /**
+   * Healing brush, on release: the difference between the layer and the
+   * copied pixels is known around the stroke; spread smoothly over it and
+   * added to the copy, the copy takes on the light and colour around it.
+   */
+  heal(): void {
+    const stroke = this.settings.stroke;
+    const area = this.touched;
+    if (stroke.kind !== "heal" || !area) return;
+    const { width, height, data } = this.pixels;
+    const sample = stroke.sample ?? this.original;
+    const left = Math.max(0, area.left - 1);
+    const top = Math.max(0, area.top - 1);
+    const right = Math.min(width, area.right + 1);
+    const bottom = Math.min(height, area.bottom + 1);
+    const regionWidth = right - left;
+    const regionHeight = bottom - top;
+    const difference = new Float32Array(regionWidth * regionHeight * 4);
+    const known = new Uint8Array(regionWidth * regionHeight);
+    const sourceOf = (x: number, y: number) => {
+      const sx = x + stroke.offset.x;
+      const sy = y + stroke.offset.y;
+      return sx < 0 || sy < 0 || sx >= width || sy >= height ? -1 : (sy * width + sx) * 4;
+    };
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        const index = y * width + x;
+        if (this.coverage[index]! > 0) continue;
+        const source = sourceOf(x, y);
+        if (source < 0) continue;
+        const local = (y - top) * regionWidth + (x - left);
+        known[local] = 1;
+        for (let channel = 0; channel < 4; channel += 1) {
+          difference[local * 4 + channel] = this.original[index * 4 + channel]! - sample[source + channel]!;
+        }
+      }
+    }
+    if (!membraneFill(difference, known, regionWidth, regionHeight, 4)) return;
+    for (let y = top; y < bottom; y += 1) {
+      for (let x = left; x < right; x += 1) {
+        const index = y * width + x;
+        const coverage = this.coverage[index]! / COVERAGE_MAX;
+        const source = sourceOf(x, y);
+        if (coverage <= 0 || source < 0) continue;
+        const local = (y - top) * regionWidth + (x - left);
+        const at = index * 4;
+        for (let channel = 0; channel < 4; channel += 1) {
+          const healed = sample[source + channel]! + difference[local * 4 + channel]!;
+          const before = this.original[at + channel]!;
+          data[at + channel] = before + (Math.min(255, Math.max(0, healed)) - before) * coverage;
+        }
+      }
+    }
+    this.grow({ left, top, right, bottom });
+  }
+
+  /**
+   * Spot healing, on release: the stroke's area and `margin` pixels around
+   * it, to rebuild the stroke from (see {@link applySpot}).
+   */
+  spotRequest(margin: number): SpotRequest | null {
+    const area = this.touched;
+    if (this.settings.stroke.kind !== "spot" || !area) return null;
+    const { width, height } = this.pixels;
+    const rect = {
+      left: Math.max(0, area.left - margin),
+      top: Math.max(0, area.top - margin),
+      right: Math.min(width, area.right + margin),
+      bottom: Math.min(height, area.bottom + margin),
+    };
+    const regionWidth = rect.right - rect.left;
+    const regionHeight = rect.bottom - rect.top;
+    const pixels = new Uint8ClampedArray(regionWidth * regionHeight * 4);
+    const hole = new Uint8Array(regionWidth * regionHeight);
+    for (let y = rect.top; y < rect.bottom; y += 1) {
+      const row = (y - rect.top) * regionWidth;
+      pixels.set(this.original.subarray((y * width + rect.left) * 4, (y * width + rect.right) * 4), row * 4);
+      for (let x = rect.left; x < rect.right; x += 1) {
+        if (this.coverage[y * width + x]! > 0) hole[row + x - rect.left] = 1;
+      }
+    }
+    return { rect, pixels, hole };
+  }
+
+  /** Spot healing: lay the rebuilt pixels in, faded where the brush was soft. */
+  applySpot(rect: PixelRect, rebuilt: Uint8ClampedArray): void {
+    const { width, data } = this.pixels;
+    const regionWidth = rect.right - rect.left;
+    for (let y = rect.top; y < rect.bottom; y += 1) {
+      for (let x = rect.left; x < rect.right; x += 1) {
+        const index = y * width + x;
+        const coverage = this.coverage[index]! / COVERAGE_MAX;
+        if (coverage <= 0) continue;
+        const at = index * 4;
+        const from = ((y - rect.top) * regionWidth + (x - rect.left)) * 4;
+        for (let channel = 0; channel < 4; channel += 1) {
+          const before = this.original[at + channel]!;
+          data[at + channel] = before + (rebuilt[from + channel]! - before) * coverage;
+        }
+      }
+    }
+    this.grow(rect);
   }
 }

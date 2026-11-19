@@ -22,6 +22,8 @@ import {
   Crosshair,
   Link2,
   Stamp,
+  Bandage,
+  Syringe,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -143,6 +145,16 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     icon: Stamp,
     name: "Clone stamp",
     hint: "Alt-click sets the source · Shift-click draws a straight line",
+  },
+  spotHealing: {
+    icon: Bandage,
+    name: "Spot healing brush",
+    hint: "Paint over a blemish, a little wider than it: it is rebuilt from around it",
+  },
+  healingBrush: {
+    icon: Syringe,
+    name: "Healing brush",
+    hint: "Alt-click sets the source · the copy takes on the light where it lands",
   },
 };
 
@@ -384,7 +396,15 @@ export function OptionsBar({
   );
 
   let options: ReactNode = null;
-  if (activeTool === "cloneStamp") {
+  if (activeTool === "spotHealing") {
+    options = (
+      <>
+        {sizeSetting}
+        {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
+      </>
+    );
+  } else if (activeTool === "cloneStamp" || activeTool === "healingBrush") {
+    const clone = activeTool === "cloneStamp";
     options = (
       <>
         <ToggleOption
@@ -396,8 +416,8 @@ export function OptionsBar({
         />
         {sizeSetting}
         {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
-        {retouchPercent("Opacity", "opacity", "Clone opacity")}
-        {retouchPercent("Flow", "flow", "Clone flow")}
+        {clone && retouchPercent("Opacity", "opacity", "Clone opacity")}
+        {clone && retouchPercent("Flow", "flow", "Clone flow")}
         <ToggleOption
           pressed={retouch.aligned}
           onChange={(aligned) => onRetouchChange({ aligned })}

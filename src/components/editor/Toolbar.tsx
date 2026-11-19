@@ -26,11 +26,13 @@ import { SHAPE_TOOLS } from "./shapeTools";
 import {
   BRUSH_TOOLS,
   CLONE_STAMP_TOOL,
+  HEALING_TOOLS,
   FILL_TOOLS,
   LASSO_TOOLS,
   MARQUEE_TOOLS,
   type BrushTool,
   type FillTool,
+  type HealingTool,
   type LassoTool,
   type MarqueeTool,
 } from "./toolGroups";
@@ -46,6 +48,8 @@ interface ToolbarProps {
   lastBrushTool: BrushTool;
   /** The tool the fill button (and the G key) arms. */
   lastFillTool: FillTool;
+  /** The tool the healing button (and the J key) arms. */
+  lastHealingTool: HealingTool;
   /** The tool the selection button (and the M key) arms. */
   lastMarqueeTool: MarqueeTool;
   /** The tool the lasso button arms. */
@@ -77,6 +81,7 @@ export const Toolbar = ({
   lastShape,
   lastBrushTool,
   lastFillTool,
+  lastHealingTool,
   lastMarqueeTool,
   lastLassoTool,
   fabricCanvas,
@@ -337,6 +342,14 @@ export const Toolbar = ({
       <ToolGroupButton
         tools={BRUSH_TOOLS}
         current={lastBrushTool}
+        activeTool={activeTool}
+        onToolChange={onToolChange}
+        className={buttonSize}
+        side={tooltipSide}
+      />
+      <ToolGroupButton
+        tools={HEALING_TOOLS}
+        current={lastHealingTool}
         activeTool={activeTool}
         onToolChange={onToolChange}
         className={buttonSize}

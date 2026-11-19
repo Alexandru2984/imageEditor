@@ -52,6 +52,8 @@ import {
   Sparkles,
   SquareDashed,
   Stamp,
+  Bandage,
+  Syringe,
   Trash2,
   Type,
   Undo2,
@@ -103,7 +105,9 @@ import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentD
 import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
+  isHealingTool,
   usesPaintBrush,
+  type HealingTool,
   isFillTool,
   isMarqueeTool,
   isSelectionTool,
@@ -130,6 +134,7 @@ export interface EditorCommandContext {
   lastShape: ShapeKind;
   lastBrushTool: BrushTool;
   lastFillTool: FillTool;
+  lastHealingTool: HealingTool;
   lastMarqueeTool: MarqueeTool;
   lastLassoTool: LassoTool;
   undo: () => void;
@@ -205,6 +210,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     lastShape,
     lastBrushTool,
     lastFillTool,
+    lastHealingTool,
     lastMarqueeTool,
     lastLassoTool,
     undo,
@@ -1129,6 +1135,27 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       tool("tool.eraser", "eraser", "Eraser", Eraser, KEYMAP.eraserTool),
       tool("tool.cloneStamp", "cloneStamp", "Clone stamp", Stamp, KEYMAP.cloneStampTool, "clone copy retouch duplicate"),
       {
+        id: "tool.healing",
+        label: "Healing brushes",
+        icon: Bandage,
+        shortcuts: KEYMAP.healingTool,
+        keywords: "heal retouch blemish spot repair",
+        run: () => onToolChange(lastHealingTool),
+        isChecked: () => isHealingTool(activeTool),
+      },
+      {
+        id: "tool.nextHealing",
+        label: "Switch between Spot healing and Healing brush",
+        icon: Bandage,
+        shortcuts: KEYMAP.nextHealingTool,
+        run: () =>
+          onToolChange(
+            activeTool === "spotHealing" ? "healingBrush" : activeTool === "healingBrush" ? "spotHealing" : lastHealingTool
+          ),
+      },
+      tool("tool.spotHealing", "spotHealing", "Spot healing brush", Bandage, undefined, "heal blemish remove spot content aware"),
+      tool("tool.healingBrush", "healingBrush", "Healing brush", Syringe, undefined, "heal repair retouch source"),
+      {
         id: "tool.fill",
         label: "Paint bucket or gradient",
         icon: PaintBucket,
@@ -1276,6 +1303,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     hasUndo,
     lastBrushTool,
     lastFillTool,
+    lastHealingTool,
     lastMarqueeTool,
     lastLassoTool,
     lastShape,

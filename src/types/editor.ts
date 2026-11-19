@@ -18,7 +18,9 @@ export type Tool =
   | "lasso"
   | "polygonLasso"
   | "magicWand"
-  | "cloneStamp";
+  | "cloneStamp"
+  | "spotHealing"
+  | "healingBrush";
 
 export interface HistoryEntry {
   json: string;

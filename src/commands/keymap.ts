@@ -78,6 +78,8 @@ export const KEYMAP = {
   nextBrushTool: [{ key: "b", shift: true }],
   eraserTool: [{ key: "e" }],
   cloneStampTool: [{ key: "s" }],
+  healingTool: [{ key: "j" }],
+  nextHealingTool: [{ key: "j", shift: true }],
   fillTool: [{ key: "g" }],
   nextFillTool: [{ key: "g", shift: true }],
   shapeTool: [{ key: "u" }],

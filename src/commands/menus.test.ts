@@ -16,6 +16,7 @@ function editorCommands(): CommandMap {
     lastShape: "rectangle",
     lastBrushTool: "brush",
     lastFillTool: "bucket",
+    lastHealingTool: "spotHealing",
     lastMarqueeTool: "marquee",
     lastLassoTool: "lasso",
     undo: noop,

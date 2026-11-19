@@ -92,3 +92,47 @@ test("the clone stamp copies from an Alt-clicked source, aligned or not, in one 
     [255, 0, 0],
   ]);
 });
+
+test("the spot healing brush rebuilds a blemish from around it, in one undo step", async ({ page }) => {
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#808080", [
+    { x: 196, y: 146, width: 8, height: 8, color: "#000000" },
+  ]);
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0, 0, 0]]);
+  await arm(page, "j", "Spot healing brush");
+  const point = await onPhoto(page, 200, 150, SIZE);
+  await page.mouse.click(point.x, point.y);
+  await expect
+    .poll(async () => {
+      const [pixel] = (await photoPixels(page, [[200, 150]])) ?? [];
+      return pixel ? Math.max(...pixel.map((channel) => Math.abs(channel - 128))) : 255;
+    })
+    .toBeLessThan(6);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0, 0, 0]]);
+});
+
+test("the healing brush copies texture but takes on the light where it lands", async ({ page }) => {
+  // Dark on the left with a lighter dot to copy, light on the right.
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#c8c8c8", [
+    { x: 0, y: 0, width: 200, height: 300, color: "#3c3c3c" },
+    { x: 97, y: 147, width: 6, height: 6, color: "#5a5a5a" },
+  ]);
+  await expect.poll(() => photoPixels(page, [[300, 150]])).toEqual([[200, 200, 200]]);
+  await arm(page, "j", "Spot healing brush");
+  await arm(page, "Shift+j", "Healing brush");
+  let point = await onPhoto(page, 100, 150, SIZE);
+  await page.keyboard.down("Alt");
+  await page.mouse.click(point.x, point.y);
+  await page.keyboard.up("Alt");
+  point = await onPhoto(page, 300, 150, SIZE);
+  await page.mouse.click(point.x, point.y);
+  // A clone would be dark (60 and 90); healed, the dot stands 30 above the light around it.
+  await expect
+    .poll(async () => {
+      const [dot, around] = (await photoPixels(page, [[300, 150], [310, 150]]))?.map((pixel) => pixel[0]!) ?? [];
+      return dot! >= 222 && dot! <= 238 && Math.abs(around! - 200) <= 4 ? "healed" : `dot ${dot}, around ${around}`;
+    })
+    .toBe("healed");
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[300, 150]])).toEqual([[200, 200, 200]]);
+});
