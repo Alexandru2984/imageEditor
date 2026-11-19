@@ -260,3 +260,319 @@ export const CURVE_PRESETS: { id: string; label: string; points: CurvePoint[] }[
   { id: "darker", label: "Darker", points: [[0, 0], [144, 114], [255, 255]] },
   { id: "negative", label: "Negative", points: [[0, 255], [255, 0]] },
 ];
+
+// ---------- Tone ----------
+
+/** Same table for every channel. */
+export const uniformLuts = (lut: Lut): Luts => ({ r: lut, g: lut, b: lut });
+
+export interface BrightnessContrastSettings {
+  /** −150 to 150, as in Photoshop. */
+  brightness: number;
+  /** −50 to 100, as in Photoshop. */
+  contrast: number;
+}
+
+export function brightnessContrastLut({ brightness, contrast }: BrightnessContrastSettings): Lut {
+  const lift = Math.max(-1, Math.min(1, brightness / 150)) * 0.5;
+  // Contrast turns the line about middle grey; 100 is close to a threshold.
+  const slope = Math.tan((Math.max(-0.5, Math.min(0.98, contrast / 100)) + 1) * (Math.PI / 4));
+  return Uint8Array.from({ length: 256 }, (_, level) => {
+    let value = level / 255;
+    value = lift < 0 ? value * (1 + lift) : value + (1 - value) * lift;
+    value = (value - 0.5) * slope + 0.5;
+    return clampByte(value * 255);
+  });
+}
+
+export interface ExposureSettings {
+  /** Stops of light. */
+  exposure: number;
+  /** Added to every level (−0.5 to 0.5), in linear light. */
+  offset: number;
+  gamma: number;
+}
+
+const toLinear = (value: number) => (value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4));
+const toSrgb = (value: number) => (value <= 0.0031308 ? value * 12.92 : 1.055 * Math.pow(value, 1 / 2.4) - 0.055);
+
+/** Exposure works on light, not on the sRGB levels the pixels are stored in. */
+export function exposureLut({ exposure, offset, gamma }: ExposureSettings): Lut {
+  const gain = Math.pow(2, exposure);
+  const power = 1 / Math.max(0.01, gamma);
+  return Uint8Array.from({ length: 256 }, (_, level) => {
+    const light = Math.max(0, toLinear(level / 255) * gain + offset);
+    return clampByte(toSrgb(Math.min(1, Math.pow(light, power))) * 255);
+  });
+}
+
+export const posterizeLut = (levels: number): Lut => {
+  const steps = Math.max(1, Math.round(levels) - 1);
+  return Uint8Array.from({ length: 256 }, (_, level) => clampByte((Math.round((level / 255) * steps) / steps) * 255));
+};
+
+export const invertLut = (): Lut => Uint8Array.from({ length: 256 }, (_, level) => 255 - level);
+
+// ---------- Colour, pixel by pixel ----------
+
+/** Rec. 601 luminosity of a pixel, as Photoshop's Threshold and Gradient Map see it. */
+const luminosity = (r: number, g: number, b: number) => (r * 77 + g * 150 + b * 29 + 128) >> 8;
+
+/** Every pixel black or white, split at `level`. */
+export function threshold(source: Uint8ClampedArray, target: Uint8ClampedArray, level: number): void {
+  for (let offset = 0; offset < source.length; offset += 4) {
+    const value = luminosity(source[offset]!, source[offset + 1]!, source[offset + 2]!) >= level ? 255 : 0;
+    target[offset] = value;
+    target[offset + 1] = value;
+    target[offset + 2] = value;
+    target[offset + 3] = source[offset + 3]!;
+  }
+}
+
+/** Photoshop's Desaturate: each pixel's HSL lightness. */
+export function desaturate(source: Uint8ClampedArray, target: Uint8ClampedArray): void {
+  for (let offset = 0; offset < source.length; offset += 4) {
+    const r = source[offset]!;
+    const g = source[offset + 1]!;
+    const b = source[offset + 2]!;
+    const value = (Math.max(r, g, b) + Math.min(r, g, b) + 1) >> 1;
+    target[offset] = value;
+    target[offset + 1] = value;
+    target[offset + 2] = value;
+    target[offset + 3] = source[offset + 3]!;
+  }
+}
+
+export interface GradientMapSettings {
+  /** The colour shadows map to. */
+  from: string;
+  /** The colour highlights map to. */
+  to: string;
+  reverse: boolean;
+}
+
+const rgbOf = (hex: string): [number, number, number] => {
+  const value = /^#[0-9a-f]{6}$/i.test(hex) ? parseInt(hex.slice(1), 16) : 0;
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+};
+
+/** Each pixel's luminosity, looked up along a two-colour gradient. */
+export function gradientMapLuts({ from, to, reverse }: GradientMapSettings): Luts {
+  const [start, end] = reverse ? [rgbOf(to), rgbOf(from)] : [rgbOf(from), rgbOf(to)];
+  const table = (channel: 0 | 1 | 2) =>
+    Uint8Array.from({ length: 256 }, (_, level) => clampByte(start[channel] + ((end[channel] - start[channel]) * level) / 255));
+  return { r: table(0), g: table(1), b: table(2) };
+}
+
+export function gradientMap(source: Uint8ClampedArray, target: Uint8ClampedArray, luts: Luts): void {
+  for (let offset = 0; offset < source.length; offset += 4) {
+    const level = luminosity(source[offset]!, source[offset + 1]!, source[offset + 2]!);
+    target[offset] = luts.r[level]!;
+    target[offset + 1] = luts.g[level]!;
+    target[offset + 2] = luts.b[level]!;
+    target[offset + 3] = source[offset + 3]!;
+  }
+}
+
+export interface BlackWhiteSettings {
+  /** How light each colour turns, in percent (−200 to 300), as in Photoshop. */
+  reds: number;
+  yellows: number;
+  greens: number;
+  cyans: number;
+  blues: number;
+  magentas: number;
+}
+
+export const DEFAULT_BLACK_WHITE: BlackWhiteSettings = {
+  reds: 40,
+  yellows: 60,
+  greens: 40,
+  cyans: 60,
+  blues: 20,
+  magentas: 80,
+};
+
+/**
+ * Photoshop's Black & White: a pixel's grey is its weakest channel plus its
+ * colour, weighed by the primary (strongest channel) and the secondary
+ * (strongest two) colour it is made of.
+ */
+export function blackWhite(source: Uint8ClampedArray, target: Uint8ClampedArray, weights: BlackWhiteSettings): void {
+  const w = {
+    reds: weights.reds / 100,
+    yellows: weights.yellows / 100,
+    greens: weights.greens / 100,
+    cyans: weights.cyans / 100,
+    blues: weights.blues / 100,
+    magentas: weights.magentas / 100,
+  };
+  for (let offset = 0; offset < source.length; offset += 4) {
+    const r = source[offset]!;
+    const g = source[offset + 1]!;
+    const b = source[offset + 2]!;
+    let primary: number;
+    let secondary: number;
+    let max: number;
+    let mid: number;
+    let min: number;
+    if (r >= g && r >= b) {
+      max = r;
+      primary = w.reds;
+      if (g >= b) [mid, min, secondary] = [g, b, w.yellows];
+      else [mid, min, secondary] = [b, g, w.magentas];
+    } else if (g >= r && g >= b) {
+      max = g;
+      primary = w.greens;
+      if (r >= b) [mid, min, secondary] = [r, b, w.yellows];
+      else [mid, min, secondary] = [b, r, w.cyans];
+    } else {
+      max = b;
+      primary = w.blues;
+      if (g >= r) [mid, min, secondary] = [g, r, w.cyans];
+      else [mid, min, secondary] = [r, g, w.magentas];
+    }
+    const value = clampByte(min + (max - mid) * primary + (mid - min) * secondary);
+    target[offset] = value;
+    target[offset + 1] = value;
+    target[offset + 2] = value;
+    target[offset + 3] = source[offset + 3]!;
+  }
+}
+
+/** RGB (0–255) to HSL (hue 0–1, saturation 0–1, lightness 0–1), into `out`. */
+function toHsl(r: number, g: number, b: number, out: Float64Array) {
+  const red = r / 255;
+  const green = g / 255;
+  const blue = b / 255;
+  const max = Math.max(red, green, blue);
+  const min = Math.min(red, green, blue);
+  const lightness = (max + min) / 2;
+  let hue = 0;
+  let saturation = 0;
+  const delta = max - min;
+  if (delta > 0) {
+    saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    if (max === red) hue = (green - blue) / delta + (green < blue ? 6 : 0);
+    else if (max === green) hue = (blue - red) / delta + 2;
+    else hue = (red - green) / delta + 4;
+    hue /= 6;
+  }
+  out[0] = hue;
+  out[1] = saturation;
+  out[2] = lightness;
+}
+
+const hueChannel = (p: number, q: number, t: number) => {
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+};
+
+/** HSL back to RGB bytes at `offset` of `target`. */
+function fromHsl(hue: number, saturation: number, lightness: number, target: Uint8ClampedArray, offset: number) {
+  if (saturation <= 0) {
+    const value = clampByte(lightness * 255);
+    target[offset] = value;
+    target[offset + 1] = value;
+    target[offset + 2] = value;
+    return;
+  }
+  const q = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
+  const p = 2 * lightness - q;
+  target[offset] = clampByte(hueChannel(p, q, hue + 1 / 3) * 255);
+  target[offset + 1] = clampByte(hueChannel(p, q, hue) * 255);
+  target[offset + 2] = clampByte(hueChannel(p, q, hue - 1 / 3) * 255);
+}
+
+export interface HueSaturationSettings {
+  /** Degrees (−180 to 180); with colorize, the hue itself (0 to 360). */
+  hue: number;
+  /** −100 to 100; with colorize, 0 to 100. */
+  saturation: number;
+  /** −100 to 100. */
+  lightness: number;
+  /** Tint the image with one hue, keeping its tones. */
+  colorize: boolean;
+}
+
+export function hueSaturation(source: Uint8ClampedArray, target: Uint8ClampedArray, settings: HueSaturationSettings): void {
+  const hsl = new Float64Array(3);
+  const shift = settings.hue / 360;
+  const saturate = settings.saturation / 100;
+  const lighten = settings.lightness / 100;
+  for (let offset = 0; offset < source.length; offset += 4) {
+    toHsl(source[offset]!, source[offset + 1]!, source[offset + 2]!, hsl);
+    let [hue, saturation, lightness] = [hsl[0]!, hsl[1]!, hsl[2]!];
+    if (settings.colorize) {
+      hue = shift - Math.floor(shift);
+      saturation = Math.max(0, Math.min(1, saturate));
+    } else {
+      hue = hue + shift;
+      hue -= Math.floor(hue);
+      saturation = Math.max(0, Math.min(1, saturation * (1 + saturate)));
+    }
+    lightness = lighten < 0 ? lightness * (1 + lighten) : lightness + (1 - lightness) * lighten;
+    fromHsl(hue, saturation, lightness, target, offset);
+    target[offset + 3] = source[offset + 3]!;
+  }
+}
+
+export type ToneRange = "shadows" | "midtones" | "highlights";
+
+/** Cyan–red, magenta–green and yellow–blue shifts, −100 to 100 each. */
+export type ColorShift = [number, number, number];
+
+export interface ColorBalanceSettings {
+  shadows: ColorShift;
+  midtones: ColorShift;
+  highlights: ColorShift;
+  preserveLuminosity: boolean;
+}
+
+export const defaultColorBalance = (): ColorBalanceSettings => ({
+  shadows: [0, 0, 0],
+  midtones: [0, 0, 0],
+  highlights: [0, 0, 0],
+  preserveLuminosity: true,
+});
+
+const clampUnit = (value: number) => (value <= 0 ? 0 : value >= 1 ? 1 : value);
+
+/**
+ * Shift each channel by tonal range, weighed by how far into that range the
+ * pixel's lightness lies (the approach GIMP takes for Photoshop's tool).
+ */
+export function colorBalance(source: Uint8ClampedArray, target: Uint8ClampedArray, settings: ColorBalanceSettings): void {
+  const a = 0.25;
+  const b = 0.333;
+  const scale = 0.7;
+  const hsl = new Float64Array(3);
+  for (let offset = 0; offset < source.length; offset += 4) {
+    const r = source[offset]!;
+    const g = source[offset + 1]!;
+    const bl = source[offset + 2]!;
+    toHsl(r, g, bl, hsl);
+    const lightness = hsl[2]!;
+    const shadowWeight = clampUnit((lightness - b) / -a + 0.5) * scale;
+    const midWeight = clampUnit((lightness - b) / a + 0.5) * clampUnit((lightness + b - 1) / -a + 0.5) * scale;
+    const highWeight = clampUnit((lightness + b - 1) / a + 0.5) * scale;
+    const channels = [r, g, bl];
+    for (let channel = 0; channel < 3; channel += 1) {
+      const shift =
+        (settings.shadows[channel]! * shadowWeight +
+          settings.midtones[channel]! * midWeight +
+          settings.highlights[channel]! * highWeight) /
+        100;
+      target[offset + channel] = clampByte(clampUnit(channels[channel]! / 255 + shift) * 255);
+    }
+    if (settings.preserveLuminosity) {
+      toHsl(target[offset]!, target[offset + 1]!, target[offset + 2]!, hsl);
+      fromHsl(hsl[0]!, hsl[1]!, lightness, target, offset);
+    }
+    target[offset + 3] = source[offset + 3]!;
+  }
+}

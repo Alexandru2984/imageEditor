@@ -36,6 +36,11 @@ export const KEYMAP = {
 
   levels: [{ key: "l", mod: true }],
   curves: [{ key: "m", mod: true }],
+  hueSaturation: [{ key: "u", mod: true }],
+  colorBalance: [{ key: "b", mod: true }],
+  blackWhite: [{ key: "b", mod: true, alt: true, shift: true }],
+  invert: [{ key: "i", mod: true }],
+  desaturate: [{ key: "u", mod: true, shift: true }],
 
   flipHorizontal: [{ key: "h", shift: true }],
   flipVertical: [{ key: "v", shift: true }],

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ComponentType } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -11,73 +11,17 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { selectionOf } from "@/selection/state";
-import { PixelPreview, adjustTarget, type PixelProcess } from "@/raster/pixelPreview";
-import {
-  applyLuts,
-  curvesLuts,
-  defaultCurves,
-  defaultLevels,
-  isDefaultCurves,
-  isDefaultLevels,
-  levelsLuts,
-  type CurvesSettings,
-  type Histogram,
-  type LevelsSettings,
-} from "@/raster/adjustments";
-import { LevelsControls } from "./LevelsControls";
-import { CurvesControls } from "./CurvesControls";
+import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
+import { ADJUSTMENTS, type AdjustmentContext, type AdjustmentKind } from "./specs";
 
-export type AdjustmentKind = "levels" | "curves";
-
-interface ControlsProps<Settings> {
-  settings: Settings;
-  onChange: (settings: Settings) => void;
-  histogram: Histogram;
-}
-
-interface AdjustmentSpec<Settings> {
-  title: string;
-  description: string;
-  initial: () => Settings;
-  /** Settings that change nothing. */
-  isIdentity: (settings: Settings) => boolean;
-  process: (settings: Settings) => PixelProcess;
-  Controls: ComponentType<ControlsProps<Settings>>;
-}
-
-const lutProcess =
-  (luts: ReturnType<typeof levelsLuts>): PixelProcess =>
-  (source, target) =>
-    applyLuts(source, target, luts);
-
-const levels: AdjustmentSpec<LevelsSettings> = {
-  title: "Levels",
-  description: "Set the black point, white point and midtones.",
-  initial: defaultLevels,
-  isIdentity: isDefaultLevels,
-  process: (settings) => lutProcess(levelsLuts(settings)),
-  Controls: LevelsControls,
-};
-
-const curves: AdjustmentSpec<CurvesSettings> = {
-  title: "Curves",
-  description: "Map each input level to a new one along a curve.",
-  initial: defaultCurves,
-  isIdentity: isDefaultCurves,
-  process: (settings) => lutProcess(curvesLuts(settings)),
-  Controls: CurvesControls,
-};
-
-// Each kind keeps its own settings type; the dialog only passes them along.
-const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
-  levels: levels as unknown as AdjustmentSpec<unknown>,
-  curves: curves as unknown as AdjustmentSpec<unknown>,
-};
+export type { AdjustmentKind } from "./specs";
 
 interface AdjustmentDialogProps {
   canvas: FabricCanvas | null;
   /** The adjustment being set up, or null when the dialog is closed. */
   kind: AdjustmentKind | null;
+  /** The colour wells, which some adjustments start from. */
+  colors: AdjustmentContext;
   onClose: () => void;
 }
 
@@ -85,7 +29,7 @@ interface AdjustmentDialogProps {
  * Image › Adjustments: the settings of one adjustment, shown on the layer as
  * they change and applied to its pixels on OK.
  */
-export function AdjustmentDialog({ canvas, kind, onClose }: AdjustmentDialogProps) {
+export function AdjustmentDialog({ canvas, kind, colors, onClose }: AdjustmentDialogProps) {
   const previewId = useId();
   const [session, setSession] = useState<{ kind: AdjustmentKind; preview: PixelPreview } | null>(null);
   const [settings, setSettings] = useState<unknown>(null);
@@ -104,7 +48,7 @@ export function AdjustmentDialog({ canvas, kind, onClose }: AdjustmentDialogProp
       return;
     }
     setSession({ kind, preview });
-    setSettings(ADJUSTMENTS[kind].initial());
+    setSettings(ADJUSTMENTS[kind].initial(colors));
     setShowPreview(true);
     return () => {
       cancelAnimationFrame(frame.current);
@@ -112,7 +56,7 @@ export function AdjustmentDialog({ canvas, kind, onClose }: AdjustmentDialogProp
       preview.cancel();
       setSession(null);
     };
-    // onClose is a fresh function each render; the session follows `kind`.
+    // onClose and colors are read once per opening; the session follows `kind`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, canvas]);
 

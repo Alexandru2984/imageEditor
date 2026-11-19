@@ -101,3 +101,61 @@ test("Curves applies a preset and a point set by number", async ({ page }) => {
   await dialog.getByRole("button", { name: "OK" }).click();
   await expect.poll(async () => (await photoPixels(page, [[200, 150]]))?.[0]?.[0]).toBe(102);
 });
+
+test("Invert, Desaturate and Hue/Saturation give the expected colours", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#336699");
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0x33, 0x66, 0x99]]);
+  await settle(page);
+
+  await page.keyboard.press("Control+i");
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0xcc, 0x99, 0x66]]);
+  await page.keyboard.press("Control+Shift+u");
+  // HSL lightness of #cc9966: (204 + 102) / 2.
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[153, 153, 153]]);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0xcc, 0x99, 0x66]]);
+
+  // Half way round the colour wheel.
+  await page.keyboard.press("Control+u");
+  const dialog = page.getByRole("dialog", { name: "Hue/Saturation" });
+  await dialog.getByRole("slider", { name: "Hue" }).focus();
+  await page.keyboard.press("End");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect
+    .poll(async () => (await photoPixels(page, [[200, 150]]))?.[0]?.map((value) => Math.round(value / 4)))
+    .toEqual([0x66, 0x99, 0xcc].map((value) => Math.round(value / 4)));
+});
+
+test("every adjustment in the menu changes the photo", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#6b8e23");
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0x6b, 0x8e, 0x23]]);
+  await settle(page);
+  let before = [0x6b, 0x8e, 0x23];
+  const steps: [string, string | null][] = [
+    ["Brightness/Contrast…", "Brightness"],
+    ["Exposure…", "Exposure"],
+    ["Hue/Saturation…", "Hue"],
+    ["Color Balance…", "Cyan – Red"],
+    ["Posterize…", null],
+    ["Gradient Map…", null],
+    ["Invert", null],
+    ["Black & White…", null],
+    ["Threshold…", null],
+  ];
+  for (const [item, slider] of steps) {
+    await chooseSubmenu(page, "Image", "Adjustments", item);
+    if (item.endsWith("…")) {
+      const dialog = page.getByRole("dialog", { name: item.slice(0, -1) });
+      if (slider) {
+        await dialog.getByRole("slider", { name: slider, exact: true }).focus();
+        for (let step = 0; step < 20; step += 1) await page.keyboard.press("ArrowRight");
+      }
+      await dialog.getByRole("button", { name: "OK" }).click();
+      await expect(dialog).toHaveCount(0);
+    }
+    await expect
+      .poll(async () => JSON.stringify((await photoPixels(page, [[200, 150]]))?.[0]), { message: item })
+      .not.toBe(JSON.stringify(before));
+    before = (await photoPixels(page, [[200, 150]]))![0]!;
+  }
+});

@@ -928,7 +928,12 @@ export const EditorWorkspace = ({
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} commands={commands} />
       <LayerStyleDialog canvas={fabricCanvas} layer={styledLayer} onClose={() => setStyledLayer(null)} />
-      <AdjustmentDialog canvas={fabricCanvas} kind={adjustment} onClose={() => setAdjustment(null)} />
+      <AdjustmentDialog
+        canvas={fabricCanvas}
+        kind={adjustment}
+        colors={{ foreground: activeColor, background: backgroundColor }}
+        onClose={() => setAdjustment(null)}
+      />
       <SelectionModifyDialog
         canvas={fabricCanvas}
         modification={selectionModification}

@@ -94,7 +94,8 @@ import {
 } from "@/raster/layerMask";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
-import { adjustTarget } from "@/raster/pixelPreview";
+import { PixelPreview, adjustTarget, type PixelProcess } from "@/raster/pixelPreview";
+import { applyLuts, desaturate, invertLut, uniformLuts } from "@/raster/adjustments";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
@@ -274,6 +275,24 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       const target = adjustTarget(canvas);
       if (typeof target === "string") toast.error(target);
       else openAdjustment(kind);
+    };
+    /** Adjustments with nothing to set (Invert, Desaturate) apply at once. */
+    const adjustNow = async (title: string, process: PixelProcess) => {
+      if (!canvas) return;
+      const target = adjustTarget(canvas);
+      const preview =
+        typeof target === "string" ? target : PixelPreview.open(canvas, target, selectionOf(canvas).current());
+      if (typeof preview === "string") {
+        toast.error(preview);
+        return;
+      }
+      preview.show(process);
+      try {
+        await preview.commit();
+      } catch (error) {
+        console.error(`${title} failed:`, error);
+        toast.error(`${title} could not be applied`);
+      }
     };
 
     /** The layer a layer style goes on: the selected one, else the photo. */
@@ -580,21 +599,44 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => flip("y"),
         keywords: "mirror upside down",
       },
+      ...(
+        [
+          ["brightnessContrast", "Brightness/Contrast…", undefined, "lighter darker"],
+          ["levels", "Levels…", KEYMAP.levels, "black point white point gamma midtones histogram auto"],
+          ["curves", "Curves…", KEYMAP.curves, "tone curve contrast negative"],
+          ["exposure", "Exposure…", undefined, "stops light gamma offset"],
+          ["hueSaturation", "Hue/Saturation…", KEYMAP.hueSaturation, "colour colorize tint lightness"],
+          ["colorBalance", "Color Balance…", KEYMAP.colorBalance, "colour cast shadows midtones highlights"],
+          ["blackWhite", "Black & White…", KEYMAP.blackWhite, "grayscale greyscale monochrome"],
+          ["posterize", "Posterize…", undefined, "levels flat"],
+          ["threshold", "Threshold…", undefined, "black white"],
+          ["gradientMap", "Gradient Map…", undefined, "duotone tones"],
+        ] as const
+      ).map(
+        ([kind, label, shortcuts, keywords]): Command => ({
+          id: `image.adjust.${kind}`,
+          label,
+          shortcuts,
+          run: () => adjust(kind),
+          isEnabled: canAdjust,
+          keywords,
+        })
+      ),
       {
-        id: "image.adjust.levels",
-        label: "Levels…",
-        shortcuts: KEYMAP.levels,
-        run: () => adjust("levels"),
+        id: "image.adjust.invert",
+        label: "Invert",
+        shortcuts: KEYMAP.invert,
+        run: () => void adjustNow("Invert", (source, target) => applyLuts(source, target, uniformLuts(invertLut()))),
         isEnabled: canAdjust,
-        keywords: "black point white point gamma midtones histogram auto",
+        keywords: "negative",
       },
       {
-        id: "image.adjust.curves",
-        label: "Curves…",
-        shortcuts: KEYMAP.curves,
-        run: () => adjust("curves"),
+        id: "image.adjust.desaturate",
+        label: "Desaturate",
+        shortcuts: KEYMAP.desaturate,
+        run: () => void adjustNow("Desaturate", desaturate),
         isEnabled: canAdjust,
-        keywords: "tone curve contrast negative",
+        keywords: "grey gray remove colour",
       },
       {
         id: "ai.removeBackground",
