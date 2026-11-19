@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import {
   type BlackWhiteSettings,
   type BrightnessContrastSettings,
@@ -11,7 +11,7 @@ import {
   type ToneRange,
 } from "@/raster/adjustments";
 import { HistogramChart } from "./HistogramChart";
-import { CHANNEL_COLORS, OptionRow, ValueSlider } from "./controls";
+import { CHANNEL_COLORS, Check, OptionRow, ValueSlider } from "./controls";
 
 interface ControlsProps<Settings> {
   settings: Settings;
@@ -20,23 +20,6 @@ interface ControlsProps<Settings> {
 }
 
 const signed = (value: number) => (value > 0 ? `+${Math.round(value)}` : String(Math.round(value)));
-
-/** A checkbox with its label, for adjustment options. */
-function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  const id = useId();
-  return (
-    <label htmlFor={id} className="flex cursor-pointer items-center gap-2 text-xs">
-      <input
-        id={id}
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        className="h-4 w-4 accent-[hsl(var(--primary))]"
-      />
-      {label}
-    </label>
-  );
-}
 
 export function BrightnessContrastControls({ settings, onChange }: ControlsProps<BrightnessContrastSettings>) {
   return (

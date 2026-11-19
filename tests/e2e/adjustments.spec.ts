@@ -159,3 +159,58 @@ test("every adjustment in the menu changes the photo", async ({ page }) => {
     before = (await photoPixels(page, [[200, 150]]))![0]!;
   }
 });
+
+test("Gaussian Blur inside a selection blurs across its edge from the pixels outside", async ({ page }) => {
+  // Black left half, white right half.
+  await uploadSolidImage(page, 400, 300, "#ffffff", [{ x: 0, y: 0, width: 200, height: 300, color: "#000000" }]);
+  await expect.poll(() => photoPixels(page, [[100, 150], [300, 150]])).toEqual([[0, 0, 0], [255, 255, 255]]);
+  await settle(page);
+
+  // Select only the white half.
+  await page.keyboard.press("m");
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Rectangle select");
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x, center.y - 280);
+  await page.mouse.down();
+  await page.mouse.move(center.x + 200, center.y, { steps: 4 });
+  await page.mouse.move(center.x + 400, center.y + 280, { steps: 4 });
+  await page.mouse.up();
+
+  await chooseSubmenu(page, "Filter", "Blur", "Gaussian Blur…");
+  const dialog = page.getByRole("dialog", { name: "Gaussian Blur" });
+  await dialog.getByRole("slider", { name: "Radius" }).focus();
+  for (let step = 0; step < 30; step += 1) await page.keyboard.press("ArrowRight");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  // The black from outside bleeds into the selected edge; the black half itself stays black.
+  await expect.poll(async () => (await photoPixels(page, [[202, 150]]))?.[0]?.[0] ?? 255).toBeLessThan(200);
+  expect((await photoPixels(page, [[150, 150], [380, 150]]))!).toEqual([
+    [0, 0, 0],
+    [255, 255, 255],
+  ]);
+});
+
+test("each filter in the Filter menu changes the photo", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#4b8bbe", [{ x: 150, y: 100, width: 100, height: 100, color: "#ffd43b" }]);
+  await settle(page);
+  const steps: [string, string][] = [
+    ["Blur", "Motion Blur…"],
+    ["Sharpen", "Unsharp Mask…"],
+    ["Noise", "Add Noise…"],
+    ["Pixelate", "Mosaic…"],
+    ["Stylize", "Emboss…"],
+    ["Stylize", "Find Edges"],
+    ["Other", "High Pass…"],
+  ];
+  // Pixels on and around the yellow square's edge.
+  const probe: [number, number][] = [[150, 150], [148, 150], [152, 150], [200, 100], [30, 30]];
+  for (const [submenu, item] of steps) {
+    const before = JSON.stringify(await photoPixels(page, probe));
+    await chooseSubmenu(page, "Filter", submenu, item);
+    if (item.endsWith("…")) {
+      const dialog = page.getByRole("dialog", { name: item.slice(0, -1) });
+      await dialog.getByRole("button", { name: "OK" }).click();
+      await expect(dialog).toHaveCount(0);
+    }
+    await expect.poll(async () => JSON.stringify(await photoPixels(page, probe)), { message: item }).not.toBe(before);
+  }
+});

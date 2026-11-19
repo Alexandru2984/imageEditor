@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 
@@ -84,3 +85,59 @@ export const CHANNEL_COLORS = {
   green: "rgb(34 197 94 / 0.5)",
   blue: "rgb(59 130 246 / 0.5)",
 } as const;
+
+/** A checkbox with its label, for adjustment options. */
+export function Check({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  const id = useId();
+  return (
+    <label htmlFor={id} className="flex cursor-pointer items-center gap-2 text-xs">
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="h-4 w-4 accent-[hsl(var(--primary))]"
+      />
+      {label}
+    </label>
+  );
+}
+
+/**
+ * A slider for sizes from a fraction of a pixel to hundreds, on a log scale
+ * so small values get as much room as large ones.
+ */
+export function LogSlider({
+  label,
+  value,
+  min,
+  max,
+  unit = "px",
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  unit?: string;
+  onChange: (value: number) => void;
+}) {
+  // Each step is a few percent, and values keep enough digits that every
+  // step (keyboard included) lands on a different one.
+  const steps = 200;
+  const toPosition = (current: number) => Math.round((Math.log(current / min) / Math.log(max / min)) * steps);
+  const toValue = (position: number) => Number((min * Math.pow(max / min, position / steps)).toPrecision(3));
+  return (
+    <ValueSlider
+      label={label}
+      value={toPosition(value)}
+      min={0}
+      max={steps}
+      format={(position) => {
+        const current = toValue(position);
+        return `${current < 10 ? current.toFixed(1) : Math.round(current)} ${unit}`;
+      }}
+      onChange={(position) => onChange(toValue(position))}
+    />
+  );
+}

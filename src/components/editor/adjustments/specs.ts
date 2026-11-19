@@ -1,24 +1,19 @@
 import type { ComponentType } from "react";
-import type { PixelProcess } from "@/raster/pixelPreview";
+import type { PixelJob } from "@/raster/pixelJobs";
+import type { EmbossSettings, NoiseSettings, UnsharpSettings } from "@/raster/filters";
 import {
   DEFAULT_BLACK_WHITE,
-  applyLuts,
-  blackWhite,
   brightnessContrastLut,
-  colorBalance,
   curvesLuts,
   defaultColorBalance,
   defaultCurves,
   defaultLevels,
   exposureLut,
-  gradientMap,
   gradientMapLuts,
-  hueSaturation,
   isDefaultCurves,
   isDefaultLevels,
   levelsLuts,
   posterizeLut,
-  threshold,
   uniformLuts,
   type BlackWhiteSettings,
   type BrightnessContrastSettings,
@@ -29,7 +24,6 @@ import {
   type Histogram,
   type HueSaturationSettings,
   type LevelsSettings,
-  type Luts,
 } from "@/raster/adjustments";
 import { LevelsControls } from "./LevelsControls";
 import { CurvesControls } from "./CurvesControls";
@@ -43,6 +37,15 @@ import {
   PosterizeControls,
   ThresholdControls,
 } from "./ToneColorControls";
+import {
+  AddNoiseControls,
+  EmbossControls,
+  GaussianBlurControls,
+  HighPassControls,
+  MosaicControls,
+  MotionBlurControls,
+  UnsharpMaskControls,
+} from "./FilterControls";
 
 export type AdjustmentKind =
   | "brightnessContrast"
@@ -54,7 +57,14 @@ export type AdjustmentKind =
   | "blackWhite"
   | "gradientMap"
   | "posterize"
-  | "threshold";
+  | "threshold"
+  | "gaussianBlur"
+  | "motionBlur"
+  | "addNoise"
+  | "mosaic"
+  | "unsharpMask"
+  | "emboss"
+  | "highPass";
 
 export interface ControlsProps<Settings> {
   settings: Settings;
@@ -74,14 +84,10 @@ export interface AdjustmentSpec<Settings> {
   initial: (context: AdjustmentContext) => Settings;
   /** Settings that change nothing. */
   isIdentity: (settings: Settings) => boolean;
-  process: (settings: Settings) => PixelProcess;
+  /** What the settings do to pixels. */
+  job: (settings: Settings) => PixelJob;
   Controls: ComponentType<ControlsProps<Settings>>;
 }
-
-const lutProcess =
-  (luts: Luts): PixelProcess =>
-  (source, target) =>
-    applyLuts(source, target, luts);
 
 const spec = <Settings>(definition: AdjustmentSpec<Settings>) => definition as unknown as AdjustmentSpec<unknown>;
 
@@ -99,7 +105,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Lighten or darken the image and spread or narrow its tones.",
     initial: () => ({ brightness: 0, contrast: 0 }),
     isIdentity: (settings) => settings.brightness === 0 && settings.contrast === 0,
-    process: (settings) => lutProcess(uniformLuts(brightnessContrastLut(settings))),
+    job: (settings) => ({ op: "luts", luts: uniformLuts(brightnessContrastLut(settings)) }),
     Controls: BrightnessContrastControls,
   }),
   levels: spec<LevelsSettings>({
@@ -107,7 +113,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Set the black point, white point and midtones.",
     initial: defaultLevels,
     isIdentity: isDefaultLevels,
-    process: (settings) => lutProcess(levelsLuts(settings)),
+    job: (settings) => ({ op: "luts", luts: levelsLuts(settings) }),
     Controls: LevelsControls,
   }),
   curves: spec<CurvesSettings>({
@@ -115,7 +121,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Map each input level to a new one along a curve.",
     initial: defaultCurves,
     isIdentity: isDefaultCurves,
-    process: (settings) => lutProcess(curvesLuts(settings)),
+    job: (settings) => ({ op: "luts", luts: curvesLuts(settings) }),
     Controls: CurvesControls,
   }),
   exposure: spec<ExposureSettings>({
@@ -123,7 +129,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Change the light as a camera exposure would, in stops.",
     initial: () => ({ exposure: 0, offset: 0, gamma: 1 }),
     isIdentity: (settings) => settings.exposure === 0 && settings.offset === 0 && settings.gamma === 1,
-    process: (settings) => lutProcess(uniformLuts(exposureLut(settings))),
+    job: (settings) => ({ op: "luts", luts: uniformLuts(exposureLut(settings)) }),
     Controls: ExposureControls,
   }),
   hueSaturation: spec<HueSaturationSettings>({
@@ -132,7 +138,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     initial: () => ({ hue: 0, saturation: 0, lightness: 0, colorize: false }),
     isIdentity: (settings) =>
       !settings.colorize && settings.hue === 0 && settings.saturation === 0 && settings.lightness === 0,
-    process: (settings) => (source, target) => hueSaturation(source, target, settings),
+    job: (settings) => ({ op: "hueSaturation", settings }),
     Controls: HueSaturationControls,
   }),
   colorBalance: spec<ColorBalanceSettings>({
@@ -142,7 +148,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     isIdentity: (settings) =>
       JSON.stringify([settings.shadows, settings.midtones, settings.highlights]) ===
       JSON.stringify([NO_BALANCE.shadows, NO_BALANCE.midtones, NO_BALANCE.highlights]),
-    process: (settings) => (source, target) => colorBalance(source, target, settings),
+    job: (settings) => ({ op: "colorBalance", settings }),
     Controls: ColorBalanceControls,
   }),
   blackWhite: spec<BlackWhiteSettings>({
@@ -151,7 +157,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     initial: () => ({ ...DEFAULT_BLACK_WHITE }),
     // Even the defaults turn the image grey.
     isIdentity: () => false,
-    process: (settings) => (source, target) => blackWhite(source, target, settings),
+    job: (settings) => ({ op: "blackWhite", settings }),
     Controls: BlackWhiteControls,
   }),
   gradientMap: spec<GradientMapSettings>({
@@ -159,10 +165,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Map the image's tones onto a gradient, from shadows to highlights.",
     initial: ({ foreground, background }) => ({ from: foreground, to: background, reverse: false }),
     isIdentity: () => false,
-    process: (settings) => {
-      const luts = gradientMapLuts(settings);
-      return (source, target) => gradientMap(source, target, luts);
-    },
+    job: (settings) => ({ op: "gradientMap", luts: gradientMapLuts(settings) }),
     Controls: GradientMapControls,
   }),
   posterize: spec<{ levels: number }>({
@@ -170,7 +173,7 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Reduce each channel to a few levels.",
     initial: () => ({ levels: 4 }),
     isIdentity: sameAs({ levels: 256 }),
-    process: (settings) => lutProcess(uniformLuts(posterizeLut(settings.levels))),
+    job: (settings) => ({ op: "luts", luts: uniformLuts(posterizeLut(settings.levels)) }),
     Controls: PosterizeControls,
   }),
   threshold: spec<{ level: number }>({
@@ -178,7 +181,65 @@ export const ADJUSTMENTS: Record<AdjustmentKind, AdjustmentSpec<unknown>> = {
     description: "Turn pixels lighter than the level white, and the rest black.",
     initial: () => ({ level: 128 }),
     isIdentity: () => false,
-    process: (settings) => (source, target) => threshold(source, target, settings.level),
+    job: (settings) => ({ op: "threshold", level: settings.level }),
     Controls: ThresholdControls,
+  }),
+
+  // ---------- Filter menu ----------
+  gaussianBlur: spec<{ radius: number }>({
+    title: "Gaussian Blur",
+    description: "Soften the image, each pixel blended with its neighbours.",
+    initial: () => ({ radius: 2 }),
+    isIdentity: (settings) => settings.radius < 0.3,
+    job: ({ radius }) => ({ op: "gaussianBlur", radius }),
+    Controls: GaussianBlurControls,
+  }),
+  motionBlur: spec<{ angle: number; distance: number }>({
+    title: "Motion Blur",
+    description: "Blur along a line, as if the camera moved.",
+    initial: () => ({ angle: 0, distance: 10 }),
+    isIdentity: (settings) => settings.distance < 1,
+    job: ({ angle, distance }) => ({ op: "motionBlur", angle, distance }),
+    Controls: MotionBlurControls,
+  }),
+  addNoise: spec<NoiseSettings>({
+    title: "Add Noise",
+    description: "Scatter random grain over the image.",
+    initial: () => ({ amount: 10, distribution: "uniform", monochromatic: false }),
+    isIdentity: (settings) => settings.amount <= 0,
+    job: (settings) => ({ op: "addNoise", settings }),
+    Controls: AddNoiseControls,
+  }),
+  mosaic: spec<{ size: number }>({
+    title: "Mosaic",
+    description: "Turn the image into square cells of their average colour.",
+    initial: () => ({ size: 10 }),
+    isIdentity: (settings) => settings.size < 2,
+    job: ({ size }) => ({ op: "mosaic", size }),
+    Controls: MosaicControls,
+  }),
+  unsharpMask: spec<UnsharpSettings>({
+    title: "Unsharp Mask",
+    description: "Sharpen by raising contrast along edges.",
+    initial: () => ({ amount: 100, radius: 1, threshold: 0 }),
+    isIdentity: () => false,
+    job: (settings) => ({ op: "unsharpMask", settings }),
+    Controls: UnsharpMaskControls,
+  }),
+  emboss: spec<EmbossSettings>({
+    title: "Emboss",
+    description: "Turn the image into a grey relief lit from one side.",
+    initial: () => ({ angle: 135, height: 3, amount: 100 }),
+    isIdentity: () => false,
+    job: (settings) => ({ op: "emboss", settings }),
+    Controls: EmbossControls,
+  }),
+  highPass: spec<{ radius: number }>({
+    title: "High Pass",
+    description: "Keep only detail finer than the radius, over middle grey.",
+    initial: () => ({ radius: 10 }),
+    isIdentity: () => false,
+    job: ({ radius }) => ({ op: "highPass", radius }),
+    Controls: HighPassControls,
   }),
 };

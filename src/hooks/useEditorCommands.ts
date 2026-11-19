@@ -94,8 +94,9 @@ import {
 } from "@/raster/layerMask";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
-import { PixelPreview, adjustTarget, type PixelProcess } from "@/raster/pixelPreview";
-import { applyLuts, desaturate, invertLut, uniformLuts } from "@/raster/adjustments";
+import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
+import { invertLut, uniformLuts } from "@/raster/adjustments";
+import type { PixelJob } from "@/raster/pixelJobs";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
@@ -277,7 +278,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       else openAdjustment(kind);
     };
     /** Adjustments with nothing to set (Invert, Desaturate) apply at once. */
-    const adjustNow = async (title: string, process: PixelProcess) => {
+    const adjustNow = async (title: string, job: PixelJob) => {
       if (!canvas) return;
       const target = adjustTarget(canvas);
       const preview =
@@ -286,8 +287,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         toast.error(preview);
         return;
       }
-      preview.show(process);
       try {
+        preview.present(await preview.compute(job));
         await preview.commit();
       } catch (error) {
         console.error(`${title} failed:`, error);
@@ -622,11 +623,37 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           keywords,
         })
       ),
+      ...(
+        [
+          ["gaussianBlur", "Gaussian Blur…", "soften smooth"],
+          ["motionBlur", "Motion Blur…", "movement speed streak"],
+          ["addNoise", "Add Noise…", "grain film"],
+          ["mosaic", "Mosaic…", "pixelate blocks censor"],
+          ["unsharpMask", "Unsharp Mask…", "sharpen detail crisp"],
+          ["emboss", "Emboss…", "relief"],
+          ["highPass", "High Pass…", "detail sharpen"],
+        ] as const
+      ).map(
+        ([kind, label, keywords]): Command => ({
+          id: `filter.${kind}`,
+          label,
+          run: () => adjust(kind),
+          isEnabled: canAdjust,
+          keywords,
+        })
+      ),
+      {
+        id: "filter.findEdges",
+        label: "Find Edges",
+        run: () => void adjustNow("Find Edges", { op: "findEdges" }),
+        isEnabled: canAdjust,
+        keywords: "outline sketch",
+      },
       {
         id: "image.adjust.invert",
         label: "Invert",
         shortcuts: KEYMAP.invert,
-        run: () => void adjustNow("Invert", (source, target) => applyLuts(source, target, uniformLuts(invertLut()))),
+        run: () => void adjustNow("Invert", { op: "luts", luts: uniformLuts(invertLut()) }),
         isEnabled: canAdjust,
         keywords: "negative",
       },
@@ -634,7 +661,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         id: "image.adjust.desaturate",
         label: "Desaturate",
         shortcuts: KEYMAP.desaturate,
-        run: () => void adjustNow("Desaturate", desaturate),
+        run: () => void adjustNow("Desaturate", { op: "desaturate" }),
         isEnabled: canAdjust,
         keywords: "grey gray remove colour",
       },
@@ -977,7 +1004,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       // ---------- Filter ----------
       {
         id: "filter.adjustments",
-        label: "Adjustments…",
+        // The Adjust panel's sliders and looks stay editable, unlike Image › Adjustments.
+        label: "Quick adjustments…",
         icon: SlidersHorizontal,
         run: () => openPanel("adjust"),
         keywords: "brightness contrast saturation filters presets",

@@ -136,7 +136,16 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
   },
   {
     label: "Filter",
-    items: ["filter.adjustments"],
+    items: [
+      "filter.adjustments",
+      "-",
+      { label: "Blur", items: ["filter.gaussianBlur", "filter.motionBlur"] },
+      { label: "Noise", items: ["filter.addNoise"] },
+      { label: "Pixelate", items: ["filter.mosaic"] },
+      { label: "Sharpen", items: ["filter.unsharpMask"] },
+      { label: "Stylize", items: ["filter.emboss", "filter.findEdges"] },
+      { label: "Other", items: ["filter.highPass"] },
+    ],
   },
   {
     label: "View",

@@ -5,6 +5,8 @@ import { selectionClip } from "@/selection/clip";
 import type { PixelSelection } from "@/selection/state";
 import { sceneToLayerMatrix } from "./fill";
 import { histogramOf, type Histogram } from "./adjustments";
+import { jobReach, type PixelJob } from "./pixelJobs";
+import { runPixelJob } from "./pixelJobClient";
 import { currentMaskPixels, maskTargetOf } from "./layerMask";
 import {
   abandonPixelEdit,
@@ -43,8 +45,15 @@ export function adjustTarget(canvas: FabricCanvas): AdjustTarget | Refusal {
   return { layer: target.layer, pixels: target.layer, mask: false };
 }
 
-/** Compute a result from the original pixels (RGBA, row by row). */
-export type PixelProcess = (source: Uint8ClampedArray, target: Uint8ClampedArray, width: number, height: number) => void;
+/** Pixels around a preview's region; the region starts at `x`, `y` in them. */
+export interface SurroundingPixels {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+  x: number;
+  y: number;
+}
+
 
 /** The part of a layer's surface a selection reaches, or null when it misses it. */
 function selectionRegion(layer: FabricImage, selection: PixelSelection, width: number, height: number): PixelRect | null {
@@ -73,6 +82,7 @@ export class PixelPreview {
   private changed = false;
   private readonly buffer: ImageData;
   private histogramCache: Histogram | null = null;
+  private aroundCache: { reach: number; area: SurroundingPixels } | null = null;
 
   private constructor(
     private readonly canvas: FabricCanvas,
@@ -85,7 +95,8 @@ export class PixelPreview {
     /** How much of each pixel is selected (0–255), or null for all of it. */
     readonly weights: Uint8Array | null,
     /** The edit was started for this; abandoning it restores the layer. */
-    private readonly fresh: boolean
+    private readonly fresh: boolean,
+    private readonly surfaceSize: { width: number; height: number }
   ) {
     this.buffer = new ImageData(original.width, original.height);
   }
@@ -111,7 +122,10 @@ export class PixelPreview {
       for (let index = 0; index < weights.length; index += 1) weights[index] = alpha[index * 4 + 3]!;
     }
     const original = context.getImageData(region.left, region.top, region.right - region.left, region.bottom - region.top);
-    return new PixelPreview(canvas, target, context, region, original, weights, fresh);
+    return new PixelPreview(canvas, target, context, region, original, weights, fresh, {
+      width: surface.width,
+      height: surface.height,
+    });
   }
 
   get width(): number {
@@ -122,43 +136,79 @@ export class PixelPreview {
     return this.original.height;
   }
 
+  /**
+   * The original pixels of the region and `reach` pixels around it (as far
+   * as the layer goes), for filters that look at neighbours: a blur inside a
+   * selection draws on what lies outside it too.
+   */
+  around(reach: number): SurroundingPixels {
+    const margin = Math.max(0, Math.ceil(reach));
+    if (this.aroundCache && this.aroundCache.reach === margin) return this.aroundCache.area;
+    const { region, original } = this;
+    const left = Math.max(0, region.left - margin);
+    const top = Math.max(0, region.top - margin);
+    const right = Math.min(this.surfaceSize.width, region.right + margin);
+    const bottom = Math.min(this.surfaceSize.height, region.bottom + margin);
+    const width = right - left;
+    const height = bottom - top;
+    // Outside the region the surface is untouched; inside it may show a
+    // preview, so the original goes back over it.
+    const data =
+      width === original.width && height === original.height
+        ? original.data.slice()
+        : this.context.getImageData(left, top, width, height).data;
+    const x = region.left - left;
+    const y = region.top - top;
+    if (data.length !== original.data.length) {
+      for (let row = 0; row < original.height; row += 1) {
+        const from = row * original.width * 4;
+        data.set(original.data.subarray(from, from + original.width * 4), ((y + row) * width + x) * 4);
+      }
+    }
+    const area = { data, width, height, x, y };
+    this.aroundCache = { reach: margin, area };
+    return area;
+  }
+
   /** The colours of the pixels the change applies to. */
   histogram(): Histogram {
     this.histogramCache ??= histogramOf(this.original.data, this.weights);
     return this.histogramCache;
   }
 
-  /** Show `process`'s result on the layer, or (with null) its own pixels. */
-  show(process: PixelProcess | null): void {
+  /** Work out a job's result for the region, in a worker where possible. */
+  compute(job: PixelJob): Promise<Uint8ClampedArray> {
+    const area = this.around(jobReach(job));
+    return runPixelJob(job, area, this.width, this.height, {
+      x: this.region.left - area.x,
+      y: this.region.top - area.y,
+    });
+  }
+
+  /** Show a result (the region's size) on the layer, or with null its own pixels. */
+  present(result: Uint8ClampedArray | null): void {
     if (this.closed) return;
     const source = this.original.data;
-    const result = this.buffer.data;
-    if (!process) {
-      result.set(source);
+    const shown = this.buffer.data;
+    if (!result) {
+      shown.set(source);
     } else {
-      process(source, result, this.width, this.height);
+      shown.set(result);
       const weights = this.weights;
       if (weights) {
         // Partly selected pixels change partly.
         for (let index = 0, offset = 0; index < weights.length; index += 1, offset += 4) {
           const weight = weights[index]!;
           if (weight === 255) continue;
-          if (weight === 0) {
-            result[offset] = source[offset]!;
-            result[offset + 1] = source[offset + 1]!;
-            result[offset + 2] = source[offset + 2]!;
-            result[offset + 3] = source[offset + 3]!;
-            continue;
-          }
           for (let channel = 0; channel < 4; channel += 1) {
             const before = source[offset + channel]!;
-            result[offset + channel] = before + ((result[offset + channel]! - before) * weight) / 255;
+            shown[offset + channel] = weight === 0 ? before : before + ((shown[offset + channel]! - before) * weight) / 255;
           }
         }
       }
     }
     this.context.putImageData(this.buffer, this.region.left, this.region.top);
-    this.changed = process !== null;
+    this.changed = result !== null;
     refreshPixelLayer(this.target.pixels, this.canvas, this.region);
   }
 

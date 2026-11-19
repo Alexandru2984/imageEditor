@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { selectionOf } from "@/selection/state";
 import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
+import type { PixelJob } from "@/raster/pixelJobs";
 import { ADJUSTMENTS, type AdjustmentContext, type AdjustmentKind } from "./specs";
 
 export type { AdjustmentKind } from "./specs";
@@ -25,16 +26,91 @@ interface AdjustmentDialogProps {
   onClose: () => void;
 }
 
+/** Stands for the layer's own pixels, shown with the preview off. */
+const ORIGINAL = Symbol("original");
+
 /**
- * Image › Adjustments: the settings of one adjustment, shown on the layer as
- * they change and applied to its pixels on OK.
+ * Works out previews one at a time. While one runs, newer settings wait,
+ * and only the latest of them runs next, so dragging a slider over a large
+ * photo never queues up work.
+ */
+class PreviewRunner {
+  private running = false;
+  private closed = false;
+  private wanted: { job: PixelJob | null; key: unknown } | null = null;
+  /** Whose result the layer shows. */
+  private shownKey: unknown = ORIGINAL;
+  private waiters: (() => void)[] = [];
+
+  constructor(
+    private readonly preview: PixelPreview,
+    private readonly title: string
+  ) {}
+
+  /** Show `job`'s result for `key` (with a null job, the layer's own pixels). */
+  request(job: PixelJob | null, key: unknown): void {
+    this.wanted = { job, key };
+    void this.pump();
+  }
+
+  shows(key: unknown): boolean {
+    return this.shownKey === key;
+  }
+
+  /** Resolves once nothing is waiting or running. */
+  idle(): Promise<void> {
+    if (!this.running && !this.wanted) return Promise.resolve();
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  close(): void {
+    this.closed = true;
+    this.wanted = null;
+  }
+
+  private async pump() {
+    if (this.running) return;
+    this.running = true;
+    try {
+      while (this.wanted && !this.closed) {
+        const { job, key } = this.wanted;
+        this.wanted = null;
+        if (key === this.shownKey) continue;
+        try {
+          const result = job ? await this.preview.compute(job) : null;
+          if (this.closed) break;
+          this.preview.present(result);
+          this.shownKey = key;
+        } catch (error) {
+          console.error(`${this.title} preview failed:`, error);
+          toast.error(`${this.title} could not be worked out`);
+        }
+      }
+    } finally {
+      this.running = false;
+      const waiters = this.waiters;
+      this.waiters = [];
+      for (const resolve of waiters) resolve();
+    }
+  }
+}
+
+interface Session {
+  kind: AdjustmentKind;
+  preview: PixelPreview;
+  runner: PreviewRunner;
+}
+
+/**
+ * Image › Adjustments and the Filter menu: the settings of one adjustment,
+ * shown on the layer as they change and applied to its pixels on OK.
  */
 export function AdjustmentDialog({ canvas, kind, colors, onClose }: AdjustmentDialogProps) {
   const previewId = useId();
-  const [session, setSession] = useState<{ kind: AdjustmentKind; preview: PixelPreview } | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [settings, setSettings] = useState<unknown>(null);
   const [showPreview, setShowPreview] = useState(true);
-  const frame = useRef(0);
+  const [applying, setApplying] = useState(false);
 
   // Opening starts a preview on the target's pixels; closing ends it.
   useEffect(() => {
@@ -47,11 +123,14 @@ export function AdjustmentDialog({ canvas, kind, colors, onClose }: AdjustmentDi
       onClose();
       return;
     }
-    setSession({ kind, preview });
-    setSettings(ADJUSTMENTS[kind].initial(colors));
+    const spec = ADJUSTMENTS[kind];
+    const runner = new PreviewRunner(preview, spec.title);
+    setSession({ kind, preview, runner });
+    setSettings(spec.initial(colors));
     setShowPreview(true);
+    setApplying(false);
     return () => {
-      cancelAnimationFrame(frame.current);
+      runner.close();
       // Closed without OK (or the editor went away): nothing changes.
       preview.cancel();
       setSession(null);
@@ -60,38 +139,45 @@ export function AdjustmentDialog({ canvas, kind, colors, onClose }: AdjustmentDi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, canvas]);
 
-  // Show the result once per frame, however fast the settings change.
+  // At most one new preview a frame, however fast the settings change.
   useEffect(() => {
-    if (!session || settings === null) return;
+    if (!session || settings === null || applying) return;
     const spec = ADJUSTMENTS[session.kind];
-    cancelAnimationFrame(frame.current);
-    frame.current = requestAnimationFrame(() => {
-      const active = showPreview && !spec.isIdentity(settings);
-      session.preview.show(active ? spec.process(settings) : null);
+    const frame = requestAnimationFrame(() => {
+      if (showPreview && !spec.isIdentity(settings)) session.runner.request(spec.job(settings), settings);
+      else session.runner.request(null, ORIGINAL);
     });
-  }, [session, settings, showPreview]);
+    return () => cancelAnimationFrame(frame);
+  }, [session, settings, showPreview, applying]);
 
-  const apply = () => {
-    if (!session || settings === null) return;
+  const apply = async () => {
+    if (!session || settings === null || applying) return;
     const spec = ADJUSTMENTS[session.kind];
-    cancelAnimationFrame(frame.current);
-    const { preview } = session;
-    if (!spec.isIdentity(settings)) {
-      // Applied as set, even if the preview was switched off.
-      preview.show(spec.process(settings));
-      void preview.commit().catch((error) => {
-        console.error(`${spec.title} failed:`, error);
-        toast.error(`${spec.title} could not be applied`);
-      });
+    if (spec.isIdentity(settings)) {
+      onClose();
+      return;
     }
-    onClose();
+    setApplying(true);
+    try {
+      // Applied as set, even with the preview off.
+      session.runner.request(spec.job(settings), settings);
+      await session.runner.idle();
+      if (!session.runner.shows(settings)) return;
+      await session.preview.commit();
+    } catch (error) {
+      console.error(`${spec.title} failed:`, error);
+      toast.error(`${spec.title} could not be applied`);
+    } finally {
+      setApplying(false);
+      onClose();
+    }
   };
 
   const spec = session ? ADJUSTMENTS[session.kind] : null;
   const Controls = spec?.Controls;
 
   return (
-    <Dialog open={kind !== null && session !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog open={kind !== null && session !== null} onOpenChange={(open) => !open && !applying && onClose()}>
       <DialogContent
         // The layer stays in view, to judge the result as it changes.
         overlayClassName="bg-transparent backdrop-blur-none"
@@ -106,7 +192,9 @@ export function AdjustmentDialog({ canvas, kind, colors, onClose }: AdjustmentDi
                 {spec.description}
               </DialogDescription>
             </DialogHeader>
-            <Controls settings={settings} onChange={setSettings} histogram={session.preview.histogram()} />
+            <fieldset disabled={applying} className="contents">
+              <Controls settings={settings} onChange={setSettings} histogram={session.preview.histogram()} />
+            </fieldset>
             <DialogFooter className="items-center sm:justify-between">
               <label htmlFor={previewId} className="flex cursor-pointer items-center gap-2 text-sm">
                 <input
@@ -119,11 +207,11 @@ export function AdjustmentDialog({ canvas, kind, colors, onClose }: AdjustmentDi
                 Preview
               </label>
               <div className="flex flex-col-reverse gap-2 sm:flex-row">
-                <Button type="button" variant="ghost" onClick={onClose}>
+                <Button type="button" variant="ghost" onClick={onClose} disabled={applying}>
                   Cancel
                 </Button>
-                <Button type="button" onClick={apply}>
-                  OK
+                <Button type="button" onClick={() => void apply()} disabled={applying}>
+                  {applying ? "Applying…" : "OK"}
                 </Button>
               </div>
             </DialogFooter>
