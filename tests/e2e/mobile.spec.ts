@@ -131,6 +131,24 @@ test("the crop bar fits on the phone and applies a square crop", async ({ page }
   await expectNoSidewaysScroll(page);
 });
 
+test("every submenu of the phone menu fits on the screen", async ({ page }) => {
+  await openPhoto(page);
+  const width = page.viewportSize()!.width;
+  for (const name of ["File", "Edit", "Image", "Layer", "Select", "Filter", "View", "Help"]) {
+    await page.getByRole("button", { name: "Menu" }).tap();
+    await page.getByRole("menuitem", { name, exact: true }).tap();
+    const submenu = page.getByRole("menu").nth(1);
+    await expect(submenu).toBeVisible();
+    await expect.poll(async () => {
+      const box = (await submenu.boundingBox())!;
+      return box.x >= 0 && box.x + box.width <= width;
+    }, { message: `${name} fits` }).toBe(true);
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+  }
+});
+
 test("the menu reaches every command on the phone, on screen", async ({ page }) => {
   await openPhoto(page);
   await page.getByRole("button", { name: "Menu" }).tap();

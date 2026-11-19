@@ -207,7 +207,11 @@ export function EditorMobileMenu({ commands }: { commands: CommandMap }) {
         {EDITOR_MENUS.map((menu) => (
           <DropdownMenuSub key={menu.label}>
             <DropdownMenuSubTrigger>{menu.label}</DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="max-h-[70dvh] overflow-y-auto">
+            {/* Beside the main menu, a submenu may only be as wide as the room left on the phone. */}
+            <DropdownMenuSubContent
+              collisionPadding={8}
+              className="max-h-[70dvh] max-w-[var(--radix-dropdown-menu-content-available-width)] overflow-y-auto"
+            >
               <MenuEntries
                 entries={menu.items}
                 commands={commands}
