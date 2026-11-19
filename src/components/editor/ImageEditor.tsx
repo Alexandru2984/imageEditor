@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { isPsdFile, readPsdFile } from "@/psd/openPsd";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { StartScreen } from "./StartScreen";
@@ -270,6 +271,25 @@ export const ImageEditor = () => {
     async (file: File) => {
       const signal = beginDocumentLoad();
       try {
+        if (await isPsdFile(file)) {
+          const notice = toast.loading("Opening the Photoshop file…");
+          try {
+            const { snapshot, notes } = await readPsdFile(file, signal);
+            if (signal.aborted) return;
+            cancelScheduledAutosave();
+            setSavedProject(null);
+            void clearProject().catch((error) => {
+              console.warn("Could not clear previous autosave:", error);
+            });
+            showDocument(snapshot.srcs[0] ?? "photoshop-document", snapshot, documentNameFromFile(file));
+            if (notes.length) toast.info(`Opened, but ${notes.join(", ")}`, { id: notice, duration: 8000 });
+            else toast.dismiss(notice);
+          } catch (error) {
+            toast.dismiss(notice);
+            throw error;
+          }
+          return;
+        }
         const { dataUrl } = await readSafeRasterImage(file, signal);
         if (signal.aborted) return;
         cancelScheduledAutosave();

@@ -598,6 +598,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         icon: ImageIcon,
         shortcuts: KEYMAP.openImage,
         run: requestOpenImage,
+        keywords: "photoshop psd file",
       },
       { id: "file.openProject", label: "Open project file…", icon: FolderOpen, run: requestOpenProject },
       {

@@ -17,7 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { SavedProject } from "@/utils/projectStore";
-import { MAX_IMAGE_FILE_BYTES, RASTER_FILE_ACCEPT } from "@/utils/imageFile";
+import { DOCUMENT_FILE_ACCEPT, MAX_IMAGE_FILE_BYTES } from "@/utils/imageFile";
 import { CANVAS_PRESETS, createBlankImage, createSampleImage } from "@/utils/starterImages";
 import { toast } from "sonner";
 
@@ -203,12 +203,12 @@ export const StartScreen = ({
                 Choose image
               </span>
               <p className="relative mt-5 text-xs text-muted-foreground">
-                JPG, PNG, GIF, WebP · up to {Math.round(MAX_IMAGE_FILE_BYTES / (1024 * 1024))} MB / 50 MP
+                JPG, PNG, GIF, WebP · up to {Math.round(MAX_IMAGE_FILE_BYTES / (1024 * 1024))} MB / 50 MP · Photoshop PSD
               </p>
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={RASTER_FILE_ACCEPT}
+                accept={DOCUMENT_FILE_ACCEPT}
                 data-testid="image-input"
                 className="hidden"
                 tabIndex={-1}

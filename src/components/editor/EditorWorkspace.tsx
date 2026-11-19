@@ -84,7 +84,7 @@ import { CanvasContextMenu } from "./CanvasContextMenu";
 import { downloadProjectFile } from "@/utils/projectFile";
 import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { isAbortError } from "@/utils/abort";
-import { RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
+import { DOCUMENT_FILE_ACCEPT, RASTER_FILE_ACCEPT, readSafeRasterImage } from "@/utils/imageFile";
 import { clampZoom, fitToScreen } from "@/utils/viewport";
 import { isEditorChrome, isReadOnlySelection, type EditorFabricObject } from "@/utils/editorObjects";
 import { nextLayerName } from "@/raster/pixelLayer";
@@ -901,7 +901,7 @@ export const EditorWorkspace = ({
       <input
         ref={imageInputRef}
         type="file"
-        accept={RASTER_FILE_ACCEPT}
+        accept={DOCUMENT_FILE_ACCEPT}
         className="hidden"
         tabIndex={-1}
         aria-hidden="true"

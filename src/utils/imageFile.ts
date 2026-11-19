@@ -6,6 +6,8 @@ export const MAX_IMAGE_DIMENSION = 16_384;
 export const MAX_IMAGE_PIXELS = 50_000_000;
 export const RASTER_FILE_ACCEPT =
   ".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp";
+/** What opens as a document: images, and Photoshop files with their layers. */
+export const DOCUMENT_FILE_ACCEPT = `${RASTER_FILE_ACCEPT},.psd,image/vnd.adobe.photoshop`;
 
 const MAX_HEADER_BYTES = 4 * 1024 * 1024;
 
