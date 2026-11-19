@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { autosavedLayerPixels, settle, uploadSolidImage } from "./helpers";
+import { autosavedLayerPixels, getAutosaveJson, settle, uploadSolidImage } from "./helpers";
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Desktop menu tests");
@@ -135,3 +135,50 @@ test("Rotate Canvas turns the document by any angle, filling the new corners", a
   await page.keyboard.press("Control+z");
   await expect.poll(() => layerOf(page, "Background")).toMatchObject({ size: [300, 400] });
 });
+
+test("Free Transform sizes, turns and skews the selected layer by numbers", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#808080", []);
+  await settle(page);
+  const rectangle = async () => {
+    const json = await getAutosaveJson(page);
+    const objects = (json ? JSON.parse(json).objects : []) as Array<Record<string, number | string>>;
+    const shape = objects.find((object) => String(object.type).toLowerCase() === "rect");
+    return shape && { scaleX: shape.scaleX, scaleY: shape.scaleY, angle: shape.angle, skewX: shape.skewX };
+  };
+
+  // A rectangle, selected, then another tool.
+  await page.keyboard.press("u");
+  await settle(page);
+  const box = (await page.locator("canvas.upper-canvas").boundingBox())!;
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect.poll(rectangle).toMatchObject({ angle: 0, skewX: 0 });
+  const before = (await rectangle())!;
+  await page.keyboard.press("b");
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Brush");
+
+  await page.keyboard.press("Control+Alt+t");
+  const options = page.getByRole("group", { name: "Tool options" });
+  await expect(options).toContainText("Move");
+  const width = options.getByLabel("Layer width");
+  const shown = Number(await width.inputValue());
+  expect(shown).toBeGreaterThan(0);
+  // Twice as wide, and as tall: proportions are kept.
+  await width.fill(String(shown * 2));
+  await width.press("Enter");
+  await expect
+    .poll(async () => {
+      const now = await rectangle();
+      return now && [round(Number(now.scaleX) / Number(before.scaleX)), round(Number(now.scaleY) / Number(before.scaleY))];
+    })
+    .toEqual([2, 2]);
+  await options.getByLabel("Layer angle").fill("30");
+  await options.getByLabel("Layer angle").press("Enter");
+  await options.getByLabel("Horizontal skew").fill("20");
+  await options.getByLabel("Horizontal skew").press("Enter");
+  await expect.poll(rectangle).toMatchObject({ angle: 30, skewX: 20 });
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(rectangle).toMatchObject({ angle: 30, skewX: 0 });
+});
+
+const round = (value: number) => Math.round(value * 100) / 100;

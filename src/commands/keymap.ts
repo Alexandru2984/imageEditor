@@ -22,6 +22,8 @@ export const KEYMAP = {
   contentAwareFill: [{ key: "Backspace", shift: true }],
   imageSize: [{ key: "i", mod: true, alt: true }],
   canvasSize: [{ key: "c", mod: true, alt: true }],
+  // Browsers keep Ctrl+T for a new tab; Ctrl+Alt+T works everywhere.
+  freeTransform: [{ key: "t", mod: true, alt: true }, { key: "t", mod: true }],
 
   duplicate: [{ key: "j", mod: true }],
   layerViaCut: [{ key: "j", mod: true, shift: true }],

@@ -30,6 +30,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "edit.fillBackground",
       "edit.contentAwareFill",
       "edit.stroke",
+      "-",
+      "edit.freeTransform",
     ],
   },
   {

@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import type { Canvas as FabricCanvas } from "fabric";
+import { TransformFields } from "./TransformFields";
 import {
   Crop,
   Eraser,
@@ -64,6 +66,8 @@ export interface BrushSettings {
 }
 
 interface OptionsBarProps {
+  /** The document, for the Move tool's transform fields. */
+  canvas: FabricCanvas | null;
   activeTool: Tool;
   onToolChange: (tool: Tool) => void;
   /** Phones: a strip above the tools, shown only for tools with settings. */
@@ -106,7 +110,7 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   select: {
     icon: MousePointer2,
     name: "Move",
-    hint: "Shift-click adds layers to the selection · Alt-drag moves without snapping",
+    hint: "Shift-click adds layers · Shift-drag a side handle to skew · Alt-drag moves without snapping",
   },
   brush: {
     icon: Paintbrush,
@@ -305,6 +309,7 @@ function Setting({
  * bar on wide screens, above the tools on phones.
  */
 export function OptionsBar({
+  canvas,
   activeTool,
   onToolChange,
   compact,
@@ -755,12 +760,15 @@ export function OptionsBar({
     );
   } else if (activeTool === "select") {
     options = (
-      <ToggleOption
-        pressed={snapping}
-        onChange={onSnappingChange}
-        icon={Magnet}
-        label="Snap to guides"
-      />
+      <>
+        <ToggleOption
+          pressed={snapping}
+          onChange={onSnappingChange}
+          icon={Magnet}
+          label="Snap to guides"
+        />
+        <TransformFields canvas={canvas} />
+      </>
     );
   }
 

@@ -46,6 +46,7 @@ import {
   Save,
   Scaling,
   Proportions,
+  Move3d,
   RotateCwSquare,
   Expand,
   Shrink,
@@ -380,6 +381,26 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       }
     };
 
+    /**
+     * Edit › Free Transform: the Move tool's handles (and its numbers) on
+     * the selected layer.
+     */
+    const freeTransform = () => {
+      if (!canvas) return;
+      const active = canvas.getActiveObject();
+      if (!active || isEditorChrome(active)) {
+        toast.error("Select a layer to transform");
+        return;
+      }
+      if (!(active instanceof ActiveSelection) && isObjectLocked(active)) {
+        toast.error("Unlock the layer first");
+        return;
+      }
+      onToolChange("select");
+      canvas.setActiveObject(active);
+      canvas.requestRenderAll();
+    };
+
     /** Image › Reveal All: grow the document around every layer. */
     const revealEverything = async () => {
       if (!canvas) return;
@@ -666,6 +687,15 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => void contentAwareFill(),
         isEnabled: () => !!pixelSelection(),
         keywords: "remove object erase heal patch inpaint fill selection",
+      },
+      {
+        id: "edit.freeTransform",
+        label: "Free Transform",
+        icon: Move3d,
+        shortcuts: KEYMAP.freeTransform,
+        run: freeTransform,
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "scale rotate skew resize size angle transform",
       },
       {
         id: "edit.stroke",

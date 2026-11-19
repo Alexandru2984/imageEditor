@@ -728,6 +728,7 @@ export const EditorWorkspace = ({
 
   const optionsBar = (
     <OptionsBar
+      canvas={fabricCanvas}
       colors={colorWells(true)}
       activeTool={activeTool}
       onToolChange={handleToolChange}
