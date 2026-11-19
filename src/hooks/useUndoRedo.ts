@@ -17,6 +17,11 @@ interface UseUndoRedoReturn {
   saveState: () => void;
   undo: () => void;
   redo: () => void;
+  /** The History panel's steps, oldest first, and which one the document is at. */
+  steps: string[];
+  currentStep: number;
+  /** Go back or forward to any step. */
+  goTo: (index: number) => void;
   canUndo: boolean;
   canRedo: boolean;
   /** Live versions for event handlers, which may run before a re-render. */
@@ -51,9 +56,12 @@ const historyFitsBudget = (history: CanvasSnapshot[]): boolean => {
 export function useUndoRedo(
   canvas: FabricCanvas | null,
   onSnapshot?: (snapshot: CanvasSnapshot) => void,
-  onError?: (error: unknown) => void
+  onError?: (error: unknown) => void,
+  /** What a new step is called, from the state before it (none for the first) and after. */
+  nameStep?: (before: CanvasSnapshot | undefined, after: CanvasSnapshot) => string
 ): UseUndoRedoReturn {
   const historyRef = useRef<CanvasSnapshot[]>([]);
+  const namesRef = useRef<string[]>([]);
   const currentIndexRef = useRef<number>(-1);
   const isRestoringRef = useRef(false);
   const restoreControllerRef = useRef<AbortController | null>(null);
@@ -63,10 +71,12 @@ export function useUndoRedo(
   // the canvas listeners below
   const onSnapshotRef = useRef(onSnapshot);
   const onErrorRef = useRef(onError);
+  const nameStepRef = useRef(nameStep);
   useEffect(() => {
     onSnapshotRef.current = onSnapshot;
     onErrorRef.current = onError;
-  }, [onError, onSnapshot]);
+    nameStepRef.current = nameStep;
+  }, [onError, onSnapshot, nameStep]);
 
   // Force re-render when history changes so canUndo/canRedo update
   const [, setHistoryVersion] = useState(0);
@@ -89,10 +99,18 @@ export function useUndoRedo(
         0,
         currentIndexRef.current + 1
       );
+      const names = namesRef.current.slice(0, history.length);
       const snapshot = takeSnapshot(canvas);
       const previous = history[history.length - 1];
       if (previous && snapshotsEqual(previous, snapshot)) return;
+      let name = previous ? "Change" : "Open";
+      try {
+        name = nameStepRef.current?.(previous, snapshot) ?? name;
+      } catch {
+        // A step without its proper name is still a step.
+      }
       history.push(snapshot);
+      names.push(name);
 
       // Retain the current state even if it alone exceeds the soft memory
       // budget; discard oldest undo points until the rest fits.
@@ -101,9 +119,11 @@ export function useUndoRedo(
         (history.length > MAX_HISTORY || !historyFitsBudget(history))
       ) {
         history.shift();
+        names.shift();
       }
 
       historyRef.current = history;
+      namesRef.current = names;
       currentIndexRef.current = history.length - 1;
       onSnapshotRef.current?.(snapshot);
       setHistoryVersion((v) => v + 1);
@@ -221,6 +241,22 @@ export function useUndoRedo(
     }
   }, [cancelPendingSave, restoreState]);
 
+  const goTo = useCallback(
+    (index: number) => {
+      if (
+        isRestoringRef.current ||
+        index === currentIndexRef.current ||
+        index < 0 ||
+        index >= historyRef.current.length
+      )
+        return;
+      cancelPendingSave();
+      const snapshot = historyRef.current[index];
+      if (snapshot) restoreState(snapshot, index);
+    },
+    [cancelPendingSave, restoreState]
+  );
+
   const redo = useCallback(() => {
     if (
       currentIndexRef.current >= historyRef.current.length - 1 ||
@@ -246,6 +282,7 @@ export function useUndoRedo(
     isRestoringRef.current = false;
     setIsRestoring(false);
     historyRef.current = [];
+    namesRef.current = [];
     currentIndexRef.current = -1;
 
     const handleSave = (e?: { target?: unknown }) => {
@@ -287,5 +324,16 @@ export function useUndoRedo(
     []
   );
 
-  return { saveState, undo, redo, canUndo, canRedo, hasUndo, hasRedo };
+  return {
+    saveState,
+    undo,
+    redo,
+    steps: namesRef.current,
+    currentStep: currentIndexRef.current,
+    goTo,
+    canUndo,
+    canRedo,
+    hasUndo,
+    hasRedo,
+  };
 }

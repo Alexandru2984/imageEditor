@@ -1,4 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
+import { forgetStepName, nameNextStep } from "@/utils/historySteps";
 import type { Canvas as FabricCanvas, FabricImage, TPointerEventInfo } from "fabric";
 import { toast } from "sonner";
 import type { Tool } from "@/types/editor";
@@ -250,15 +251,18 @@ export function useWarpTool({ canvasRef, canvasKey, activeTool, mode, onToolChan
     const apply = () => {
       if (busy || finished) return;
       busy = true;
+      nameNextStep(canvas, modeRef.current === "perspective" ? "Perspective" : "Distort");
       applyWarp(canvas, image, quad)
         .then((result) => {
           if (typeof result === "string") {
+            forgetStepName(canvas);
             toast.error(result);
             return;
           }
           finish(true);
         })
         .catch((error: unknown) => {
+          forgetStepName(canvas);
           console.error("Distort failed:", error);
           toast.error("The layer could not be distorted");
         })

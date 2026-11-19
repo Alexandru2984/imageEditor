@@ -1,5 +1,7 @@
 // Fabric defaults must be set before any Fabric object is constructed; this
 // module is the editor chunk's entry point.
+import { HistoryPanel } from "./HistoryPanel";
+import { describeChange, forgetStepName, takeStepName, toolStepName } from "@/utils/historySteps";
 import { GuideDialog, type GuideDialogKind } from "@/components/editor/GuideDialog";
 import { Rulers } from "@/components/editor/Rulers";
 import { useGuides } from "@/hooks/useGuides";
@@ -257,11 +259,41 @@ export const EditorWorkspace = ({
     toast.error("Undo/redo failed. The editor attempted a safe rollback.");
   }, []);
 
-  const { undo, redo, canUndo, canRedo, hasUndo, hasRedo } = useUndoRedo(
+  // A History step is named after the command that made it, else after the
+  // tool just used on the canvas, else after what changed.
+  const lastCanvasPressRef = useRef(0);
+  const activeToolRef = useRef(activeTool);
+  activeToolRef.current = activeTool;
+  useEffect(() => {
+    if (!fabricCanvas) return;
+    const pressed = () => {
+      lastCanvasPressRef.current = Date.now();
+      forgetStepName(fabricCanvas);
+    };
+    fabricCanvas.on("mouse:down", pressed);
+    return () => {
+      fabricCanvas.off("mouse:down", pressed);
+    };
+  }, [fabricCanvas]);
+  const nameStep = useCallback(
+    (before: CanvasSnapshot | undefined, after: CanvasSnapshot) => {
+      const change = describeChange(before, after);
+      if (!before) return change.name;
+      const named = fabricCanvas ? takeStepName(fabricCanvas) : null;
+      if (named) return named;
+      const tool = toolStepName(activeToolRef.current);
+      if (tool && change.kind !== "other" && Date.now() - lastCanvasPressRef.current < 15_000) return tool;
+      return change.name;
+    },
+    [fabricCanvas]
+  );
+  const { undo, redo, canUndo, canRedo, hasUndo, hasRedo, steps, currentStep, goTo } = useUndoRedo(
     fabricCanvas,
     onSnapshot,
-    handleHistoryError
+    handleHistoryError,
+    nameStep
   );
+  const [historyOpen, setHistoryOpen] = useSessionState<boolean>("history", false);
 
   const ai = useAiActions(fabricCanvas);
   useDocumentFonts(fabricCanvas);
@@ -649,6 +681,8 @@ export const EditorWorkspace = ({
     togglePanel,
     histogram: histogramOpen,
     setHistogram: setHistogramOpen,
+    historyPanel: historyOpen,
+    setHistoryPanel: setHistoryOpen,
     openPanel,
     showShortcuts,
     modifySelection: setSelectionModification,
@@ -984,6 +1018,9 @@ export const EditorWorkspace = ({
           />
 
           {histogramOpen && <HistogramPanel canvas={fabricCanvas} onClose={() => setHistogramOpen(false)} />}
+          {historyOpen && (
+            <HistoryPanel steps={steps} current={currentStep} onPick={goTo} onClose={() => setHistoryOpen(false)} />
+          )}
 
           {eyedropper.picking && !("EyeDropper" in window) && (
             <div

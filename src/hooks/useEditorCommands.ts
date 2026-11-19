@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { nameNextStep } from "@/utils/historySteps";
 import type { GuideDialogKind } from "@/components/editor/GuideDialog";
 import { guidesOf, setGuides } from "@/utils/guides";
 import type { WarpMode } from "@/raster/warpLayer";
@@ -49,6 +50,7 @@ import {
   Save,
   Scaling,
   Proportions,
+  History,
   Spline,
   Move3d,
   RotateCwSquare,
@@ -147,6 +149,18 @@ import {
   type Refusal,
 } from "@/raster/layerOps";
 
+/** Commands whose change is a History step named after them. */
+const NAMED_STEP_PREFIXES = ["edit.", "image.", "layer.", "filter."];
+/** …except these, which change nothing themselves or arm a tool that names its own step. */
+const UNNAMED_STEPS = new Set([
+  "edit.undo",
+  "edit.redo",
+  "edit.copy",
+  "edit.freeTransform",
+  "edit.distort",
+  "edit.perspective",
+]);
+
 export interface EditorCommandContext {
   canvas: FabricCanvas | null;
   activeTool: Tool;
@@ -192,6 +206,9 @@ export interface EditorCommandContext {
   /** View › Histogram, which floats over the canvas. */
   histogram: boolean;
   setHistogram: (open: boolean) => void;
+  /** View › History, which floats over the canvas too. */
+  historyPanel: boolean;
+  setHistoryPanel: (open: boolean) => void;
   openPanel: (tab: PanelTab) => void;
   showShortcuts: () => void;
   /** Opens Select › Modify's dialog. */
@@ -274,6 +291,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     togglePanel,
     histogram,
     setHistogram,
+    historyPanel,
+    setHistoryPanel,
     openPanel,
     showShortcuts,
     modifySelection,
@@ -1345,6 +1364,15 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         toggle: true,
       },
       {
+        id: "view.history",
+        label: "History",
+        icon: History,
+        run: () => setHistoryPanel(!historyPanel),
+        isChecked: () => historyPanel,
+        toggle: true,
+        keywords: "steps undo states",
+      },
+      {
         id: "view.histogram",
         label: "Histogram",
         icon: ChartArea,
@@ -1565,7 +1593,19 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       brushKey("brush.harder", "Harder brush", KEYMAP.brushHarder, "hardness", 1)
     );
 
-    return Object.fromEntries(list.map((command) => [command.id, command]));
+    // What a command changes is a History step named after it.
+    const named = list.map((command) =>
+      canvas && NAMED_STEP_PREFIXES.some((prefix) => command.id.startsWith(prefix)) && !command.toggle && !UNNAMED_STEPS.has(command.id)
+        ? {
+            ...command,
+            run: () => {
+              nameNextStep(canvas, command.label);
+              command.run();
+            },
+          }
+        : command
+    );
+    return Object.fromEntries(named.map((command) => [command.id, command]));
   }, [
     activeTool,
     aiBusy,
@@ -1596,6 +1636,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     panel,
     histogram,
     setHistogram,
+    historyPanel,
+    setHistoryPanel,
     paste,
     pickColor,
     placeImage,
