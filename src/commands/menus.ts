@@ -32,6 +32,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "edit.stroke",
       "-",
       "edit.freeTransform",
+      { label: "Transform", items: ["edit.distort", "edit.perspective"] },
     ],
   },
   {

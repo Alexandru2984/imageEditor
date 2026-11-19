@@ -26,7 +26,9 @@ export type Tool =
   | "sponge"
   | "blur"
   | "sharpen"
-  | "smudge";
+  | "smudge"
+  /** Edit › Transform › Distort or Perspective, on the selected layer. */
+  | "warp";
 
 export interface HistoryEntry {
   json: string;

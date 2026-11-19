@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import type { WarpMode } from "@/raster/warpLayer";
 import { revealAll } from "@/raster/documentSize";
 import type { DocumentDialogKind } from "@/components/editor/DocumentDialog";
 import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from "fabric";
@@ -46,6 +47,7 @@ import {
   Save,
   Scaling,
   Proportions,
+  Spline,
   Move3d,
   RotateCwSquare,
   Expand,
@@ -200,6 +202,8 @@ export interface EditorCommandContext {
   openLayerStyle: (layer: FabricObject) => void;
   /** An Image menu dialog that changes the whole document. */
   openDocumentDialog: (kind: DocumentDialogKind) => void;
+  /** Edit › Transform › Distort or Perspective on the selected layer. */
+  startWarp: (mode: WarpMode) => void;
   /** An Image › Adjustments dialog. */
   openAdjustment: (kind: AdjustmentKind) => void;
   resetColors: () => void;
@@ -271,6 +275,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     strokeSelection,
     openLayerStyle,
     openDocumentDialog,
+    startWarp,
     openAdjustment,
     resetColors,
     openCommandPalette,
@@ -696,6 +701,22 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: freeTransform,
         isEnabled: () => !!canvas && documentGrid(canvas) !== null,
         keywords: "scale rotate skew resize size angle transform",
+      },
+      {
+        id: "edit.distort",
+        label: "Distort",
+        icon: Spline,
+        run: () => startWarp("distort"),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "corner pin warp transform reshape",
+      },
+      {
+        id: "edit.perspective",
+        label: "Perspective",
+        icon: Spline,
+        run: () => startWarp("perspective"),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "keystone tilt warp transform",
       },
       {
         id: "edit.stroke",
@@ -1530,6 +1551,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     strokeSelection,
     openLayerStyle,
     openDocumentDialog,
+    startWarp,
     openAdjustment,
     togglePanel,
     undo,

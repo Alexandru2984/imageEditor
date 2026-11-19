@@ -1,4 +1,6 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, type MutableRefObject } from "react";
+import { useWarpTool, type WarpControls } from "@/hooks/useWarpTool";
+import type { WarpMode } from "@/raster/warpLayer";
 import {
   Canvas as FabricCanvas,
   Rect,
@@ -63,6 +65,10 @@ interface CanvasProps {
   retouch: RetouchOptions;
   pickingSource: boolean;
   onPickingSourceChange: (picking: boolean) => void;
+  /** Distort or Perspective, while the warp tool is armed. */
+  warpMode: WarpMode;
+  /** Filled in with what Apply and Cancel do while warping. */
+  warpControlsRef: MutableRefObject<WarpControls | null>;
   /** Select › Subject, offered while nothing is selected. */
   onSelectSubject: () => void;
   aiBusy: boolean;
@@ -122,6 +128,8 @@ export const Canvas = ({
   retouch,
   pickingSource,
   onPickingSourceChange,
+  warpMode,
+  warpControlsRef,
   onSelectSubject,
   aiBusy,
   uploadedImage,
@@ -940,6 +948,16 @@ export const Canvas = ({
     retouch,
     pickingSource,
     onPickingSourceChange,
+    spaceDownRef,
+  });
+
+  useWarpTool({
+    canvasRef: fabricCanvasRef,
+    canvasKey: uploadedImage,
+    activeTool,
+    mode: warpMode,
+    onToolChange,
+    controlsRef: warpControlsRef,
     spaceDownRef,
   });
 

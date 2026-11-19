@@ -11,6 +11,7 @@ import {
   type HueSaturationSettings,
   type Luts,
 } from "./adjustments";
+import { warpPixels, type Homography } from "./warp";
 import {
   addNoise,
   cropInto,
@@ -52,7 +53,12 @@ export type PixelJob =
    * Content-aware fill of `hole` (non-zero where to fill, the region's size)
    * from up to `reach` pixels around it.
    */
-  | { op: "inpaint"; hole: Uint8Array; reach: number; seed?: number };
+  | { op: "inpaint"; hole: Uint8Array; reach: number; seed?: number }
+  /**
+   * Perspective/distort: the result (`width`×`height`, its own size) shows the
+   * area's pixels through `inverse`, which takes result pixels to area pixels.
+   */
+  | { op: "warp"; inverse: Homography };
 
 /** How many pixels around each one a job looks at. */
 export function jobReach(job: PixelJob): number {
@@ -118,6 +124,8 @@ export function runJob(job: PixelJob, area: JobArea, width: number, height: numb
       }
       return filtered(inpaint(area.data, area.width, area.height, hole, job.seed));
     }
+    case "warp":
+      return warpPixels(area, job.inverse, width, height);
   }
   // Pixel by pixel: only the region itself.
   let source = area.data;

@@ -1,5 +1,7 @@
 // Fabric defaults must be set before any Fabric object is constructed; this
 // module is the editor chunk's entry point.
+import type { WarpControls } from "@/hooks/useWarpTool";
+import { warpTarget, type WarpMode } from "@/raster/warpLayer";
 import "@/lib/fabricDefaults";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
@@ -504,6 +506,21 @@ export const EditorWorkspace = ({
   /** The Image › Adjustments dialog that is open. */
   const [adjustment, setAdjustment] = useState<AdjustmentKind | null>(null);
   const [documentDialog, setDocumentDialog] = useState<DocumentDialogKind | null>(null);
+  const [warpMode, setWarpMode] = useState<WarpMode>("distort");
+  const warpControlsRef = useRef<WarpControls | null>(null);
+  const startWarp = useCallback(
+    (mode: WarpMode) => {
+      if (!fabricCanvas) return;
+      const target = warpTarget(fabricCanvas);
+      if (typeof target === "string") {
+        toast.error(target);
+        return;
+      }
+      setWarpMode(mode);
+      handleToolChange("warp");
+    },
+    [fabricCanvas, handleToolChange]
+  );
   const maskTargetLayer = useMaskTarget(fabricCanvas);
   const leaveMask = useCallback(() => {
     if (fabricCanvas) maskTargetOf(fabricCanvas).set(null);
@@ -578,6 +595,7 @@ export const EditorWorkspace = ({
     strokeSelection: openStrokeDialog,
     openLayerStyle: setStyledLayer,
     openDocumentDialog: setDocumentDialog,
+    startWarp,
     openAdjustment: setAdjustment,
     colors: paintColors,
     adjustBrush,
@@ -756,6 +774,10 @@ export const EditorWorkspace = ({
       onRetouchChange={updateRetouch}
       pickingSource={pickingSource}
       onPickingSourceChange={setPickingSource}
+      warpMode={warpMode}
+      onWarpModeChange={setWarpMode}
+      onWarpApply={() => warpControlsRef.current?.apply()}
+      onWarpCancel={() => warpControlsRef.current?.cancel()}
       maskLayerName={maskTargetLayer ? (maskTargetLayer as EditorFabricObject).name ?? "the layer" : null}
       onLeaveMask={leaveMask}
     />
@@ -882,6 +904,8 @@ export const EditorWorkspace = ({
             retouch={retouch}
             pickingSource={pickingSource}
             onPickingSourceChange={setPickingSource}
+            warpMode={warpMode}
+            warpControlsRef={warpControlsRef}
             onSelectSubject={() => void ai.selectSubject()}
             aiBusy={ai.isProcessing}
             secondaryColor={backgroundColor}

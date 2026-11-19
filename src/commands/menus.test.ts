@@ -65,6 +65,7 @@ function editorCommands(): CommandMap {
     strokeSelection: noop,
     openLayerStyle: noop,
     openDocumentDialog: noop,
+    startWarp: noop,
     openAdjustment: noop,
     resetColors: noop,
     openCommandPalette: noop,

@@ -49,7 +49,7 @@ export function axisFactors(matrix: TMat2D, sx: number, sy: number): { x: number
 }
 
 /** A part of an image, in its pixels. */
-interface SourceRect {
+export interface SourceRect {
   x: number;
   y: number;
   width: number;
@@ -92,7 +92,7 @@ async function decode(src: string): Promise<HTMLImageElement> {
 
 type ImageInternals = FabricImage & { _originalElement?: CanvasImageSource };
 
-const sourceOf = (image: FabricImage): CanvasImageSource =>
+export const sourceOf = (image: FabricImage): CanvasImageSource =>
   (image as ImageInternals)._originalElement ?? image.getElement();
 
 /** Images drawn from vector sources stay sharp at any size; they are not resampled. */
@@ -106,7 +106,7 @@ function isRaster(image: FabricImage): boolean {
 }
 
 /** The part of an image's source it shows (its crop), in source pixels. */
-const shownRect = (image: FabricImage): SourceRect => ({
+export const shownRect = (image: FabricImage): SourceRect => ({
   x: image.cropX ?? 0,
   y: image.cropY ?? 0,
   width: image.width,

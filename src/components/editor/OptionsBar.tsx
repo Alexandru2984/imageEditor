@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { Button } from "@/components/ui/button";
+import type { WarpMode } from "@/raster/warpLayer";
 import type { Canvas as FabricCanvas } from "fabric";
 import { TransformFields } from "./TransformFields";
 import {
@@ -33,6 +35,7 @@ import {
   Triangle,
   Pointer,
   ShieldCheck,
+  Check,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -101,6 +104,10 @@ interface OptionsBarProps {
   /** The clone source is set by the next click (phones have no Alt key). */
   pickingSource: boolean;
   onPickingSourceChange: (picking: boolean) => void;
+  warpMode: WarpMode;
+  onWarpModeChange: (mode: WarpMode) => void;
+  onWarpApply: () => void;
+  onWarpCancel: () => void;
   /** The layer whose mask the pixel tools paint on, if any. */
   maskLayerName?: string | null;
   onLeaveMask?: () => void;
@@ -172,6 +179,7 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   burn: { icon: Hand, name: "Burn", hint: "Paint to darken · stroke again to go further" },
   sponge: { icon: Droplets, name: "Sponge", hint: "Paint to take colour away, or add it" },
   blur: { icon: Droplet, name: "Blur", hint: "Paint to soften · every pass softens more" },
+  warp: { icon: Spline, name: "Transform", hint: "Drag a corner, or inside to move · Enter applies · Esc cancels" },
   sharpen: { icon: Triangle, name: "Sharpen", hint: "Paint to crisp up edges · go gently" },
   smudge: { icon: Pointer, name: "Smudge", hint: "Drag to smear colour along the stroke" },
 };
@@ -337,6 +345,10 @@ export function OptionsBar({
   onRetouchChange,
   pickingSource,
   onPickingSourceChange,
+  warpMode,
+  onWarpModeChange,
+  onWarpApply,
+  onWarpCancel,
   maskLayerName,
   onLeaveMask,
 }: OptionsBarProps) {
@@ -350,7 +362,7 @@ export function OptionsBar({
   const selecting = isSelectionTool(activeTool);
   // On a phone, space goes to the canvas unless there is something to set.
   // The selection modes stand in for the modifier keys phones lack.
-  if (compact && !painting && !shape && !selecting) return null;
+  if (compact && !painting && !shape && !selecting && activeTool !== "warp") return null;
 
   const widthSetting = (
     <Setting label="Size" value={`${brush.width}px`} keys="[ and ] change the size">
@@ -430,7 +442,30 @@ export function OptionsBar({
   const textChoice = (option: { label: string }) => <span className="text-xs">{option.label}</span>;
 
   let options: ReactNode = null;
-  if (activeTool === "blur" || activeTool === "sharpen" || activeTool === "smudge") {
+  if (activeTool === "warp") {
+    options = (
+      <>
+        <Choice
+          label="Transform"
+          value={warpMode}
+          onChange={onWarpModeChange}
+          options={[
+            { value: "distort" as WarpMode, label: "Distort" },
+            { value: "perspective" as WarpMode, label: "Perspective" },
+          ]}
+          render={textChoice}
+        />
+        <Button type="button" size="sm" className="h-8 shrink-0 gap-1.5" onClick={onWarpApply}>
+          <Check className="h-4 w-4" />
+          Apply
+        </Button>
+        <Button type="button" size="sm" variant="ghost" className="h-8 shrink-0 gap-1.5" onClick={onWarpCancel}>
+          <X className="h-4 w-4" />
+          Cancel
+        </Button>
+      </>
+    );
+  } else if (activeTool === "blur" || activeTool === "sharpen" || activeTool === "smudge") {
     options = (
       <>
         {sizeSetting}
