@@ -20,6 +20,8 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "globalCompositeOperation",
   "layerMask",
   "layerStyle",
+  // The document's guides, on the photo.
+  "guides",
 ];
 
 export interface CanvasSnapshot {

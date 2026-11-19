@@ -1435,6 +1435,8 @@ test("smart guides snap a dragged layer to the photo centre", async ({ page }) =
     "false"
   );
   await page.keyboard.press("Escape");
+  // The menu reaches over the canvas while it animates out.
+  await expect(page.getByRole("menu")).toHaveCount(0);
   await dragNearCentre();
   expect(Math.abs((await centres()).dx)).toBeGreaterThan(0.5);
   expect(await page.evaluate(() => localStorage.getItem("ie-snap"))).toBe("0");

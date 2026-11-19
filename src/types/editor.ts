@@ -46,3 +46,11 @@ export interface LayerInfo {
 
 /** Side panel (desktop) / bottom sheet (mobile) tabs. */
 export type PanelTab = "properties" | "adjust" | "layers";
+
+/** View › Rulers, Grid, Guides and Lock Guides. */
+export interface ViewOptions {
+  rulers: boolean;
+  grid: boolean;
+  guides: boolean;
+  lockGuides: boolean;
+}

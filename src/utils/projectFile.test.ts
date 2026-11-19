@@ -322,6 +322,18 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts guides on the photo and rejects malformed ones", async () => {
+    const ok = {
+      json: '{"objects":[{"type":"image","src":"__snapshot_src_0","guides":[{"axis":"x","position":12.5},{"axis":"y","position":40}]}]}',
+      srcs: [PNG_DATA_URL],
+    };
+    await expect(readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: ok })))).resolves.toEqual(ok);
+    for (const guides of ['[{"axis":"x","position":"1"}]', '[{"axis":"x","position":1,"src":"https://evil.example"}]', '{"axis":"x"}', "[1e400]"]) {
+      const snapshot = { json: `{"objects":[{"type":"image","src":"__snapshot_src_0","guides":${guides}}]}`, srcs: [PNG_DATA_URL] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot }))), guides).rejects.toThrow();
+    }
+  });
+
   it("accepts a layer style the editor writes", async () => {
     const style = {
       dropShadow: { enabled: true, color: "#000000", opacity: 75, angle: 120, distance: 10, size: 10 },

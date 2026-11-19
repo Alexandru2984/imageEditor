@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import type { GuideDialogKind } from "@/components/editor/GuideDialog";
+import { guidesOf, setGuides } from "@/utils/guides";
 import type { WarpMode } from "@/raster/warpLayer";
 import { revealAll } from "@/raster/documentSize";
 import type { DocumentDialogKind } from "@/components/editor/DocumentDialog";
@@ -118,7 +120,7 @@ import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
 import { invertLut, uniformLuts } from "@/raster/adjustments";
 import type { PixelJob } from "@/raster/pixelJobs";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
-import type { PanelTab, Tool } from "@/types/editor";
+import type { PanelTab, Tool, ViewOptions } from "@/types/editor";
 import {
   isBrushTool,
   isHealingTool,
@@ -182,6 +184,9 @@ export interface EditorCommandContext {
   pickColor: () => void;
   snapping: boolean;
   setSnapping: (enabled: boolean) => void;
+  viewOptions: ViewOptions;
+  setViewOption: (option: keyof ViewOptions, value: boolean) => void;
+  openGuideDialog: (kind: GuideDialogKind) => void;
   panel: PanelTab | null;
   togglePanel: (tab: PanelTab) => void;
   /** View › Histogram, which floats over the canvas. */
@@ -262,6 +267,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     pickColor,
     snapping,
     setSnapping,
+    viewOptions,
+    setViewOption,
+    openGuideDialog,
     panel,
     togglePanel,
     histogram,
@@ -1250,12 +1258,69 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         keywords: "actual pixels zoom",
       },
       {
+        id: "view.rulers",
+        label: "Rulers",
+        shortcuts: KEYMAP.rulers,
+        run: () => setViewOption("rulers", !viewOptions.rulers),
+        isChecked: () => viewOptions.rulers,
+        toggle: true,
+        keywords: "measure show",
+      },
+      {
+        id: "view.grid",
+        label: "Grid",
+        shortcuts: KEYMAP.showGrid,
+        run: () => setViewOption("grid", !viewOptions.grid),
+        isChecked: () => viewOptions.grid,
+        toggle: true,
+        keywords: "show grid lines",
+      },
+      {
+        id: "view.guides",
+        label: "Guides",
+        shortcuts: KEYMAP.showGuides,
+        run: () => setViewOption("guides", !viewOptions.guides),
+        isChecked: () => viewOptions.guides,
+        toggle: true,
+        keywords: "show guide lines",
+      },
+      {
         id: "view.snap",
         label: "Snap to guides",
         shortcuts: KEYMAP.toggleSnap,
         run: () => setSnapping(!snapping),
         isChecked: () => snapping,
         toggle: true,
+      },
+      {
+        id: "view.lockGuides",
+        label: "Lock guides",
+        shortcuts: KEYMAP.lockGuides,
+        run: () => setViewOption("lockGuides", !viewOptions.lockGuides),
+        isChecked: () => viewOptions.lockGuides,
+        toggle: true,
+      },
+      {
+        id: "view.newGuide",
+        label: "New guide…",
+        run: () => openGuideDialog("newGuide"),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "add guide position",
+      },
+      {
+        id: "view.clearGuides",
+        label: "Clear guides",
+        run: () => {
+          if (canvas) setGuides(canvas, []);
+        },
+        isEnabled: () => !!canvas && guidesOf(canvas).length > 0,
+        keywords: "remove delete guides",
+      },
+      {
+        id: "view.gridSettings",
+        label: "Grid settings…",
+        run: () => openGuideDialog("grid"),
+        keywords: "grid spacing subdivisions preferences",
       },
       {
         id: "view.propertiesPanel",
@@ -1552,6 +1617,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openLayerStyle,
     openDocumentDialog,
     startWarp,
+    viewOptions,
+    setViewOption,
+    openGuideDialog,
     openAdjustment,
     togglePanel,
     undo,

@@ -1,3 +1,4 @@
+import { transformGuides } from "./guides";
 import { ActiveSelection, FabricImage, Point } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import {
@@ -52,6 +53,7 @@ export function rotate(canvas: FabricCanvas, degrees: number): "selection" | "ca
   const radians = (degrees * Math.PI) / 180;
   const cos = Math.round(Math.cos(radians) * 1e9) / 1e9;
   const sin = Math.round(Math.sin(radians) * 1e9) / 1e9;
+  transformGuides(canvas, [cos, sin, -sin, cos, pivot.x - cos * pivot.x + sin * pivot.y, pivot.y - sin * pivot.x - cos * pivot.y]);
   for (const object of objects) {
     const center = object.getCenterPoint();
     const dx = center.x - pivot.x;
@@ -87,6 +89,7 @@ export function flip(canvas: FabricCanvas, axis: "x" | "y"): "selection" | "canv
   const pivot = background
     ? background.getCenterPoint()
     : new Point(canvas.width / 2, canvas.height / 2);
+  transformGuides(canvas, axis === "x" ? [-1, 0, 0, 1, 2 * pivot.x, 0] : [1, 0, 0, -1, 0, 2 * pivot.y]);
   for (const object of objects) {
     const center = object.getCenterPoint();
     const next =

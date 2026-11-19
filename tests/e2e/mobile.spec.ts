@@ -148,6 +148,35 @@ test("the menu reaches every command on the phone, on screen", async ({ page }) 
   await expect(page.getByRole("tab", { name: "Layers", selected: true })).toBeVisible();
 });
 
+test("rulers show on the phone, and a finger drags a guide out of one", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "View", exact: true }).tap();
+  await page.getByRole("menuitemcheckbox", { name: /^Rulers/ }).tap();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  const ruler = page.getByTestId("ruler-vertical");
+  await expect(ruler).toBeVisible();
+  await expect(page.getByTestId("ruler-horizontal")).toBeVisible();
+  await expectNoSidewaysScroll(page);
+
+  const box = (await ruler.boundingBox())!;
+  const y = box.y + box.height / 2;
+  const client = await page.context().newCDPSession(page);
+  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + 10, y }] });
+  for (let step = 1; step <= 8; step += 1) {
+    await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: box.x + 10 + step * 20, y }] });
+  }
+  await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect
+    .poll(async () => {
+      const photo = (await autosavedObjects(page)).find((object) => object.__isBackground);
+      return (photo?.guides as { axis: string }[] | undefined)?.map((guide) => guide.axis);
+    })
+    .toEqual(["x"]);
+  await page.screenshot({ path: "test-results/mobile-rulers.png" });
+});
+
 test("brush settings sit above the tools only while painting", async ({ page }) => {
   await openPhoto(page);
   const options = page.getByRole("group", { name: "Tool options" });

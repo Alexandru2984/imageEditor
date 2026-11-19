@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState, type MutableRefObject } from "react";
+import { useEffect, useRef, useCallback, useState, type MutableRefObject, type ReactNode } from "react";
 import { useWarpTool, type WarpControls } from "@/hooks/useWarpTool";
 import type { WarpMode } from "@/raster/warpLayer";
 import {
@@ -80,6 +80,8 @@ interface CanvasProps {
   onZoomChange: (zoom: number) => void;
   onToolChange: (tool: Tool) => void;
   onLoadError: (error: unknown) => void;
+  /** Drawn over the canvas, inside its frame (the rulers). */
+  overlay?: ReactNode;
 }
 
 // A soft brush is faked with a same-color shadow whose blur grows as hardness
@@ -139,6 +141,7 @@ export const Canvas = ({
   onZoomChange,
   onToolChange,
   onLoadError,
+  overlay,
 }: CanvasProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -983,6 +986,7 @@ export const Canvas = ({
         data-testid="selection-overlay"
         className="pointer-events-none absolute left-0 top-0"
       />
+      {overlay}
 
       {isRasterizing && (
         <div

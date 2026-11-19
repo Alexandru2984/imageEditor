@@ -49,7 +49,12 @@ function referenceBoxes(canvas: FabricCanvas, target: FabricObject): Box[] {
  * showing what it lined up with. Rotation snaps to 45° steps. Holding Alt,
  * Ctrl or ⌘ suspends snapping for that drag.
  */
-export function useSmartGuides(canvas: FabricCanvas | null, enabled: boolean): void {
+export function useSmartGuides(
+  canvas: FabricCanvas | null,
+  enabled: boolean,
+  /** Lines besides other layers to snap to (guides, the grid). */
+  extraLines?: (moving: Box) => { x: number[]; y: number[] }
+): void {
   useEffect(() => {
     if (!canvas) return;
     let lines: SnapLine[] = [];
@@ -69,7 +74,8 @@ export function useSmartGuides(canvas: FabricCanvas | null, enabled: boolean): v
       }
       target.setCoords();
       const zoom = canvas.getZoom() || 1;
-      const result = computeSnap(toBox(target), referenceBoxes(canvas, target), SNAP_DISTANCE / zoom);
+      const moving = toBox(target);
+      const result = computeSnap(moving, referenceBoxes(canvas, target), SNAP_DISTANCE / zoom, extraLines?.(moving));
       if (result.dx !== 0 || result.dy !== 0) {
         target.set({ left: target.left + result.dx, top: target.top + result.dy });
         target.setCoords();
@@ -148,5 +154,5 @@ export function useSmartGuides(canvas: FabricCanvas | null, enabled: boolean): v
       lines = [];
       rotation = null;
     };
-  }, [canvas, enabled]);
+  }, [canvas, enabled, extraLines]);
 }

@@ -45,19 +45,24 @@ function bestOffset(moving: number[], targets: number[][], threshold: number): n
 
 /**
  * Snap a moving box to the edges and centres of reference boxes (the photo
- * and the other layers). Each axis snaps independently to the closest match
- * inside `threshold`; every reference stop that lines up after snapping gets
- * a guide spanning both boxes.
+ * and the other layers), and to `lines` (guides, the grid). Each axis snaps
+ * independently to the closest match inside `threshold`; every reference
+ * stop that lines up after snapping gets a guide spanning both boxes.
  */
-export function computeSnap(moving: Box, references: Box[], threshold: number): SnapResult {
-  const dx = bestOffset(xStops(moving), references.map(xStops), threshold) ?? 0;
-  const dy = bestOffset(yStops(moving), references.map(yStops), threshold) ?? 0;
+export function computeSnap(
+  moving: Box,
+  references: Box[],
+  threshold: number,
+  lines: { x: number[]; y: number[] } = { x: [], y: [] }
+): SnapResult {
+  const dx = bestOffset(xStops(moving), [...references.map(xStops), lines.x], threshold) ?? 0;
+  const dy = bestOffset(yStops(moving), [...references.map(yStops), lines.y], threshold) ?? 0;
   const snapped: Box = { ...moving, left: moving.left + dx, top: moving.top + dy };
-  const lines: SnapLine[] = [];
+  const guides: SnapLine[] = [];
 
   // One guide per aligned coordinate, stretched over every box it touches.
   const addLine = (line: SnapLine) => {
-    const existing = lines.find(
+    const existing = guides.find(
       (candidate) =>
         candidate.axis === line.axis && Math.abs(candidate.position - line.position) < EPSILON
     );
@@ -65,7 +70,7 @@ export function computeSnap(moving: Box, references: Box[], threshold: number): 
       existing.from = Math.min(existing.from, line.from);
       existing.to = Math.max(existing.to, line.to);
     } else {
-      lines.push(line);
+      guides.push(line);
     }
   };
 
@@ -93,5 +98,5 @@ export function computeSnap(moving: Box, references: Box[], threshold: number): 
       }
     }
   }
-  return { dx, dy, lines };
+  return { dx, dy, lines: guides };
 }

@@ -7,6 +7,7 @@ import {
 import { downloadBlob } from "./download";
 import { throwIfAborted } from "./abort";
 import { isValidLayerStyle } from "@/raster/layerStyleData";
+import { isGuideList } from "./guideData";
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -411,6 +412,10 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
         ) {
           throw new Error("Project contains an invalid layer mask");
         }
+      }
+      if (key === "guides") {
+        if (!isGuideList(child)) throw new Error("Project contains invalid guides");
+        continue;
       }
       if (key === "layerStyle") {
         if (!isValidLayerStyle(child)) throw new Error("Project contains an invalid layer style");

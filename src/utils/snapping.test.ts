@@ -49,4 +49,11 @@ describe("computeSnap", () => {
     // Already-aligned stops still show their guide.
     expect(result.lines).toEqual([{ axis: "y", position: 300, from: 0, to: 1000 }]);
   });
+
+  it("snaps to extra lines (guides, the grid) without drawing a guide for them", () => {
+    const result = computeSnap({ left: 96, top: 0, width: 20, height: 20 }, [], 5, { x: [100], y: [] });
+    expect(result.dx).toBe(4);
+    expect(result.dy).toBe(0);
+    expect(result.lines).toEqual([]);
+  });
 });

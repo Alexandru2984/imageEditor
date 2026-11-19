@@ -1,4 +1,5 @@
 import { FabricImage, Point, util, type Canvas as FabricCanvas, type FabricObject, type TMat2D } from "fabric";
+import { transformGuides } from "@/utils/guides";
 import { findBackgroundImage, isEditorChrome } from "@/utils/editorObjects";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE, renderObjectsRegion } from "@/utils/flatten";
 import { documentGrid, selectionOf } from "@/selection/state";
@@ -221,6 +222,7 @@ export async function resizeImage(
       changes.push(kept ? { object, matrix: null, scale, pixels } : { object, matrix, pixels });
     }
     if (!unchanged(canvas, objects)) return false;
+    if (stretched) transformGuides(canvas, toScene);
     applyChanges(canvas, changes);
     return true;
   } finally {
@@ -543,6 +545,7 @@ export async function rotateDocument(
     }
     if (!unchanged(canvas, objects)) return false;
 
+    transformGuides(canvas, turn);
     for (const object of objects) {
       if (object === photo) continue;
       const centre = util.transformPoint(object.getCenterPoint(), turn);

@@ -1,5 +1,11 @@
 // Fabric defaults must be set before any Fabric object is constructed; this
 // module is the editor chunk's entry point.
+import { GuideDialog, type GuideDialogKind } from "@/components/editor/GuideDialog";
+import { Rulers } from "@/components/editor/Rulers";
+import { useGuides } from "@/hooks/useGuides";
+import type { GridSettings } from "@/utils/guideData";
+import { snapLines } from "@/utils/guides";
+import type { Box } from "@/utils/snapping";
 import type { WarpControls } from "@/hooks/useWarpTool";
 import { warpTarget, type WarpMode } from "@/raster/warpLayer";
 import "@/lib/fabricDefaults";
@@ -63,6 +69,12 @@ import { useMaskTarget } from "@/hooks/useMaskTarget";
 import { maskTargetOf } from "@/raster/layerMask";
 import {
   SNAP_PREFERENCE_KEY,
+  GRID_PREFERENCE_KEY,
+  GUIDES_PREFERENCE_KEY,
+  LOCK_GUIDES_PREFERENCE_KEY,
+  RULERS_PREFERENCE_KEY,
+  readGridSettings,
+  writeGridSettings,
   readBooleanPreference,
   writeBooleanPreference,
 } from "@/utils/preferences";
@@ -86,7 +98,7 @@ import {
   rotate,
   type ArrangeAction,
 } from "@/utils/canvasActions";
-import type { PanelTab, Tool } from "@/types/editor";
+import type { PanelTab, Tool, ViewOptions } from "@/types/editor";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -101,6 +113,13 @@ import {
 
 /** Replacing the open document needs a confirmation first. */
 type DiscardAction = "new" | "openImage" | "openProject";
+
+const VIEW_PREFERENCE_KEYS: Record<keyof ViewOptions, string> = {
+  rulers: RULERS_PREFERENCE_KEY,
+  grid: GRID_PREFERENCE_KEY,
+  guides: GUIDES_PREFERENCE_KEY,
+  lockGuides: LOCK_GUIDES_PREFERENCE_KEY,
+};
 
 const DISCARD_TEXT: Record<DiscardAction, { title: string; confirm: string }> = {
   new: { title: "Start a new project?", confirm: "Start new" },
@@ -251,7 +270,45 @@ export const EditorWorkspace = ({
     setSnapping(enabled);
     writeBooleanPreference(SNAP_PREFERENCE_KEY, enabled);
   }, []);
-  useSmartGuides(fabricCanvas, snapping);
+  const [viewOptions, setViewOptions] = useState<ViewOptions>(() => ({
+    rulers: readBooleanPreference(VIEW_PREFERENCE_KEYS.rulers, false),
+    grid: readBooleanPreference(VIEW_PREFERENCE_KEYS.grid, false),
+    guides: readBooleanPreference(VIEW_PREFERENCE_KEYS.guides, true),
+    lockGuides: readBooleanPreference(VIEW_PREFERENCE_KEYS.lockGuides, false),
+  }));
+  const setViewOption = useCallback((option: keyof ViewOptions, value: boolean) => {
+    setViewOptions((current) => ({ ...current, [option]: value }));
+    writeBooleanPreference(VIEW_PREFERENCE_KEYS[option], value);
+  }, []);
+  const revealGuides = useCallback(() => setViewOption("guides", true), [setViewOption]);
+  const [gridSettings, setGridSettings] = useState<GridSettings>(readGridSettings);
+  const handleGridChange = useCallback(
+    (settings: GridSettings) => {
+      setGridSettings(settings);
+      writeGridSettings(settings);
+      setViewOption("grid", true);
+    },
+    [setViewOption]
+  );
+  const [guideDialog, setGuideDialog] = useState<GuideDialogKind | null>(null);
+  // Layers also snap to the guides and the grid's lines, while they show.
+  const snapTargets = useCallback(
+    (moving: Box) =>
+      fabricCanvas
+        ? snapLines(fabricCanvas, moving, { guides: viewOptions.guides, grid: viewOptions.grid ? gridSettings : null })
+        : { x: [], y: [] },
+    [fabricCanvas, viewOptions.guides, viewOptions.grid, gridSettings]
+  );
+  useSmartGuides(fabricCanvas, snapping, snapTargets);
+  useGuides(fabricCanvas, {
+    showGuides: viewOptions.guides,
+    showGrid: viewOptions.grid,
+    grid: gridSettings,
+    locked: viewOptions.lockGuides,
+    rulers: viewOptions.rulers,
+    snapping,
+    activeTool,
+  });
 
   // Phones start with the canvas unobstructed; wide screens with the panel.
   const previousIsMobileRef = useRef(isMobile);
@@ -585,6 +642,9 @@ export const EditorWorkspace = ({
     pickColor: eyedropper.start,
     snapping,
     setSnapping: handleSnappingChange,
+    viewOptions,
+    setViewOption,
+    openGuideDialog: setGuideDialog,
     panel,
     togglePanel,
     histogram: histogramOpen,
@@ -916,6 +976,11 @@ export const EditorWorkspace = ({
             onZoomChange={handleZoomChange}
             onToolChange={handleToolChange}
             onLoadError={onLoadError}
+            overlay={
+              viewOptions.rulers ? (
+                <Rulers canvas={fabricCanvas} snapping={snapping} onRevealGuides={revealGuides} />
+              ) : null
+            }
           />
 
           {histogramOpen && <HistogramPanel canvas={fabricCanvas} onClose={() => setHistogramOpen(false)} />}
@@ -1008,6 +1073,14 @@ export const EditorWorkspace = ({
         colors={{ foreground: activeColor, background: backgroundColor }}
         onClose={() => setDocumentDialog(null)}
         onResized={handleFit}
+      />
+      <GuideDialog
+        canvas={fabricCanvas}
+        kind={guideDialog}
+        grid={gridSettings}
+        onGridChange={handleGridChange}
+        onRevealGuides={revealGuides}
+        onClose={() => setGuideDialog(null)}
       />
       <SelectionModifyDialog
         canvas={fabricCanvas}

@@ -65,6 +65,10 @@ export const KEYMAP = {
   fitOnScreen: [{ key: "0", mod: true }],
   actualPixels: [{ key: "1", mod: true }],
   toggleSnap: [{ key: ";", mod: true, shift: true }],
+  rulers: [{ key: "r", mod: true }],
+  showGrid: [{ key: "'", mod: true }],
+  showGuides: [{ key: ";", mod: true }],
+  lockGuides: [{ key: ";", mod: true, alt: true }],
   layersPanel: [{ key: "F7" }],
 
   shortcuts: [{ key: "?" }],
