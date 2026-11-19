@@ -39,11 +39,13 @@ import {
   isHealingTool,
   isLassoTool,
   isToningTool,
+  isFocusTool,
   isMarqueeTool,
   type BrushTool,
   type FillTool,
   type HealingTool,
   type ToningTool,
+  type FocusTool,
   type LassoTool,
   type MarqueeTool,
 } from "./toolGroups";
@@ -159,6 +161,7 @@ export const EditorWorkspace = ({
   const [lastFillTool, setLastFillTool] = useSessionState<FillTool>("lastFillTool", "bucket");
   const [lastHealingTool, setLastHealingTool] = useSessionState<HealingTool>("lastHealingTool", "spotHealing");
   const [lastToningTool, setLastToningTool] = useSessionState<ToningTool>("lastToningTool", "dodge");
+  const [lastFocusTool, setLastFocusTool] = useSessionState<FocusTool>("lastFocusTool", "blur");
   const [lastMarqueeTool, setLastMarqueeTool] = useSessionState<MarqueeTool>("lastMarqueeTool", "marquee");
   const [selectionMode, setSelectionMode] = useSessionState<SelectionMode>("selectionMode", "replace");
   const [lastLassoTool, setLastLassoTool] = useSessionState<LassoTool>("lastLassoTool", "lasso");
@@ -273,10 +276,11 @@ export const EditorWorkspace = ({
       if (isFillTool(tool)) setLastFillTool(tool);
       if (isHealingTool(tool)) setLastHealingTool(tool);
       if (isToningTool(tool)) setLastToningTool(tool);
+      if (isFocusTool(tool)) setLastFocusTool(tool);
       if (isMarqueeTool(tool)) setLastMarqueeTool(tool);
       if (isLassoTool(tool)) setLastLassoTool(tool);
     },
-    [setLastShape, setLastBrushTool, setLastFillTool, setLastHealingTool, setLastToningTool, setLastMarqueeTool, setLastLassoTool]
+    [setLastShape, setLastBrushTool, setLastFillTool, setLastHealingTool, setLastToningTool, setLastFocusTool, setLastMarqueeTool, setLastLassoTool]
   );
 
   const handleZoomChange = useCallback((newZoom: number) => {
@@ -849,6 +853,7 @@ export const EditorWorkspace = ({
             lastFillTool={lastFillTool}
             lastHealingTool={lastHealingTool}
             lastToningTool={lastToningTool}
+            lastFocusTool={lastFocusTool}
             lastMarqueeTool={lastMarqueeTool}
             lastLassoTool={lastLassoTool}
             fabricCanvas={fabricCanvas}
@@ -947,6 +952,7 @@ export const EditorWorkspace = ({
           lastFillTool={lastFillTool}
           lastHealingTool={lastHealingTool}
           lastToningTool={lastToningTool}
+          lastFocusTool={lastFocusTool}
           lastMarqueeTool={lastMarqueeTool}
           lastLassoTool={lastLassoTool}
           fabricCanvas={fabricCanvas}

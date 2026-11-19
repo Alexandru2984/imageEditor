@@ -27,6 +27,9 @@ import {
   Lollipop,
   Hand,
   Droplets,
+  Droplet,
+  Triangle,
+  Pointer,
   ShieldCheck,
   X,
   type LucideIcon,
@@ -164,6 +167,9 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
   dodge: { icon: Lollipop, name: "Dodge", hint: "Paint to lighten · stroke again to go further" },
   burn: { icon: Hand, name: "Burn", hint: "Paint to darken · stroke again to go further" },
   sponge: { icon: Droplets, name: "Sponge", hint: "Paint to take colour away, or add it" },
+  blur: { icon: Droplet, name: "Blur", hint: "Paint to soften · every pass softens more" },
+  sharpen: { icon: Triangle, name: "Sharpen", hint: "Paint to crisp up edges · go gently" },
+  smudge: { icon: Pointer, name: "Smudge", hint: "Drag to smear colour along the stroke" },
 };
 
 function ToggleOption({
@@ -403,7 +409,7 @@ export function OptionsBar({
     </Setting>
   );
 
-  const retouchSlider = (label: string, key: "exposure" | "spongeFlow", aria: string) => (
+  const retouchSlider = (label: string, key: "exposure" | "spongeFlow" | "strength", aria: string) => (
     <Setting label={label} value={`${retouch[key]}%`}>
       <Slider
         value={[retouch[key]]}
@@ -419,7 +425,15 @@ export function OptionsBar({
   const textChoice = (option: { label: string }) => <span className="text-xs">{option.label}</span>;
 
   let options: ReactNode = null;
-  if (activeTool === "dodge" || activeTool === "burn") {
+  if (activeTool === "blur" || activeTool === "sharpen" || activeTool === "smudge") {
+    options = (
+      <>
+        {sizeSetting}
+        {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
+        {retouchSlider("Strength", "strength", `${TOOL_INFO[activeTool]!.name} strength`)}
+      </>
+    );
+  } else if (activeTool === "dodge" || activeTool === "burn") {
     options = (
       <>
         {sizeSetting}

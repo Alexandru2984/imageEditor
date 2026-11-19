@@ -59,7 +59,21 @@ export interface SpongeStroke {
   flow: number;
 }
 
-export type RetouchStroke = CloneStroke | HealStroke | SpotStroke | ToneStroke | SpongeStroke;
+/** Blur softens, sharpen crisps; every pass goes further. */
+export interface FocusStroke {
+  kind: "blur" | "sharpen";
+  /** 0–1. */
+  strength: number;
+}
+
+/** Smudge: drags the colour under the brush along the stroke. */
+export interface SmudgeStroke {
+  kind: "smudge";
+  /** How far the colour is carried, 0–1. */
+  strength: number;
+}
+
+export type RetouchStroke = CloneStroke | HealStroke | SpotStroke | ToneStroke | SpongeStroke | FocusStroke | SmudgeStroke;
 
 /**
  * What a full dodge or burn does to a level (0–1) at an exposure (0–1): each
@@ -160,7 +174,8 @@ export class RetouchPainter {
   ) {
     this.original = pixels.data.slice();
     this.coverage = new Uint16Array(pixels.width * pixels.height);
-    this.spacer = new DabSpacer(settings.diameter);
+    // The smudge carries colour dab to dab, so its dabs sit closer.
+    this.spacer = new DabSpacer(settings.diameter, settings.stroke.kind === "smudge" ? 0.1 : undefined);
     const stroke = settings.stroke;
     if (stroke.kind === "tone") {
       const curve = toneCurve(stroke.mode, stroke.range, stroke.exposure);
@@ -222,6 +237,15 @@ export class RetouchPainter {
     };
     if (rect.right <= rect.left || rect.bottom <= rect.top) return;
     this.grow(rect);
+    const kind = this.settings.stroke.kind;
+    if (kind === "blur" || kind === "sharpen") {
+      this.focusDab(dab, rect);
+      return;
+    }
+    if (kind === "smudge") {
+      this.smudgeDab(dab, rect);
+      return;
+    }
     const { hardness, clip } = this.settings;
     for (let y = rect.top; y < rect.bottom; y += 1) {
       const dy = y + 0.5 - dab.y;
@@ -247,6 +271,165 @@ export class RetouchPainter {
           default:
             this.clonePixel(x, y, index, weight);
         }
+      }
+    }
+  }
+
+  /** How much of a pixel the dab may change: the tip's shape, faded by the selection. */
+  private weightAt(dab: Dab, x: number, y: number): number {
+    const dx = x + 0.5 - dab.x;
+    const dy = y + 0.5 - dab.y;
+    const weight = tipAlpha(Math.sqrt(dx * dx + dy * dy), dab.diameter / 2, this.settings.hardness);
+    const clip = this.settings.clip;
+    return clip && weight > 0 ? (weight * clip[y * this.pixels.width + x]!) / 255 : weight;
+  }
+
+  /**
+   * Blur and sharpen: the pixels under the dab move towards (or away from)
+   * a box-blurred copy of themselves, in premultiplied colour.
+   */
+  /** Scratch space for blur and sharpen, kept between dabs. */
+  private focusScratch = new Float32Array(0);
+
+  private focusDab(dab: Dab, rect: PixelRect) {
+    const stroke = this.settings.stroke as FocusStroke;
+    const { width, height, data } = this.pixels;
+    const radius = stroke.kind === "blur" ? Math.max(1, Math.round(dab.diameter / 25)) : 1;
+    const left = Math.max(0, rect.left - radius);
+    const top = Math.max(0, rect.top - radius);
+    const right = Math.min(width, rect.right + radius);
+    const bottom = Math.min(height, rect.bottom + radius);
+    const regionWidth = right - left;
+    const regionHeight = bottom - top;
+    const size = regionWidth * regionHeight * 4;
+    if (this.focusScratch.length < size * 3) this.focusScratch = new Float32Array(size * 3);
+    const source = this.focusScratch.subarray(0, size);
+    const across = this.focusScratch.subarray(size, size * 2);
+    const soft = this.focusScratch.subarray(size * 2, size * 3);
+    for (let y = top; y < bottom; y += 1) {
+      let from = (y * width + left) * 4;
+      let to = (y - top) * regionWidth * 4;
+      for (let x = left; x < right; x += 1, from += 4, to += 4) {
+        const alpha = data[from + 3]!;
+        const scale = alpha / 255;
+        source[to] = data[from]! * scale;
+        source[to + 1] = data[from + 1]! * scale;
+        source[to + 2] = data[from + 2]! * scale;
+        source[to + 3] = alpha;
+      }
+    }
+    // A box blur in two passes of running sums, edges repeated.
+    const span = radius * 2 + 1;
+    for (let y = 0; y < regionHeight; y += 1) {
+      const row = y * regionWidth;
+      for (let channel = 0; channel < 4; channel += 1) {
+        let sum = 0;
+        for (let k = -radius; k <= radius; k += 1) sum += source[(row + Math.min(regionWidth - 1, Math.max(0, k))) * 4 + channel]!;
+        for (let x = 0; x < regionWidth; x += 1) {
+          across[(row + x) * 4 + channel] = sum / span;
+          const leaving = Math.max(0, x - radius);
+          const entering = Math.min(regionWidth - 1, x + radius + 1);
+          sum += source[(row + entering) * 4 + channel]! - source[(row + leaving) * 4 + channel]!;
+        }
+      }
+    }
+    const stride = regionWidth * 4;
+    for (let x = 0; x < regionWidth; x += 1) {
+      for (let channel = 0; channel < 4; channel += 1) {
+        const column = x * 4 + channel;
+        let sum = 0;
+        for (let k = -radius; k <= radius; k += 1) sum += across[Math.min(regionHeight - 1, Math.max(0, k)) * stride + column]!;
+        for (let y = 0; y < regionHeight; y += 1) {
+          soft[y * stride + column] = sum / span;
+          const leaving = Math.max(0, y - radius);
+          const entering = Math.min(regionHeight - 1, y + radius + 1);
+          sum += across[entering * stride + column]! - across[leaving * stride + column]!;
+        }
+      }
+    }
+    const sign = stroke.kind === "blur" ? 1 : -1;
+    for (let y = rect.top; y < rect.bottom; y += 1) {
+      for (let x = rect.left; x < rect.right; x += 1) {
+        const weight = this.weightAt(dab, x, y) * stroke.strength * sign;
+        if (weight === 0) continue;
+        const local = ((y - top) * regionWidth + (x - left)) * 4;
+        const alphaBefore = source[local + 3]!;
+        const alpha = Math.min(255, Math.max(0, alphaBefore + (soft[local + 3]! - alphaBefore) * weight));
+        const at = (y * width + x) * 4;
+        if (alpha <= 0) {
+          data[at + 3] = 0;
+          continue;
+        }
+        for (let channel = 0; channel < 3; channel += 1) {
+          const before = source[local + channel]!;
+          data[at + channel] = ((before + (soft[local + channel]! - before) * weight) / alpha) * 255;
+        }
+        data[at + 3] = alpha;
+      }
+    }
+  }
+
+  /** The colour the smudge carries, premultiplied, around the tip's centre. */
+  private smudgeColour: { size: number; values: Float32Array } | null = null;
+
+  /**
+   * Smudge: the carried colour is mixed with what lies under the dab and
+   * laid down there, so the stroke drags colour along.
+   */
+  private smudgeDab(dab: Dab, rect: PixelRect) {
+    const stroke = this.settings.stroke as SmudgeStroke;
+    const { width, data } = this.pixels;
+    const size = Math.ceil(this.settings.diameter) + 2;
+    const half = Math.floor(size / 2);
+    const originX = Math.round(dab.x) - half;
+    const originY = Math.round(dab.y) - half;
+    if (!this.smudgeColour) {
+      // The first dab picks up the colour under the whole tip (the edge
+      // repeated past the layer's) and lays nothing down.
+      const values = new Float32Array(size * size * 4);
+      const height = this.pixels.height;
+      for (let localY = 0; localY < size; localY += 1) {
+        const y = Math.min(height - 1, Math.max(0, originY + localY));
+        for (let localX = 0; localX < size; localX += 1) {
+          const x = Math.min(width - 1, Math.max(0, originX + localX));
+          const at = (y * width + x) * 4;
+          const slot = (localY * size + localX) * 4;
+          const alpha = data[at + 3]!;
+          values[slot] = (data[at]! * alpha) / 255;
+          values[slot + 1] = (data[at + 1]! * alpha) / 255;
+          values[slot + 2] = (data[at + 2]! * alpha) / 255;
+          values[slot + 3] = alpha;
+        }
+      }
+      this.smudgeColour = { size, values };
+      return;
+    }
+    const carried = this.smudgeColour.values;
+    for (let y = rect.top; y < rect.bottom; y += 1) {
+      const localY = y - originY;
+      if (localY < 0 || localY >= size) continue;
+      for (let x = rect.left; x < rect.right; x += 1) {
+        const localX = x - originX;
+        if (localX < 0 || localX >= size) continue;
+        const at = (y * width + x) * 4;
+        const slot = (localY * size + localX) * 4;
+        const alpha = data[at + 3]!;
+        const under = [(data[at]! * alpha) / 255, (data[at + 1]! * alpha) / 255, (data[at + 2]! * alpha) / 255, alpha];
+        const weight = this.weightAt(dab, x, y);
+        if (weight <= 0) continue;
+        const values = [0, 0, 0, 0];
+        for (let channel = 0; channel < 4; channel += 1) {
+          const mixed = carried[slot + channel]! * stroke.strength + under[channel]! * (1 - stroke.strength);
+          carried[slot + channel] = mixed;
+          values[channel] = under[channel]! + (mixed - under[channel]!) * weight;
+        }
+        const newAlpha = Math.min(255, Math.max(0, values[3]!));
+        if (newAlpha <= 0) {
+          data[at + 3] = 0;
+          continue;
+        }
+        for (let channel = 0; channel < 3; channel += 1) data[at + channel] = (values[channel]! / newAlpha) * 255;
+        data[at + 3] = newAlpha;
       }
     }
   }

@@ -248,6 +248,8 @@ export function useRetouchTool({
         };
       } else if (activeTool === "sponge") {
         retouchStroke = { kind: "sponge", mode: options.spongeMode, flow: options.spongeFlow / 100 };
+      } else if (activeTool === "blur" || activeTool === "sharpen" || activeTool === "smudge") {
+        retouchStroke = { kind: activeTool, strength: options.strength / 100 };
       } else if (cloning && source) {
         if (options.aligned && source.offset) {
           sourceOffset = source.offset;

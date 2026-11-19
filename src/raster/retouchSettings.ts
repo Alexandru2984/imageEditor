@@ -19,6 +19,8 @@ export interface RetouchOptions {
   spongeMode: "saturate" | "desaturate";
   /** Sponge: strength, 1–100. */
   spongeFlow: number;
+  /** Blur, sharpen and smudge: strength, 1–100. */
+  strength: number;
 }
 
 export const DEFAULT_RETOUCH_OPTIONS: RetouchOptions = {
@@ -31,4 +33,5 @@ export const DEFAULT_RETOUCH_OPTIONS: RetouchOptions = {
   protectTones: true,
   spongeMode: "desaturate",
   spongeFlow: 50,
+  strength: 50,
 };

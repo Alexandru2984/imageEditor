@@ -14,6 +14,9 @@ import {
   Lollipop,
   Hand,
   Droplets,
+  Droplet,
+  Triangle,
+  Pointer,
   type LucideIcon,
 } from "lucide-react";
 import type { Tool } from "@/types/editor";
@@ -165,8 +168,20 @@ export const TONING_TOOLS: GroupedToolDef<ToningTool>[] = [
 
 export const isToningTool = (tool: Tool): tool is ToningTool => tool === "dodge" || tool === "burn" || tool === "sponge";
 
+/** Photoshop's focus group: blur, sharpen, smudge. */
+export type FocusTool = "blur" | "sharpen" | "smudge";
+
+export const FOCUS_TOOLS: GroupedToolDef<FocusTool>[] = [
+  { id: "blur", icon: Droplet, label: "Blur", name: "Blur", description: "Paint to soften" },
+  { id: "sharpen", icon: Triangle, label: "Sharpen", name: "Sharpen", description: "Paint to crisp up edges" },
+  { id: "smudge", icon: Pointer, label: "Smudge", name: "Smudge", description: "Drag colour along" },
+];
+
+export const isFocusTool = (tool: Tool): tool is FocusTool => tool === "blur" || tool === "sharpen" || tool === "smudge";
+
 /** Tools that rework a layer's own pixels as they paint. */
-export const isRetouchTool = (tool: Tool): boolean => tool === "cloneStamp" || isHealingTool(tool) || isToningTool(tool);
+export const isRetouchTool = (tool: Tool): boolean =>
+  tool === "cloneStamp" || isHealingTool(tool) || isToningTool(tool) || isFocusTool(tool);
 
 /** Retouching tools that copy from a source the user sets (Alt-click). */
 export const needsCloneSource = (tool: Tool): boolean => tool === "cloneStamp" || tool === "healingBrush";

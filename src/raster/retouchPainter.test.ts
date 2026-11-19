@@ -222,3 +222,64 @@ describe("dodge, burn and sponge", () => {
     expect(r2! - g2!).toBeGreaterThan(50);
   });
 });
+
+describe("blur, sharpen and smudge", () => {
+  /** A hard black-and-white edge down the middle. */
+  const edge = (): Pixels => {
+    const width = 30;
+    const height = 20;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const value = x < 15 ? 0 : 255;
+        data.set([value, value, value, 255], (y * width + x) * 4);
+      }
+    }
+    return { data, width, height };
+  };
+
+  it("blurs an edge more with every pass and leaves the rest", () => {
+    const layer = edge();
+    const pass = () =>
+      new RetouchPainter(layer, { diameter: 10, hardness: 1, stroke: { kind: "blur", strength: 0.5 } }).add({
+        x: 15,
+        y: 10,
+        pressure: 1,
+      });
+    pass();
+    const once = pixel(layer, 14, 10)[0]!;
+    expect(once).toBeGreaterThan(0);
+    pass();
+    pass();
+    expect(pixel(layer, 14, 10)[0]).toBeGreaterThan(once);
+    expect(pixel(layer, 2, 10)).toEqual([0, 0, 0, 255]);
+  });
+
+  it("sharpens an edge into overshoot", () => {
+    const layer = edge();
+    // A low-contrast step: 64 then 192.
+    for (let index = 0; index < 30 * 20; index += 1) {
+      const value = index % 30 < 15 ? 64 : 192;
+      layer.data.set([value, value, value, 255], index * 4);
+    }
+    new RetouchPainter(layer, { diameter: 10, hardness: 1, stroke: { kind: "sharpen", strength: 1 } }).add({
+      x: 15,
+      y: 10,
+      pressure: 1,
+    });
+    // Darker on the dark side of the step, lighter on the light side.
+    expect(pixel(layer, 14, 10)[0]).toBeLessThan(54);
+    expect(pixel(layer, 15, 10)[0]).toBeGreaterThan(202);
+    // Flat areas stay flat.
+    expect(pixel(layer, 11, 10)[0]).toBe(64);
+  });
+
+  it("drags dark into light along the stroke", () => {
+    const layer = edge();
+    const painter = new RetouchPainter(layer, { diameter: 6, hardness: 1, stroke: { kind: "smudge", strength: 0.9 } });
+    for (let x = 10; x <= 22; x += 0.25) painter.add({ x, y: 10, pressure: 1 });
+    // Pulled from the black into the white.
+    expect(pixel(layer, 20, 10)[0]).toBeLessThan(200);
+    expect(pixel(layer, 20, 2)[0]).toBe(255);
+  });
+});

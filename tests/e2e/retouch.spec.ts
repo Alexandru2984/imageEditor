@@ -206,3 +206,49 @@ test("dodge lightens, burn darkens and the sponge takes colour away", async ({ p
   await expect.poll(() => photoPixels(page, [[100, 150]])).toEqual([[200, 50, 50]]);
   await expect.poll(async () => (await photoPixels(page, [[300, 220]]))?.[0]?.[0]).toBeLessThan(105);
 });
+
+test("blur softens, sharpen crisps and smudge drags colour along", async ({ page }) => {
+  // Top: black | white. Middle: dark grey | light grey. Bottom: red | white.
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#ffffff", [
+    { x: 0, y: 0, width: 200, height: 100, color: "#000000" },
+    { x: 0, y: 100, width: 200, height: 100, color: "#404040" },
+    { x: 200, y: 100, width: 200, height: 100, color: "#c0c0c0" },
+    { x: 0, y: 200, width: 200, height: 100, color: "#ff0000" },
+  ]);
+  await expect.poll(() => photoPixels(page, [[199, 50], [200, 50]])).toEqual([[0, 0, 0], [255, 255, 255]]);
+  const tools = page.getByRole("navigation", { name: "Tools" });
+
+  await tools.getByRole("button", { name: "Blur", exact: true }).click();
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Blur");
+  await settle(page);
+  await dragOnPhoto(page, [200, 20], [200, 80]);
+  await expect
+    .poll(async () => {
+      const [dark, light] = (await photoPixels(page, [[199, 50], [200, 50]])) ?? [];
+      return dark![0]! > 10 && light![0]! < 245;
+    })
+    .toBe(true);
+
+  // Pressed again, the button lists the group.
+  await tools.getByRole("button", { name: "Blur", exact: true }).click();
+  await page.getByRole("group", { name: "Blur tools" }).getByRole("button", { name: /^Sharpen/ }).click();
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Sharpen");
+  await settle(page);
+  await dragOnPhoto(page, [200, 120], [200, 180]);
+  await expect
+    .poll(async () => {
+      const [dark, light, flat] = (await photoPixels(page, [[199, 150], [200, 150], [100, 150]])) ?? [];
+      return dark![0]! < 60 && light![0]! > 196 && flat![0] === 64;
+    })
+    .toBe(true);
+
+  await tools.getByRole("button", { name: "Sharpen", exact: true }).click();
+  await page.getByRole("group", { name: "Blur tools" }).getByRole("button", { name: /^Smudge/ }).click();
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Smudge");
+  await settle(page);
+  await dragOnPhoto(page, [170, 250], [260, 250]);
+  // Red carried into the white.
+  await expect.poll(async () => (await photoPixels(page, [[215, 250]]))?.[0]?.[1]).toBeLessThan(200);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[215, 250]])).toEqual([[255, 255, 255]]);
+});

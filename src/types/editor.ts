@@ -23,7 +23,10 @@ export type Tool =
   | "healingBrush"
   | "dodge"
   | "burn"
-  | "sponge";
+  | "sponge"
+  | "blur"
+  | "sharpen"
+  | "smudge";
 
 export interface HistoryEntry {
   json: string;
