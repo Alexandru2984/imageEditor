@@ -19,6 +19,7 @@ export const KEYMAP = {
   delete: [{ key: "Delete" }, { key: "Backspace" }],
   fillForeground: [{ key: "Backspace", alt: true }],
   fillBackground: [{ key: "Backspace", mod: true }],
+  contentAwareFill: [{ key: "Backspace", shift: true }],
 
   duplicate: [{ key: "j", mod: true }],
   layerViaCut: [{ key: "j", mod: true, shift: true }],

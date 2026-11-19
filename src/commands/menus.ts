@@ -28,6 +28,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "-",
       "edit.fillForeground",
       "edit.fillBackground",
+      "edit.contentAwareFill",
       "edit.stroke",
     ],
   },

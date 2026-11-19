@@ -136,3 +136,35 @@ test("the healing brush copies texture but takes on the light where it lands", a
   await page.keyboard.press("Control+z");
   await expect.poll(() => photoPixels(page, [[300, 150]])).toEqual([[200, 200, 200]]);
 });
+
+test("Content-Aware Fill rebuilds the selection from around it", async ({ page }) => {
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#808080", [
+    { x: 170, y: 120, width: 60, height: 60, color: "#000000" },
+  ]);
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0, 0, 0]]);
+  // Without a selection there is nothing to fill.
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
+  await expect(page.getByRole("menuitem", { name: /^Content-Aware Fill/ })).toHaveAttribute("aria-disabled", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  // Tool keys are left to the menu bar while it has the focus.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+
+  await arm(page, "m", "Rectangle select");
+  const from = await onPhoto(page, 160, 110, SIZE);
+  const to = await onPhoto(page, 240, 190, SIZE);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(to.x, to.y, { steps: 6 });
+  await page.mouse.up();
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click();
+  await page.getByRole("menuitem", { name: /^Content-Aware Fill/ }).click();
+  await expect
+    .poll(async () => {
+      const pixels = (await photoPixels(page, [[200, 150], [172, 122], [100, 100]])) ?? [];
+      return pixels.every((pixel) => pixel.every((channel) => Math.abs(channel - 128) <= 3));
+    })
+    .toBe(true);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[0, 0, 0]]);
+});

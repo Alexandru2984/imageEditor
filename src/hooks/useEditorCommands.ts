@@ -310,6 +310,56 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       }
     };
 
+    /**
+     * Edit › Content-Aware Fill: rebuild the selected pixels from the rest of
+     * the layer around them, in the worker.
+     */
+    const contentAwareFill = async () => {
+      if (!canvas) return;
+      const selection = pixelSelection();
+      if (!selection) {
+        toast.error("Select what to fill first");
+        return;
+      }
+      const target = adjustTarget(canvas);
+      const preview = typeof target === "string" ? target : PixelPreview.open(canvas, target, selection);
+      if (typeof preview === "string") {
+        toast.error(preview);
+        return;
+      }
+      const { region, weights } = preview;
+      const width = region.right - region.left;
+      const height = region.bottom - region.top;
+      const hole = new Uint8Array(width * height);
+      let filling = 0;
+      for (let index = 0; index < hole.length; index += 1) {
+        if (!weights || weights[index]! > 0) {
+          hole[index] = 1;
+          filling += 1;
+        }
+      }
+      // The fill copies from around the selection: as far again as its size,
+      // within reason for memory.
+      let reach = Math.max(48, Math.min(512, Math.max(width, height)));
+      while (reach > 48 && (width + reach * 2) * (height + reach * 2) > 8_000_000) reach = Math.floor(reach * 0.8);
+      const around = preview.around(reach);
+      if (filling === hole.length && around.width === width && around.height === height) {
+        preview.cancel();
+        toast.error("Leave part of the layer unselected to fill from");
+        return;
+      }
+      const notice = toast.loading("Filling…");
+      try {
+        preview.present(await preview.compute({ op: "inpaint", hole, reach }));
+        await preview.commit();
+        toast.dismiss(notice);
+      } catch (error) {
+        console.error("Content-aware fill failed:", error);
+        preview.cancel();
+        toast.error("The selection could not be filled", { id: notice });
+      }
+    };
+
     /** The layer a layer style goes on: the selected one, else the photo. */
     const styleLayer = (): FabricObject | string => {
       if (!canvas) return "Open a photo first";
@@ -574,6 +624,15 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => fillPixels(colors.background),
         isEnabled: () => !!canvas && documentGrid(canvas) !== null,
         keywords: "fill selection color paint",
+      },
+      {
+        id: "edit.contentAwareFill",
+        label: "Content-Aware Fill",
+        icon: Sparkles,
+        shortcuts: KEYMAP.contentAwareFill,
+        run: () => void contentAwareFill(),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "remove object erase heal patch inpaint fill selection",
       },
       {
         id: "edit.stroke",
