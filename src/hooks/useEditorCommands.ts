@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { revealAll } from "@/raster/documentSize";
 import type { DocumentDialogKind } from "@/components/editor/DocumentDialog";
 import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import {
@@ -45,6 +46,9 @@ import {
   Save,
   Scaling,
   Proportions,
+  Expand,
+  Shrink,
+  Maximize2,
   Scissors,
   CircleDot,
   Sparkle,
@@ -375,6 +379,19 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       }
     };
 
+    /** Image › Reveal All: grow the document around every layer. */
+    const revealEverything = async () => {
+      if (!canvas) return;
+      try {
+        const result = await revealAll(canvas, colors.background);
+        if (typeof result === "string") toast.message(result);
+        else if (result) fitOnScreen();
+      } catch (error) {
+        console.error("Reveal all failed:", error);
+        toast.error("The canvas could not be grown");
+      }
+    };
+
     /** The layer a layer style goes on: the selected one, else the photo. */
     const styleLayer = (): FabricObject | string => {
       if (!canvas) return "Open a photo first";
@@ -688,6 +705,31 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => openDocumentDialog("imageSize"),
         isEnabled: () => !!canvas && documentGrid(canvas) !== null,
         keywords: "resize resample scale dimensions pixels",
+      },
+      {
+        id: "image.canvasSize",
+        label: "Canvas Size…",
+        icon: Expand,
+        shortcuts: KEYMAP.canvasSize,
+        run: () => openDocumentDialog("canvasSize"),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "extend border margin padding enlarge document",
+      },
+      {
+        id: "image.trim",
+        label: "Trim…",
+        icon: Shrink,
+        run: () => openDocumentDialog("trim"),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "remove empty transparent edges autocrop",
+      },
+      {
+        id: "image.revealAll",
+        label: "Reveal All",
+        icon: Maximize2,
+        run: () => void revealEverything(),
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "expand canvas show layers outside",
       },
       {
         id: "image.flipVertical",

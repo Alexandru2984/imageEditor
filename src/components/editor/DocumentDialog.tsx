@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useId, useState, type FormEvent, type ReactNode } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { Link2, Unlink2 } from "lucide-react";
 import { toast } from "sonner";
@@ -11,12 +11,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { documentSize, fitsLimits, resizeImage, type ResampleMethod } from "@/raster/documentSize";
+import {
+  anchoredRect,
+  documentSize,
+  fitsLimits,
+  recanvas,
+  resizeImage,
+  trim,
+  type Anchor,
+  type Refusal,
+  type ResampleMethod,
+  type TrimBasis,
+} from "@/raster/documentSize";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
 import { cn } from "@/lib/utils";
 
 /** The Image menu's document dialogs. */
-export type DocumentDialogKind = "imageSize";
+export type DocumentDialogKind = "imageSize" | "canvasSize" | "trim";
 
 const RESAMPLE_METHODS: { value: ResampleMethod; label: string }[] = [
   { value: "bicubic", label: "Smooth" },
@@ -110,30 +121,38 @@ const wholeNumber = (text: string): number | null => {
   return text.trim() !== "" && Number.isInteger(value) && value >= 1 ? value : null;
 };
 
-interface DocumentDialogProps {
+interface FormProps {
   canvas: FabricCanvas | null;
-  /** The dialog shown, or null when closed. */
-  kind: DocumentDialogKind | null;
   onClose: () => void;
-  /** The document changed size; the view should fit it again. */
-  onResized: () => void;
+  /** Run a document change, reporting how it went. */
+  run: (label: string, change: (canvas: FabricCanvas) => Promise<boolean | Refusal>) => void;
 }
 
-/** Image › Image Size. */
-export function DocumentDialog({ canvas, kind, onClose, onResized }: DocumentDialogProps) {
-  const [original, setOriginal] = useState<{ width: number; height: number } | null>(null);
-  const [width, setWidth] = useState("");
-  const [height, setHeight] = useState("");
+function Footer({ onClose, disabled }: { onClose: () => void; disabled: boolean }) {
+  return (
+    <DialogFooter>
+      <Button type="button" variant="ghost" onClick={onClose}>
+        Cancel
+      </Button>
+      <Button type="submit" disabled={disabled}>
+        OK
+      </Button>
+    </DialogFooter>
+  );
+}
+
+/** The document's size while a dialog is open. */
+function useDocumentSize(canvas: FabricCanvas | null) {
+  const [size] = useState(() => (canvas ? documentSize(canvas) : null));
+  return size;
+}
+
+function ImageSizeForm({ canvas, onClose, run }: FormProps) {
+  const original = useDocumentSize(canvas);
+  const [width, setWidth] = useState(original ? String(original.width) : "");
+  const [height, setHeight] = useState(original ? String(original.height) : "");
   const [linked, setLinked] = useState(true);
   const [method, setMethod] = useState<ResampleMethod>("bicubic");
-
-  useEffect(() => {
-    if (!kind || !canvas) return;
-    const size = documentSize(canvas);
-    setOriginal(size);
-    setWidth(size ? String(size.width) : "");
-    setHeight(size ? String(size.height) : "");
-  }, [kind, canvas]);
 
   const newWidth = wholeNumber(width);
   const newHeight = wholeNumber(height);
@@ -157,82 +176,230 @@ export function DocumentDialog({ canvas, kind, onClose, onResized }: DocumentDia
   const percent = (value: number | null, of: number | undefined) =>
     value !== null && of ? ` · ${Math.round((value / of) * 1000) / 10}%` : "";
 
-  const apply = async (event: FormEvent) => {
+  const apply = (event: FormEvent) => {
     event.preventDefault();
-    if (!canvas || !fits || same || newWidth === null || newHeight === null) return;
-    onClose();
-    const notice = toast.loading("Resizing…");
-    try {
-      const result = await resizeImage(canvas, { width: newWidth, height: newHeight, method });
-      if (typeof result === "string") toast.error(result, { id: notice });
-      else {
-        toast.dismiss(notice);
-        if (result) onResized();
-      }
-    } catch (error) {
-      console.error("Image size failed:", error);
-      toast.error("The image could not be resized", { id: notice });
-    }
+    if (!fits || same || newWidth === null || newHeight === null) return;
+    run("resize", (target) => resizeImage(target, { width: newWidth, height: newHeight, method }));
   };
 
   return (
-    <Dialog open={kind !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
-        {kind === "imageSize" && (
-          <form onSubmit={(event) => void apply(event)} className="grid gap-4">
-            <DialogHeader>
-              <DialogTitle>Image size</DialogTitle>
-              <DialogDescription>
-                {original
-                  ? `Now ${original.width} × ${original.height} pixels. Every pixel layer and mask is resampled; text and shapes stay sharp.`
-                  : "Open a photo first."}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex items-center gap-2">
-              <div className="grid gap-2">
-                <PixelField
-                  label="Width"
-                  value={width}
-                  onChange={changeWidth}
-                  invalid={newWidth === null || !fits}
-                  autoFocus
-                  suffix={percent(newWidth, original?.width)}
-                />
-                <PixelField
-                  label="Height"
-                  value={height}
-                  onChange={changeHeight}
-                  invalid={newHeight === null || !fits}
-                  suffix={percent(newHeight, original?.height)}
-                />
-              </div>
-              <Button
+    <form onSubmit={apply} className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>Image size</DialogTitle>
+        <DialogDescription>
+          {original
+            ? `Now ${original.width} × ${original.height} pixels. Every pixel layer and mask is resampled; text and shapes stay sharp.`
+            : "Open a photo first."}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex items-center gap-2">
+        <div className="grid gap-2">
+          <PixelField
+            label="Width"
+            value={width}
+            onChange={changeWidth}
+            invalid={newWidth === null || !fits}
+            autoFocus
+            suffix={percent(newWidth, original?.width)}
+          />
+          <PixelField
+            label="Height"
+            value={height}
+            onChange={changeHeight}
+            invalid={newHeight === null || !fits}
+            suffix={percent(newHeight, original?.height)}
+          />
+        </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Keep proportions"
+          aria-pressed={linked}
+          title="Keep proportions"
+          onClick={() => setLinked(!linked)}
+          className={cn("h-9 w-9 shrink-0", linked && "text-primary")}
+        >
+          {linked ? <Link2 className="h-4 w-4" /> : <Unlink2 className="h-4 w-4" />}
+        </Button>
+      </div>
+      {!fits && newWidth !== null && newHeight !== null && <p className="text-xs text-destructive">{LIMIT_TEXT}</p>}
+      <Segmented label="Resample" value={method} options={RESAMPLE_METHODS} onChange={setMethod} />
+      <Footer onClose={onClose} disabled={!canvas || !fits || same} />
+    </form>
+  );
+}
+
+const ANCHORS: { anchor: Anchor; label: string }[] = [0, 0.5, 1].flatMap((y) =>
+  [0, 0.5, 1].map((x) => ({
+    anchor: { x, y } as Anchor,
+    label:
+      x === 0.5 && y === 0.5
+        ? "Centre"
+        : `${y === 0 ? "Top" : y === 1 ? "Bottom" : "Middle"} ${x === 0 ? "left" : x === 1 ? "right" : "centre"}`,
+  }))
+);
+
+type Extension = "background" | "foreground" | "white" | "black" | "transparent";
+
+const EXTENSIONS: { value: Extension; label: string }[] = [
+  { value: "background", label: "Background" },
+  { value: "foreground", label: "Foreground" },
+  { value: "white", label: "White" },
+  { value: "black", label: "Black" },
+  { value: "transparent", label: "Transparent" },
+];
+
+function CanvasSizeForm({ canvas, onClose, run, colors }: FormProps & { colors: { foreground: string; background: string } }) {
+  const original = useDocumentSize(canvas);
+  const [width, setWidth] = useState(original ? String(original.width) : "");
+  const [height, setHeight] = useState(original ? String(original.height) : "");
+  const [anchor, setAnchor] = useState<Anchor>({ x: 0.5, y: 0.5 });
+  const [extension, setExtension] = useState<Extension>("background");
+
+  const newWidth = wholeNumber(width);
+  const newHeight = wholeNumber(height);
+  const fits = newWidth !== null && newHeight !== null && fitsLimits(newWidth, newHeight);
+  const same = original !== null && newWidth === original.width && newHeight === original.height;
+  const smaller = original !== null && fits && (newWidth! < original.width || newHeight! < original.height);
+  const change = (value: number | null, of: number | undefined) =>
+    value !== null && of !== undefined && value !== of ? ` · ${value > of ? "+" : "−"}${Math.abs(value - of)}` : "";
+
+  const apply = (event: FormEvent) => {
+    event.preventDefault();
+    if (!original || !fits || same || newWidth === null || newHeight === null) return;
+    const fill =
+      extension === "transparent"
+        ? null
+        : extension === "background"
+          ? colors.background
+          : extension === "foreground"
+            ? colors.foreground
+            : extension === "white"
+              ? "#ffffff"
+              : "#000000";
+    const rect = anchoredRect(original, { width: newWidth, height: newHeight }, anchor);
+    run("resize the canvas", (target) => recanvas(target, rect, fill));
+  };
+
+  return (
+    <form onSubmit={apply} className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>Canvas size</DialogTitle>
+        <DialogDescription>
+          {original
+            ? `Now ${original.width} × ${original.height} pixels. The photo grows or is cut at the edges; other layers stay where they are.`
+            : "Open a photo first."}
+        </DialogDescription>
+      </DialogHeader>
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="grid gap-2">
+          <PixelField
+            label="Width"
+            value={width}
+            onChange={setWidth}
+            invalid={newWidth === null || !fits}
+            autoFocus
+            suffix={change(newWidth, original?.width)}
+          />
+          <PixelField
+            label="Height"
+            value={height}
+            onChange={setHeight}
+            invalid={newHeight === null || !fits}
+            suffix={change(newHeight, original?.height)}
+          />
+        </div>
+        <div role="radiogroup" aria-label="Anchor" className="grid grid-cols-3 gap-1">
+          {ANCHORS.map(({ anchor: option, label }) => {
+            const checked = option.x === anchor.x && option.y === anchor.y;
+            return (
+              <button
+                key={label}
                 type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Keep proportions"
-                aria-pressed={linked}
-                title="Keep proportions"
-                onClick={() => setLinked(!linked)}
-                className={cn("h-9 w-9 shrink-0", linked && "text-primary")}
-              >
-                {linked ? <Link2 className="h-4 w-4" /> : <Unlink2 className="h-4 w-4" />}
-              </Button>
-            </div>
-            {!fits && newWidth !== null && newHeight !== null && (
-              <p className="text-xs text-destructive">{LIMIT_TEXT}</p>
-            )}
-            <Segmented label="Resample" value={method} options={RESAMPLE_METHODS} onChange={setMethod} />
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={!canvas || !fits || same}>
-                OK
-              </Button>
-            </DialogFooter>
-          </form>
-        )}
+                role="radio"
+                aria-checked={checked}
+                aria-label={label}
+                title={label}
+                onClick={() => setAnchor(option)}
+                className={cn(
+                  "h-7 w-7 rounded border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  checked ? "border-primary bg-primary" : "border-input hover:bg-accent"
+                )}
+              />
+            );
+          })}
+        </div>
+      </div>
+      {!fits && newWidth !== null && newHeight !== null && <p className="text-xs text-destructive">{LIMIT_TEXT}</p>}
+      {smaller && <p className="text-xs text-muted-foreground">The canvas is smaller: the photo is cut at the edges.</p>}
+      <Segmented label="Extension" value={extension} options={EXTENSIONS} onChange={setExtension} />
+      <Footer onClose={onClose} disabled={!canvas || !fits || same} />
+    </form>
+  );
+}
+
+const TRIM_BASES: { value: TrimBasis; label: string }[] = [
+  { value: "transparent", label: "Transparent pixels" },
+  { value: "topLeft", label: "Top-left colour" },
+  { value: "bottomRight", label: "Bottom-right colour" },
+];
+
+function TrimForm({ canvas, onClose, run }: FormProps) {
+  const [basis, setBasis] = useState<TrimBasis>("transparent");
+  const apply = (event: FormEvent) => {
+    event.preventDefault();
+    run("trim", (target) => trim(target, basis));
+  };
+  return (
+    <form onSubmit={apply} className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>Trim</DialogTitle>
+        <DialogDescription>Cut away the edges of the document that are empty or one plain colour.</DialogDescription>
+      </DialogHeader>
+      <Segmented label="Based on" value={basis} options={TRIM_BASES} onChange={setBasis} />
+      <Footer onClose={onClose} disabled={!canvas} />
+    </form>
+  );
+}
+
+interface DocumentDialogProps {
+  canvas: FabricCanvas | null;
+  /** The dialog shown, or null when closed. */
+  kind: DocumentDialogKind | null;
+  /** Foreground and background colours, for the canvas's new area. */
+  colors: { foreground: string; background: string };
+  onClose: () => void;
+  /** The document changed size; the view should fit it again. */
+  onResized: () => void;
+}
+
+/** Image › Image Size, Canvas Size and Trim. */
+export function DocumentDialog({ canvas, kind, colors, onClose, onResized }: DocumentDialogProps) {
+  const run: FormProps["run"] = (label, change) => {
+    if (!canvas) return;
+    onClose();
+    const notice = toast.loading("Working…");
+    change(canvas)
+      .then((result) => {
+        if (typeof result === "string") toast.error(result, { id: notice });
+        else {
+          toast.dismiss(notice);
+          if (result) onResized();
+        }
+      })
+      .catch((error: unknown) => {
+        console.error(`Could not ${label}:`, error);
+        toast.error(`Could not ${label} the image`, { id: notice });
+      });
+  };
+  const props = { canvas, onClose, run };
+  return (
+    <Dialog open={kind !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        {kind === "imageSize" && <ImageSizeForm {...props} />}
+        {kind === "canvasSize" && <CanvasSizeForm {...props} colors={colors} />}
+        {kind === "trim" && <TrimForm {...props} />}
       </DialogContent>
     </Dialog>
   );

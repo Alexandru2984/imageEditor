@@ -1,6 +1,6 @@
-import { FabricImage, util, type Canvas as FabricCanvas, type FabricObject, type TMat2D } from "fabric";
+import { FabricImage, Point, util, type Canvas as FabricCanvas, type FabricObject, type TMat2D } from "fabric";
 import { findBackgroundImage, isEditorChrome } from "@/utils/editorObjects";
-import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
+import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE, renderObjectsRegion } from "@/utils/flatten";
 import { documentGrid, selectionOf } from "@/selection/state";
 import { hasLayerMask, hydrateLayerMask, type MaskedImage } from "./layerMask";
 import { editSession, releaseSurface, surfaceToImage } from "./pixelLayer";
@@ -9,6 +9,8 @@ import { editSession, releaseSurface, surfaceToImage } from "./pixelLayer";
  * Photoshop's document-wide Image commands. The document is the photo's
  * frame: Image Size resamples every pixel layer (and its mask) so the
  * document has a new number of pixels; vector layers keep their shapes.
+ * Canvas Size, Trim and Reveal All move the frame's edges instead: the photo
+ * gains or loses pixels there and the other layers stay where they are.
  * Everything changes in one synchronous step, so it is one undo step.
  */
 
@@ -224,4 +226,209 @@ export async function resizeImage(
   } finally {
     busy.delete(canvas);
   }
+}
+
+// ---------- Canvas Size, Trim, Reveal All ----------
+
+/** A rectangle in document pixels; it may reach past the document. */
+export interface DocumentRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Where the old document sits in a new canvas: 0 at the start, 1 at the end. */
+export type Anchor = { x: 0 | 0.5 | 1; y: 0 | 0.5 | 1 };
+
+/** The new canvas, around the old document, for Canvas Size. */
+export function anchoredRect(
+  current: { width: number; height: number },
+  size: { width: number; height: number },
+  anchor: Anchor
+): DocumentRect {
+  return {
+    left: -Math.round((size.width - current.width) * anchor.x),
+    top: -Math.round((size.height - current.height) * anchor.y),
+    width: size.width,
+    height: size.height,
+  };
+}
+
+export type TrimBasis = "transparent" | "topLeft" | "bottomRight";
+
+/**
+ * What Trim keeps: the smallest rectangle around every pixel that is not
+ * transparent (or not the colour of the chosen corner). Null when nothing is
+ * left.
+ */
+export function trimBounds(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  basis: TrimBasis
+): DocumentRect | null {
+  const corner = basis === "bottomRight" ? (width * height - 1) * 4 : 0;
+  const reference = data.slice(corner, corner + 4);
+  const kept =
+    basis === "transparent"
+      ? (at: number) => data[at + 3]! > 0
+      : (at: number) =>
+          data[at] !== reference[0] ||
+          data[at + 1] !== reference[1] ||
+          data[at + 2] !== reference[2] ||
+          data[at + 3] !== reference[3];
+  let left = width;
+  let right = -1;
+  let top = height;
+  let bottom = -1;
+  for (let y = 0; y < height; y += 1) {
+    let at = y * width * 4;
+    for (let x = 0; x < width; x += 1, at += 4) {
+      if (!kept(at)) continue;
+      if (x < left) left = x;
+      if (x > right) right = x;
+      if (y < top) top = y;
+      bottom = y;
+    }
+  }
+  return right < 0 ? null : { left, top, width: right + 1 - left, height: bottom + 1 - top };
+}
+
+/**
+ * Make `rect` (in the current document's pixels) the document: the photo is
+ * cut down or extended there, the new area filled with `fill` (or left
+ * transparent), and every other layer stays put.
+ */
+export async function recanvas(
+  canvas: FabricCanvas,
+  rect: DocumentRect,
+  fill: string | null
+): Promise<boolean | Refusal> {
+  const refused = refusal(canvas);
+  if (refused) return refused;
+  if (!fitsLimits(rect.width, rect.height)) return "That size is too big for the editor";
+  const photo = findBackgroundImage(canvas)!;
+  const grid = documentGrid(canvas)!;
+  if ((photo.angle ?? 0) % 90 !== 0 || photo.skewX || photo.skewY) return "Straighten the photo first";
+  busy.add(canvas);
+  try {
+    canvas.discardActiveObject();
+    const objects = documentObjects(canvas);
+    // The rectangle in the photo's own pixels, counted from its crop.
+    const matrix = photo.calcTransformMatrix();
+    const inverse = util.invertTransform(matrix);
+    const toPhoto = (x: number, y: number) => {
+      const local = util.transformPoint(new Point(grid.left + x / grid.scale, grid.top + y / grid.scale), inverse);
+      return { x: local.x + photo.width / 2, y: local.y + photo.height / 2 };
+    };
+    const corners = [
+      toPhoto(rect.left, rect.top),
+      toPhoto(rect.left + rect.width, rect.top + rect.height),
+    ];
+    const left = Math.round(Math.min(corners[0]!.x, corners[1]!.x));
+    const top = Math.round(Math.min(corners[0]!.y, corners[1]!.y));
+    const width = Math.max(1, Math.round(Math.abs(corners[1]!.x - corners[0]!.x)));
+    const height = Math.max(1, Math.round(Math.abs(corners[1]!.y - corners[0]!.y)));
+    const from = shownRect(photo);
+
+    const extend = (source: CanvasImageSource, colour: string | null) => {
+      const surface = document.createElement("canvas");
+      surface.width = width;
+      surface.height = height;
+      const context = surface.getContext("2d");
+      if (!context) throw new Error("The browser could not prepare the new canvas");
+      if (colour) {
+        context.fillStyle = colour;
+        context.fillRect(0, 0, width, height);
+        // Only the new area: the photo's own transparency stays.
+        context.clearRect(-left, -top, from.width, from.height);
+      }
+      context.drawImage(source, from.x, from.y, from.width, from.height, -left, -top, from.width, from.height);
+      return surface;
+    };
+    const element = await encode(extend(sourceOf(photo), fill));
+    let mask: string | undefined;
+    if (hasLayerMask(photo)) {
+      // New area shows: a mask grows with white.
+      mask = (await encode(extend(await decode(photo.layerMask.src), "#ffffff"))).src;
+    }
+    if (!unchanged(canvas, objects)) return false;
+
+    const centre = util.transformPoint(
+      new Point(left + width / 2 - photo.width / 2, top + height / 2 - photo.height / 2),
+      matrix
+    );
+    photo.set({ cropX: 0, cropY: 0 });
+    photo.setElement(element, { width, height });
+    const masked = photo as MaskedImage;
+    if (mask && masked.layerMask) {
+      masked.layerMask = { src: mask, enabled: masked.layerMask.enabled };
+      void hydrateLayerMask(photo).then(() => canvas.requestRenderAll());
+    }
+    photo.setPositionByOrigin(centre, "center", "center");
+    photo.setCoords();
+    photo.dirty = true;
+    selectionOf(canvas).set(null);
+    canvas.fire("object:modified", { target: photo });
+    canvas.requestRenderAll();
+    return true;
+  } finally {
+    busy.delete(canvas);
+  }
+}
+
+/** The document as it shows, at its own pixels. */
+function renderDocument(canvas: FabricCanvas): ImageData {
+  const grid = documentGrid(canvas)!;
+  const { element } = renderObjectsRegion(
+    canvas,
+    { left: grid.left, top: grid.top, width: grid.width / grid.scale, height: grid.height / grid.scale },
+    grid.scale,
+    (object) => !isEditorChrome(object) && object.visible !== false
+  );
+  try {
+    const context = element.getContext("2d");
+    if (!context) throw new Error("The browser could not read the document");
+    return context.getImageData(0, 0, element.width, element.height);
+  } finally {
+    releaseSurface(element);
+  }
+}
+
+/** Image › Trim: cut the document down to what is not transparent (or a corner's colour). */
+export async function trim(canvas: FabricCanvas, basis: TrimBasis): Promise<boolean | Refusal> {
+  const refused = refusal(canvas);
+  if (refused) return refused;
+  const image = renderDocument(canvas);
+  const kept = trimBounds(image.data, image.width, image.height, basis);
+  if (!kept) return "Nothing would be left";
+  if (kept.left === 0 && kept.top === 0 && kept.width === image.width && kept.height === image.height) {
+    return "There is nothing to trim";
+  }
+  return recanvas(canvas, kept, null);
+}
+
+/** Image › Reveal All: grow the document to show every layer whole. */
+export async function revealAll(canvas: FabricCanvas, fill: string | null): Promise<boolean | Refusal> {
+  const refused = refusal(canvas);
+  if (refused) return refused;
+  const grid = documentGrid(canvas)!;
+  let left = 0;
+  let top = 0;
+  let right = grid.width;
+  let bottom = grid.height;
+  for (const object of documentObjects(canvas)) {
+    if (object.visible === false) continue;
+    object.setCoords();
+    const box = object.getBoundingRect();
+    left = Math.min(left, Math.floor((box.left - grid.left) * grid.scale + 1e-6));
+    top = Math.min(top, Math.floor((box.top - grid.top) * grid.scale + 1e-6));
+    right = Math.max(right, Math.ceil((box.left + box.width - grid.left) * grid.scale - 1e-6));
+    bottom = Math.max(bottom, Math.ceil((box.top + box.height - grid.top) * grid.scale - 1e-6));
+  }
+  if (left === 0 && top === 0 && right === grid.width && bottom === grid.height) {
+    return "Every layer already shows whole";
+  }
+  return recanvas(canvas, { left, top, width: right - left, height: bottom - top }, fill);
 }

@@ -41,6 +41,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "image.flipVertical",
       "-",
       "image.imageSize",
+      "image.canvasSize",
       "-",
       {
         label: "Adjustments",
@@ -64,6 +65,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       },
       "-",
       "tool.crop",
+      "image.trim",
+      "image.revealAll",
       "-",
       "ai.removeBackground",
       "ai.extractSubject",

@@ -980,6 +980,7 @@ export const EditorWorkspace = ({
       <DocumentDialog
         canvas={fabricCanvas}
         kind={documentDialog}
+        colors={{ foreground: activeColor, background: backgroundColor }}
         onClose={() => setDocumentDialog(null)}
         onResized={handleFit}
       />
