@@ -272,3 +272,22 @@ test("the layer style dialog fits the phone and styles the photo", async ({ page
     })
     .toBe(true);
 });
+
+test("Levels opens from the menu, fits the phone and applies", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#808080");
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "Image", exact: true }).tap();
+  await page.getByRole("menuitem", { name: "Adjustments", exact: true }).tap();
+  await page.getByRole("menuitem", { name: /^Levels/ }).tap();
+  const dialog = page.getByRole("dialog", { name: "Levels" });
+  const shadows = dialog.getByRole("slider", { name: "Shadows", exact: true });
+  await expectOnScreen(page, shadows);
+  await expectNoSidewaysScroll(page);
+  await shadows.focus();
+  await page.keyboard.press("End");
+  await dialog.getByRole("button", { name: "OK" }).tap();
+  await expect(dialog).toHaveCount(0);
+  await expect
+    .poll(async () => (await autosavedLayerPixels(page, "Background", [[200, 150]]))?.pixels[0]?.slice(0, 3))
+    .toEqual([0, 0, 0]);
+});

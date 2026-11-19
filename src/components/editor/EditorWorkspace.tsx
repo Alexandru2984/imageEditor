@@ -45,6 +45,7 @@ import { DEFAULT_WAND_OPTIONS, type WandOptions } from "@/selection/magicWand";
 import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import { LayerStyleDialog } from "./LayerStyleDialog";
+import { AdjustmentDialog, type AdjustmentKind } from "./adjustments/AdjustmentDialog";
 import { copySource, selectionLayer } from "@/selection/actions";
 import { selectionOf } from "@/selection/state";
 import { useMaskTarget } from "@/hooks/useMaskTarget";
@@ -478,6 +479,8 @@ export const EditorWorkspace = ({
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
   /** The layer the Layer style dialog is open for. */
   const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
+  /** The Image › Adjustments dialog that is open. */
+  const [adjustment, setAdjustment] = useState<AdjustmentKind | null>(null);
   const maskTargetLayer = useMaskTarget(fabricCanvas);
   const leaveMask = useCallback(() => {
     if (fabricCanvas) maskTargetOf(fabricCanvas).set(null);
@@ -547,6 +550,7 @@ export const EditorWorkspace = ({
     modifySelection: setSelectionModification,
     strokeSelection: openStrokeDialog,
     openLayerStyle: setStyledLayer,
+    openAdjustment: setAdjustment,
     colors: paintColors,
     adjustBrush,
     swapColors,
@@ -924,6 +928,7 @@ export const EditorWorkspace = ({
       />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} commands={commands} />
       <LayerStyleDialog canvas={fabricCanvas} layer={styledLayer} onClose={() => setStyledLayer(null)} />
+      <AdjustmentDialog canvas={fabricCanvas} kind={adjustment} onClose={() => setAdjustment(null)} />
       <SelectionModifyDialog
         canvas={fabricCanvas}
         modification={selectionModification}

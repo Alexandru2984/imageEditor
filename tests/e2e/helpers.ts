@@ -72,6 +72,14 @@ export async function chooseMenu(page: Page, menu: string, item: string) {
   await expect(page.getByRole("menu")).toHaveCount(0);
 }
 
+/** Choose an item from a submenu of the menu bar, e.g. Image › Adjustments › Levels…. */
+export async function chooseSubmenu(page: Page, menu: string, submenu: string, item: string) {
+  await page.getByRole("menuitem", { name: menu, exact: true }).click();
+  await page.getByRole("menuitem", { name: submenu, exact: true }).click();
+  await menuItem(page, item).click();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+}
+
 export const TOP_IMAGE = "__top_image__";
 
 export interface PaintedRect {

@@ -34,6 +34,9 @@ export const KEYMAP = {
   sendToBack: [{ key: "[", mod: true, shift: true }],
   lockLayer: [{ key: "/", mod: true }],
 
+  levels: [{ key: "l", mod: true }],
+  curves: [{ key: "m", mod: true }],
+
   flipHorizontal: [{ key: "h", shift: true }],
   flipVertical: [{ key: "v", shift: true }],
 

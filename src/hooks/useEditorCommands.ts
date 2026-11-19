@@ -94,6 +94,8 @@ import {
 } from "@/raster/layerMask";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
+import { adjustTarget } from "@/raster/pixelPreview";
+import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
 import type { PanelTab, Tool } from "@/types/editor";
 import {
   isBrushTool,
@@ -166,6 +168,8 @@ export interface EditorCommandContext {
   strokeSelection: () => void;
   /** Layer › Layer style's dialog, for a layer. */
   openLayerStyle: (layer: FabricObject) => void;
+  /** An Image › Adjustments dialog. */
+  openAdjustment: (kind: AdjustmentKind) => void;
   resetColors: () => void;
   openCommandPalette: () => void;
 }
@@ -230,6 +234,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     colors,
     strokeSelection,
     openLayerStyle,
+    openAdjustment,
     resetColors,
     openCommandPalette,
   } = context;
@@ -260,6 +265,15 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         return;
       }
       void editPixels(canvas, target, pixelSelection(), { kind: "fill", color }).catch(reportFailure);
+    };
+
+    /** Image › Adjustments act on the selected layer's pixels (or its mask). */
+    const canAdjust = () => !!canvas && typeof adjustTarget(canvas) !== "string";
+    const adjust = (kind: AdjustmentKind) => {
+      if (!canvas) return;
+      const target = adjustTarget(canvas);
+      if (typeof target === "string") toast.error(target);
+      else openAdjustment(kind);
     };
 
     /** The layer a layer style goes on: the selected one, else the photo. */
@@ -565,6 +579,22 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.flipVertical,
         run: () => flip("y"),
         keywords: "mirror upside down",
+      },
+      {
+        id: "image.adjust.levels",
+        label: "Levels…",
+        shortcuts: KEYMAP.levels,
+        run: () => adjust("levels"),
+        isEnabled: canAdjust,
+        keywords: "black point white point gamma midtones histogram auto",
+      },
+      {
+        id: "image.adjust.curves",
+        label: "Curves…",
+        shortcuts: KEYMAP.curves,
+        run: () => adjust("curves"),
+        isEnabled: canAdjust,
+        keywords: "tone curve contrast negative",
       },
       {
         id: "ai.removeBackground",
@@ -1185,6 +1215,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     colors,
     strokeSelection,
     openLayerStyle,
+    openAdjustment,
     togglePanel,
     undo,
     zoomIn,

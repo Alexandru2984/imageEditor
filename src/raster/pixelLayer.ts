@@ -26,6 +26,8 @@ interface EditSession {
   generation: number;
   /** A layer that does not join the document until its first stroke lands. */
   pending: boolean;
+  /** What the layer showed before, for {@link abandonPixelEdit}. */
+  original: CanvasImageSource | null;
 }
 
 const sessions = new WeakMap<FabricImage, EditSession>();
@@ -119,7 +121,7 @@ export function beginPixelEdit(image: FabricImage): EditSession {
   const { width, height } = image.getOriginalSize();
   const { surface, context } = createSurface(Math.round(width), Math.round(height));
   context.drawImage(source, 0, 0);
-  const session: EditSession = { surface, context, generation: 1, pending: false };
+  const session: EditSession = { surface, context, generation: 1, pending: false, original: source };
   sessions.set(image, session);
   showSurface(image, surface);
   owners.get(image)?.began(surface);
@@ -206,6 +208,30 @@ export async function commitPixelEdit(canvas: FabricCanvas, image: FabricImage):
   return true;
 }
 
+/**
+ * Give up on changes not yet committed: the layer shows its last committed
+ * pixels again, and nothing is recorded.
+ */
+export function abandonPixelEdit(canvas: FabricCanvas, image: FabricImage): void {
+  const session = sessions.get(image);
+  if (!session) return;
+  if (session.pending || !session.original) {
+    discardPendingLayer(canvas, image);
+    return;
+  }
+  // Any encode still running for this session is now stale.
+  sessions.delete(image);
+  const original = session.original as HTMLImageElement;
+  image.setElement(original, { width: image.width, height: image.height });
+  releaseSurface(session.surface);
+  const link = owners.get(image);
+  if (link) {
+    link.changed();
+    if (original instanceof HTMLImageElement) link.committed(original);
+  }
+  refreshPixelLayer(image, canvas);
+}
+
 /** "Layer 1", "Layer 2", … after the highest number in use. */
 export function nextLayerName(canvas: FabricCanvas): string {
   let highest = 0;
@@ -262,7 +288,7 @@ export function createPendingLayer(canvas: FabricCanvas): FabricImage | null {
   layer.__isPreview = true;
   layer.excludeFromExport = true;
   ensureLayerId(layer);
-  sessions.set(layer, { surface, context, generation: 1, pending: true });
+  sessions.set(layer, { surface, context, generation: 1, pending: true, original: null });
   canvas.add(layer);
   return layer;
 }

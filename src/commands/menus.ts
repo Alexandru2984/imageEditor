@@ -39,6 +39,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "image.flipHorizontal",
       "image.flipVertical",
       "-",
+      { label: "Adjustments", items: ["image.adjust.levels", "image.adjust.curves"] },
+      "-",
       "tool.crop",
       "-",
       "ai.removeBackground",
