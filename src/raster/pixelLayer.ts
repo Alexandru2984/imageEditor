@@ -4,7 +4,8 @@ import {
   findBackgroundImage,
   isBackgroundObject,
   isEditorChrome,
-  isObjectLocked,
+  isPixelsLocked,
+  isTransparencyLocked,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
@@ -28,6 +29,8 @@ interface EditSession {
   pending: boolean;
   /** What the layer showed before, for {@link abandonPixelEdit}. */
   original: CanvasImageSource | null;
+  /** The layer's alpha when its transparent pixels are locked: edits keep it. */
+  alpha?: Uint8ClampedArray | null;
 }
 
 const sessions = new WeakMap<FabricImage, EditSession>();
@@ -71,7 +74,7 @@ export const isPaintableLayer = (object: FabricObject | undefined | null): objec
   object instanceof FabricImage &&
   !isEditorChrome(object) &&
   !isBackgroundObject(object) &&
-  !isObjectLocked(object);
+  !isPixelsLocked(object);
 
 /** A layer still waiting for its first stroke to be committed. */
 export const isPendingLayer = (image: FabricImage): boolean => sessions.get(image)?.pending === true;
@@ -115,6 +118,7 @@ export function beginPixelEdit(image: FabricImage): EditSession {
   const existing = sessions.get(image);
   if (existing && originalElement(image) === existing.surface) {
     existing.generation += 1;
+    keepAlphaOf(image, existing);
     return existing;
   }
   const source = originalElement(image);
@@ -125,11 +129,61 @@ export function beginPixelEdit(image: FabricImage): EditSession {
   sessions.set(image, session);
   showSurface(image, surface);
   owners.get(image)?.began(surface);
+  keepAlphaOf(image, session);
   return session;
+}
+
+/** A layer's own pixels (not its mask's) with Lock transparent pixels on. */
+const keepsAlpha = (image: FabricImage) => !owners.has(image) && isTransparencyLocked(image);
+
+/** Remember the alpha to keep while the lock is on, from the pixels as they are now. */
+function keepAlphaOf(image: FabricImage, session: EditSession): void {
+  if (!keepsAlpha(image)) {
+    session.alpha = null;
+    return;
+  }
+  if (session.alpha) return;
+  const { width, height } = session.surface;
+  const data = session.context.getImageData(0, 0, width, height).data;
+  const alpha = new Uint8ClampedArray(width * height);
+  for (let index = 0; index < alpha.length; index += 1) alpha[index] = data[index * 4 + 3]!;
+  session.alpha = alpha;
+}
+
+/**
+ * Put back the alpha the layer had where an edit changed it, so paint only
+ * changes the colour of pixels already there (Lock transparent pixels).
+ */
+function restoreAlpha(session: EditSession, rect?: PixelRect): void {
+  const alpha = session.alpha;
+  if (!alpha) return;
+  const { surface, context } = session;
+  const left = Math.max(0, Math.floor(rect?.left ?? 0));
+  const top = Math.max(0, Math.floor(rect?.top ?? 0));
+  const right = Math.min(surface.width, Math.ceil(rect?.right ?? surface.width));
+  const bottom = Math.min(surface.height, Math.ceil(rect?.bottom ?? surface.height));
+  if (right <= left || bottom <= top) return;
+  const pixels = context.getImageData(left, top, right - left, bottom - top);
+  const data = pixels.data;
+  let changed = false;
+  for (let y = top; y < bottom; y += 1) {
+    let from = y * surface.width + left;
+    let at = ((y - top) * (right - left)) * 4 + 3;
+    for (let x = left; x < right; x += 1, from += 1, at += 4) {
+      const kept = alpha[from]!;
+      if (data[at] !== kept) {
+        data[at] = kept;
+        changed = true;
+      }
+    }
+  }
+  if (changed) context.putImageData(pixels, left, top);
 }
 
 /** Redraw the layer after its surface changed (in `rect`, or anywhere). */
 export function refreshPixelLayer(image: FabricImage, canvas: FabricCanvas, rect?: PixelRect): void {
+  const session = sessions.get(image);
+  if (session?.alpha && keepsAlpha(image)) restoreAlpha(session, rect);
   if (image.filters.length > 0) {
     // The filter backend caches the source texture by key.
     image.removeTexture(image.cacheKey);
@@ -180,6 +234,8 @@ export function releaseSurface(surface: HTMLCanvasElement): void {
 export async function commitPixelEdit(canvas: FabricCanvas, image: FabricImage): Promise<boolean> {
   const session = sessions.get(image);
   if (!session) return false;
+  // Whatever drew without a refresh keeps the layer's alpha too.
+  if (session.alpha && keepsAlpha(image)) restoreAlpha(session);
   const generation = session.generation;
   const element = await surfaceToImage(session.surface);
   const link = owners.get(image);

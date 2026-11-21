@@ -1,5 +1,5 @@
 import { ActiveSelection, FabricImage, type Canvas as FabricCanvas } from "fabric";
-import { findBackgroundImage, isEditorChrome, isObjectLocked } from "@/utils/editorObjects";
+import { findBackgroundImage, isEditorChrome, isObjectLocked, isPixelsLocked } from "@/utils/editorObjects";
 import {
   beginPixelEdit,
   commitPixelEdit,
@@ -30,6 +30,7 @@ const refusalFor = (object: unknown): Refusal | null => {
   if (object instanceof ActiveSelection) return "Select a single layer first";
   if (!(object instanceof FabricImage)) return "Rasterize the layer first (Layer › Rasterize)";
   if (isObjectLocked(object)) return "Unlock the layer first";
+  if (isPixelsLocked(object)) return "The layer's pixels are locked";
   if (object.visible === false) return "Show the layer first";
   return null;
 };

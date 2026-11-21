@@ -6,7 +6,16 @@ import { repaired } from "@/layers/layerTree";
 export type EditorFabricObject = FabricObject & {
   __isBackground?: boolean;
   __layerId?: string;
+  /** Lock all (Photoshop's padlock): no moving, painting or changing it. */
   __locked?: boolean;
+  /** Painting changes colour only where the layer already has pixels. */
+  __lockTransparency?: boolean;
+  /** No painting, filters or adjustments; it can still move. */
+  __lockPixels?: boolean;
+  /** No moving or transforming; it can still be painted on. */
+  __lockPosition?: boolean;
+  /** Fill opacity: the layer's own pixels fade, its effects do not (0–1). */
+  __fill?: number;
   __isCropOverlay?: boolean;
   __isMarquee?: boolean;
   __isPreview?: boolean;
@@ -66,6 +75,7 @@ export const isBackgroundObject = (object: FabricObject): boolean =>
 export const isObjectLocked = (object: FabricObject): boolean => {
   const editorObject = object as EditorFabricObject;
   if (editorObject.__locked === true) return true;
+  if (editorObject.__locked === false || editorObject.__lockPosition === true) return false;
   // Migrate layers locked by older builds, which did not persist __locked.
   return (
     object.lockMovementX === true &&
@@ -106,16 +116,66 @@ export function markBackgroundObject(image: FabricImage): void {
 export function setObjectLocked(object: FabricObject, locked: boolean): void {
   // Group markers are never picked on the canvas; their group locks through its layers.
   if (isBackgroundObject(object) || isGroupMarker(object)) return;
-  const editorObject = object as EditorFabricObject;
-  editorObject.__locked = locked;
-  editorObject.erasable = !locked;
+  (object as EditorFabricObject).__locked = locked;
+  applyLockFlags(object);
+}
+
+/** Photoshop's four layer locks. */
+export type LayerLock = "transparency" | "pixels" | "position" | "all";
+
+const LOCK_KEYS = {
+  transparency: "__lockTransparency",
+  pixels: "__lockPixels",
+  position: "__lockPosition",
+} as const;
+
+/** Whether a layer has that lock itself on (Lock all implies none of the others). */
+export function hasLayerLock(object: FabricObject, lock: LayerLock): boolean {
+  if (lock === "all") return isObjectLocked(object);
+  return (object as EditorFabricObject)[LOCK_KEYS[lock]] === true;
+}
+
+/** Turn one of the four locks on or off. */
+export function setLayerLock(object: FabricObject, lock: LayerLock, on: boolean): void {
+  if (isBackgroundObject(object) || isGroupMarker(object)) return;
+  if (lock === "all") {
+    setObjectLocked(object, on);
+    return;
+  }
+  // Off is no setting at all, so files only carry the locks in use.
+  (object as EditorFabricObject)[LOCK_KEYS[lock]] = on ? true : undefined;
+  applyLockFlags(object);
+}
+
+/** Its pixels cannot be painted, filtered or adjusted. */
+export const isPixelsLocked = (object: FabricObject): boolean =>
+  isObjectLocked(object) || (object as EditorFabricObject).__lockPixels === true;
+
+/** Painting keeps its transparent pixels transparent. */
+export const isTransparencyLocked = (object: FabricObject): boolean =>
+  (object as EditorFabricObject).__lockTransparency === true;
+
+/** It, or any layer of a multiple selection, cannot be moved or transformed. */
+export const isMoveLocked = (object: FabricObject): boolean =>
+  isObjectLocked(object) ||
+  (object as EditorFabricObject).__lockPosition === true ||
+  (object instanceof ActiveSelection && object.getObjects().some(isMoveLocked));
+
+/** Fabric's own flags, from the layer's locks. */
+function applyLockFlags(object: FabricObject): void {
+  const layer = object as EditorFabricObject;
+  const all = layer.__locked === true;
+  const fixed = all || layer.__lockPosition === true;
+  layer.erasable = !(all || layer.__lockPixels === true);
   object.set({
-    lockMovementX: locked,
-    lockMovementY: locked,
-    lockRotation: locked,
-    lockScalingX: locked,
-    lockScalingY: locked,
-    hasControls: !locked,
+    lockMovementX: fixed,
+    lockMovementY: fixed,
+    lockRotation: fixed,
+    lockScalingX: fixed,
+    lockScalingY: fixed,
+    lockSkewingX: fixed,
+    lockSkewingY: fixed,
+    hasControls: !fixed,
     // A locked layer remains selectable from the canvas and Layers panel.
     // The lock flags prevent transforms while selection enables inspection.
     selectable: true,
@@ -161,6 +221,8 @@ export function normalizeEditorObjects(
     } else if (isObjectLocked(object)) {
       // This also repairs the old lock implementation's selectable=false.
       setObjectLocked(object, true);
+    } else if (hasLayerLock(object, "position") || hasLayerLock(object, "pixels")) {
+      applyLockFlags(object);
     } else {
       (object as EditorFabricObject).erasable = true;
     }

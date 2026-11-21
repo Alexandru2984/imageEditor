@@ -256,10 +256,17 @@ export function LayerRow({
             onClick={(event) => handlers.onToggleLock(layer, event)}
             className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground disabled:pointer-events-none",
-              !layer.locked && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
+              !layer.locked && !layer.partlyLocked && "opacity-0 focus-visible:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
             )}
           >
-            {layer.locked ? <Lock className="h-3 w-3 text-amber-500" /> : <Unlock className="h-3 w-3" />}
+            {layer.locked ? (
+              <Lock className="h-3 w-3 text-amber-500" />
+            ) : layer.partlyLocked ? (
+              // Photoshop's hollow padlock: some locks are on.
+              <Lock aria-hidden className="h-3 w-3 opacity-60" />
+            ) : (
+              <Unlock className="h-3 w-3" />
+            )}
           </button>
         )}
 

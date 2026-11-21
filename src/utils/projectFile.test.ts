@@ -349,6 +349,16 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts the layer locks and Fill, and rejects malformed ones", async () => {
+    const layer = { type: "rect", __lockTransparency: true, __lockPixels: true, __lockPosition: true, __fill: 0.25 };
+    const ok = { json: JSON.stringify({ objects: [layer] }), srcs: [] };
+    await expect(readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: ok })))).resolves.toEqual(ok);
+    for (const bad of [{ __lockPixels: "yes" }, { __lockPosition: 1 }, { __lockTransparency: null }, { __fill: 2 }, { __fill: "0.5" }]) {
+      const snapshot = { json: JSON.stringify({ objects: [{ type: "rect", ...bad }] }), srcs: [] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot }))), JSON.stringify(bad)).rejects.toThrow();
+    }
+  });
+
   it("accepts a layer style the editor writes", async () => {
     const style = {
       dropShadow: { enabled: true, color: "#000000", opacity: 75, angle: 120, distance: 10, size: 10 },

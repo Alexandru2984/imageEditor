@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
-import { isReadOnlySelection } from "@/utils/editorObjects";
+import { isMoveLocked, isReadOnlySelection } from "@/utils/editorObjects";
 import { matchesShortcut } from "@/commands/shortcuts";
 import type { Command } from "@/commands/types";
 
@@ -59,7 +59,7 @@ export function useKeyboardShortcuts({ canvas, commands }: UseKeyboardShortcutsO
         const active = canvas?.getActiveObject();
         if (!canvas || !active) return;
         e.preventDefault();
-        if (isReadOnlySelection(active)) return;
+        if (isReadOnlySelection(active) || isMoveLocked(active)) return;
         const step = e.shiftKey ? 10 : 1;
         if (e.key === "ArrowLeft") active.left -= step;
         else if (e.key === "ArrowRight") active.left += step;

@@ -223,6 +223,12 @@ function drawOutline(
 
 let renderPlain: (this: FabricObject, ctx: CanvasRenderingContext2D) => void;
 
+/** A layer's Fill opacity (Layers panel), 0–1. */
+export function fillOf(object: FabricObject): number {
+  const fill = (object as FabricObject & { __fill?: unknown }).__fill;
+  return typeof fill === "number" && Number.isFinite(fill) ? Math.min(1, Math.max(0, fill)) : 1;
+}
+
 function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style: LayerStyle) {
   const internals = object as unknown as RenderInternals;
   const base = ctx.getTransform();
@@ -301,7 +307,10 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
       castShadow(out, content.element, width, height, glow, outerGlow.size * devicePerDoc, 0, 0);
       castShadow(out, content.element, width, height, glow, (outerGlow.size * devicePerDoc) / 3, 0, 0);
     }
+    // Fill opacity fades the layer's own pixels, not its effects.
+    out.globalAlpha = fillOf(object);
     out.drawImage(content.element, 0, 0, width, height, 0, 0, width, height);
+    out.globalAlpha = 1;
 
     if (colorOverlay?.enabled && colorOverlay.opacity > 0) {
       const overlay = contextOf(extra.element, width, height);
@@ -370,7 +379,19 @@ export function installLayerStyles(): void {
   prototype.render = function (this: StyledObject, ctx: CanvasRenderingContext2D) {
     const style = this.layerStyle;
     if (!hasEffects(style) || this.isNotVisible()) {
-      render.call(this, ctx);
+      const fill = fillOf(this);
+      if (fill >= 1) {
+        render.call(this, ctx);
+        return;
+      }
+      // Without effects, Fill is one more opacity.
+      const opacity = this.opacity;
+      this.opacity = opacity * fill;
+      try {
+        render.call(this, ctx);
+      } finally {
+        this.opacity = opacity;
+      }
       return;
     }
     depth += 1;

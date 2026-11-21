@@ -1,5 +1,5 @@
 import { ActiveSelection, FabricImage, Point, util, type Canvas as FabricCanvas } from "fabric";
-import { isBackgroundObject, isEditorChrome, isObjectLocked } from "@/utils/editorObjects";
+import { isBackgroundObject, isEditorChrome, isMoveLocked, isObjectLocked, isPixelsLocked } from "@/utils/editorObjects";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
 import { shownRect, sourceOf, type SourceRect } from "./documentSize";
 import { hasLayerMask, hydrateLayerMask, type MaskedImage } from "./layerMask";
@@ -25,6 +25,8 @@ export function warpTarget(canvas: FabricCanvas): FabricImage | Refusal {
   if (active instanceof ActiveSelection) return "Select a single layer";
   if (!(active instanceof FabricImage) || isBackgroundObject(active)) return "Rasterize the layer first";
   if (isObjectLocked(active)) return "Unlock the layer first";
+  if (isMoveLocked(active)) return "The layer's position is locked";
+  if (isPixelsLocked(active)) return "The layer's pixels are locked";
   if (editSession(active)) return "Finish painting first";
   return active;
 }

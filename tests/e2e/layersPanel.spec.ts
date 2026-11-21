@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { autosavedLayerPixels, autosavedObjects, chooseMenu, uploadSolidImage } from "./helpers";
+import { autosavedLayerPixels, autosavedObjects, canvasCenter, chooseMenu, uploadSolidImage } from "./helpers";
 import { BLACK, dragRow, GREY, paintedLayer, shown, stack, WHITE } from "./layerHelpers";
 
 test.beforeEach(async ({ page }, testInfo) => {
@@ -185,4 +185,107 @@ test("the list filters by kind and name, and a layer's effects turn on and off f
     .toBe(false);
   await expect.poll(() => shown(page, [-60, 0])).toEqual(BLACK);
   await expect(page.getByRole("button", { name: "Show the colour overlay of Layer 1" })).toBeVisible();
+});
+
+/** A tool by its key, once its options show. */
+async function arm(page: Page, key: string, name: string) {
+  await page.keyboard.press(key);
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText(name);
+}
+
+/** A stroke across the canvas, at `dy` from its centre, between two offsets. */
+async function brushStroke(page: Page, from: number, to: number, dy = 0) {
+  const center = await canvasCenter(page);
+  await page.mouse.move(center.x + from, center.y + dy);
+  await page.mouse.down();
+  await page.mouse.move(center.x + to, center.y + dy, { steps: 12 });
+  await page.mouse.up();
+}
+
+const layerOf = async (page: Page, name: string) => (await autosavedObjects(page)).find((object) => object.name === name)!;
+
+test("Fill fades a layer's own pixels but not its effects", async ({ page }) => {
+  await twoLayers(page);
+  await row(page, "Layer 2").click();
+  await chooseMenu(page, "Layer", "Layer style…");
+  const dialog = page.getByRole("dialog", { name: "Layer style" });
+  await dialog.getByLabel("Stroke", { exact: true }).check();
+  await dialog.getByRole("button", { name: "OK" }).click();
+  // The white square, and its black stroke just outside its left edge.
+  await expect.poll(() => shown(page, [60, 0])).toEqual(WHITE);
+  await expect.poll(async () => (await shown(page, [17, 0]))[0]).toBeLessThan(40);
+
+  const fill = page.getByRole("slider", { name: "Layer fill" });
+  await fill.focus();
+  await page.keyboard.press("Home");
+  await expect.poll(async () => (await layerOf(page, "Layer 2")).__fill).toBe(0);
+  await expect.poll(() => shown(page, [60, 0])).toEqual(GREY);
+  expect((await shown(page, [17, 0]))[0]).toBeLessThan(40);
+  // Opacity still fades everything.
+  expect((await layerOf(page, "Layer 2")).opacity).toBe(1);
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => shown(page, [60, 0])).toEqual(WHITE);
+});
+
+test("Lock transparent pixels keeps the brush and the eraser inside the layer's pixels", async ({ page }) => {
+  await twoLayers(page);
+  await row(page, "Layer 1").click();
+  await page.getByRole("button", { name: "Lock transparent pixels" }).click();
+  await expect.poll(async () => (await layerOf(page, "Layer 1")).__lockTransparency).toBe(true);
+  await expect(page.getByRole("button", { name: "Lock transparent pixels" })).toHaveAttribute("aria-pressed", "true");
+
+  // White over the black square and past both its sides.
+  await page.keyboard.press("d");
+  await page.keyboard.press("x");
+  await arm(page, "b", "Brush");
+  await brushStroke(page, -130, 10);
+  await expect.poll(() => shown(page, [-60, 0])).toEqual(WHITE);
+  expect(await shown(page, [-120, 0])).toEqual(GREY);
+  expect(await shown(page, [0, 0])).toEqual(GREY);
+
+  // The eraser paints the background colour (black now) instead of making holes.
+  await arm(page, "e", "Eraser");
+  await brushStroke(page, -130, 10, 30);
+  await expect.poll(() => shown(page, [-60, 30])).toEqual(BLACK);
+  expect(await shown(page, [-120, 30])).toEqual(GREY);
+  expect(await shown(page, [-60, 0])).toEqual(WHITE);
+});
+
+test("Lock image pixels sends the brush to a new layer, and Lock position keeps the layer in place", async ({ page }) => {
+  await twoLayers(page);
+  await row(page, "Layer 1").click();
+  await page.getByRole("button", { name: "Lock image pixels" }).click();
+  await expect.poll(async () => (await layerOf(page, "Layer 1")).__lockPixels).toBe(true);
+  // A hollow padlock on the row; the row's own padlock still locks all.
+  await expect(row(page, "Layer 1").getByRole("button", { name: "Lock Layer 1" })).toBeVisible();
+
+  await page.keyboard.press("d");
+  await arm(page, "b", "Brush");
+  await brushStroke(page, -80, -40);
+  await expect.poll(() => stack(page)).toEqual(["Background", "Layer 1", "Layer 2", "Layer 3"]);
+
+  // Lock position: arrows and drags with the Move tool leave it where it is.
+  await row(page, "Layer 2").click();
+  await page.getByRole("button", { name: "Lock position" }).click();
+  await expect.poll(async () => (await layerOf(page, "Layer 2")).__lockPosition).toBe(true);
+  const before = await layerOf(page, "Layer 2");
+  await arm(page, "v", "Move");
+  await page.keyboard.press("ArrowRight");
+  await brushStroke(page, 60, 140);
+  await page.waitForTimeout(300);
+  const after = await layerOf(page, "Layer 2");
+  expect([after.left, after.top]).toEqual([before.left, before.top]);
+
+  // Locks survive a reload.
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await page.getByRole("tab", { name: "Layers" }).click();
+  await row(page, "Layer 2").click();
+  await expect(page.getByRole("button", { name: "Lock position" })).toHaveAttribute("aria-pressed", "true");
+  await arm(page, "v", "Move");
+  await page.keyboard.press("ArrowRight");
+  await page.waitForTimeout(300);
+  expect((await layerOf(page, "Layer 2")).left).toEqual(before.left);
 });

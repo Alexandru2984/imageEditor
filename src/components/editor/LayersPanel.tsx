@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
-import { CircleDot, FolderPlus, Layers, MoreHorizontal, Pencil, Search, SquareDashed, SquarePlus, Trash2 } from "lucide-react";
+import { Brush, CircleDot, FolderPlus, Grid2x2, Layers, Lock, MoreHorizontal, Move, Pencil, Search, SquareDashed, SquarePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -32,13 +32,17 @@ import { selectionModeOf, selectLayerPixels } from "@/selection/layerPixels";
 import { BLEND_MODES, DEFAULT_BLEND_MODE, objectThumbnail } from "@/utils/blendModes";
 import {
   ensureLayerId,
+  hasLayerLock,
   isBackgroundObject,
   isEditorChrome,
   isLayerObject,
   isObjectLocked,
   isProtectedObject,
+  setLayerLock,
   setObjectLocked,
+  type LayerLock,
 } from "@/utils/editorObjects";
+import { fillOf } from "@/raster/layerStyle";
 import { cn } from "@/lib/utils";
 import { CommandDropdownItems } from "./EditorMenus";
 import { LayerRow, type LayerRowHandlers } from "./layers/LayerRow";
@@ -59,6 +63,13 @@ const MAX_CACHED_THUMBNAILS = 160;
 
 /** A group's blend mode when its layers blend straight into what is below. */
 const PASS_THROUGH = "pass-through";
+
+const LOCKS: { lock: LayerLock; label: string; icon: typeof Lock }[] = [
+  { lock: "transparency", label: "Lock transparent pixels", icon: Grid2x2 },
+  { lock: "pixels", label: "Lock image pixels", icon: Brush },
+  { lock: "position", label: "Lock position", icon: Move },
+  { lock: "all", label: "Lock all", icon: Lock },
+];
 
 const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: "all", label: "All kinds" },
@@ -272,6 +283,9 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
       ? PASS_THROUGH
       : (primary?.globalCompositeOperation as string) || DEFAULT_BLEND_MODE;
   const selectedOpacity = Math.round((primary?.opacity ?? 1) * 100);
+  const selectedFill = Math.round((primary ? fillOf(primary) : 1) * 100);
+  // The layers (not groups, nor the photo) the locks and Fill apply to.
+  const lockable = selection.filter((object) => !isGroupHeader(object) && !isBackgroundObject(object));
 
   const handleBlendModeChange = (value: string) => {
     if (!fabricCanvas || !primary || selectionLocked) return;
@@ -291,6 +305,28 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
     // Reflect the new value without waiting for a full refresh.
     setLayers((previous) => [...previous]);
     scheduleOpacityCommit(primary);
+  };
+
+  const handleFillChange = (value: number[]) => {
+    const fill = value[0];
+    if (!fabricCanvas || !primary || selectionLocked || fill === undefined || lockable.length === 0) return;
+    for (const object of lockable) {
+      // Full is no setting at all.
+      (object as EditorObject).__fill = fill >= 100 ? undefined : fill / 100;
+      object.dirty = true;
+    }
+    fabricCanvas.requestRenderAll();
+    setLayers((previous) => [...previous]);
+    scheduleOpacityCommit(lockable[0]!);
+  };
+
+  const toggleLock = (lock: LayerLock) => {
+    if (!fabricCanvas || lockable.length === 0) return;
+    const on = !lockable.every((object) => hasLayerLock(object, lock));
+    for (const object of lockable) setLayerLock(object, lock, on);
+    fabricCanvas.fire("object:modified", { target: lockable[0]! });
+    fabricCanvas.requestRenderAll();
+    scheduleRefresh();
   };
 
   // ---------- Selecting ----------
@@ -690,6 +726,43 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
             className="flex-1"
           />
           <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">{selectedOpacity}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div role="group" aria-label="Lock" className="flex shrink-0 items-center">
+            {LOCKS.map(({ lock, label, icon: Icon }) => {
+              const pressed = lockable.length > 0 && lockable.every((object) => hasLayerLock(object, lock));
+              return (
+                <button
+                  key={lock}
+                  type="button"
+                  aria-label={label}
+                  title={label}
+                  aria-pressed={pressed}
+                  disabled={lockable.length === 0}
+                  onClick={() => toggleLock(lock)}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+                    pressed && "bg-primary/15 text-primary"
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                </button>
+              );
+            })}
+          </div>
+          <Label className="ml-1 shrink-0 text-xs text-muted-foreground">Fill</Label>
+          <Slider
+            value={[selectedFill]}
+            aria-label="Layer fill"
+            disabled={lockable.length === 0 || selectionLocked}
+            onValueChange={handleFillChange}
+            onValueCommit={flushOpacityCommit}
+            min={0}
+            max={100}
+            step={1}
+            className="min-w-0 flex-1"
+          />
+          <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">{selectedFill}</span>
         </div>
       </div>
 

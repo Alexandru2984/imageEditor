@@ -106,6 +106,7 @@ const NUMERIC_PROPERTY_LIMITS = new Map<
   { min: number; max: number }
 >([
   ["opacity", { min: 0, max: 1 }],
+  ["__fill", { min: 0, max: 1 }],
   ["width", { min: 0, max: MAX_OBJECT_DIMENSION }],
   ["height", { min: 0, max: MAX_OBJECT_DIMENSION }],
   ["radius", { min: 0, max: MAX_OBJECT_DIMENSION }],
@@ -422,6 +423,9 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
       }
       if ((key === "__clipped" || key === "passThrough" || key === "collapsed") && typeof child !== "boolean") {
         throw new Error("Project contains an invalid layer group setting");
+      }
+      if ((key === "__lockTransparency" || key === "__lockPixels" || key === "__lockPosition") && typeof child !== "boolean") {
+        throw new Error("Project contains an invalid layer lock");
       }
       if (key === "layerStyle") {
         if (!isValidLayerStyle(child)) throw new Error("Project contains an invalid layer style");

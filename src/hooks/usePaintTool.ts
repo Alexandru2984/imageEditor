@@ -19,7 +19,7 @@ import { greyOf } from "@/raster/maskPixels";
 import { constrainAngle, drawGradient, type GradientOptions } from "@/raster/gradient";
 import type { PaintOptions } from "@/raster/paintSettings";
 import type { StrokePoint } from "@/raster/stroke";
-import { ensureLayerId, type EditorFabricObject } from "@/utils/editorObjects";
+import { ensureLayerId, type EditorFabricObject, isTransparencyLocked } from "@/utils/editorObjects";
 import { nativeMultiplier } from "@/utils/flatten";
 import { releaseCanvas, restrictToClip, selectionClip, snapshotSurface } from "@/selection/clip";
 import { sceneToGrid, selectionOf } from "@/selection/state";
@@ -352,6 +352,9 @@ export function usePaintTool({
       const layer = target.pixels;
       const { paint: options, color, secondaryColor } = settingsRef.current;
       const session = beginPixelEdit(layer);
+      // With its transparent pixels locked, the eraser paints the background
+      // colour instead of taking pixels away, as in Photoshop (and on masks).
+      const keepAlpha = !target.mask && isTransparencyLocked(layer);
       // Sizes are in image pixels; this layer may be stored at another scale.
       const layerPerImagePixel = layerPixelsPerSceneUnit(layer) / nativeMultiplier(canvas);
       const painter = new StrokePainter(session.surface, {
@@ -360,8 +363,8 @@ export function usePaintTool({
         opacity: options.opacity / 100,
         flow: options.flow / 100,
         // The eraser paints the background colour on a mask, as in Photoshop.
-        color: paintColor(target.mask && erasing ? secondaryColor : color, target.mask),
-        erase: erasing && !target.mask,
+        color: paintColor((target.mask || keepAlpha) && erasing ? secondaryColor : color, target.mask),
+        erase: erasing && !target.mask && !keepAlpha,
         // A second finger turns the stroke into a pinch; it must be undone.
         cancellable: (event as PointerEvent).pointerType === "touch",
         clip: clipFor(layer, session.surface),

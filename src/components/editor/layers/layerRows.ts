@@ -30,6 +30,8 @@ export interface LayerItem {
   /** Its own eye is on, but a group around it is hidden. */
   hiddenByGroup: boolean;
   locked: boolean;
+  /** Some of Photoshop's other locks are on (transparency, pixels, position). */
+  partlyLocked: boolean;
   isBackground: boolean;
   thumbnail: string;
   /** The layer mask, when the layer has one. */
@@ -141,6 +143,7 @@ export function layerRows(objects: readonly FabricObject[], filter: RowFilter = 
           visible: object.visible !== false,
           hiddenByGroup: hidden.has(object),
           locked: false,
+          partlyLocked: false,
           isBackground: false,
           thumbnail: "",
           mask: null,
@@ -164,6 +167,7 @@ export function layerRows(objects: readonly FabricObject[], filter: RowFilter = 
         visible: object.visible !== false,
         hiddenByGroup: hidden.has(object),
         locked: isBackground || isObjectLocked(object),
+        partlyLocked: !!(object.__lockTransparency || object.__lockPixels || object.__lockPosition),
         isBackground,
         thumbnail: "",
         mask: hasLayerMask(object) ? { thumbnail: layerMaskThumbnail(object), enabled: object.layerMask.enabled } : null,

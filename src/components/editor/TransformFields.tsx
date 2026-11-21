@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import { Link2, Unlink2 } from "lucide-react";
-import { isEditorChrome, isObjectLocked } from "@/utils/editorObjects";
+import { isEditorChrome, isMoveLocked } from "@/utils/editorObjects";
 import { nativeMultiplier } from "@/utils/flatten";
 import { cn } from "@/lib/utils";
 
@@ -112,7 +112,7 @@ export function TransformFields({ canvas }: { canvas: FabricCanvas | null }) {
       frame = requestAnimationFrame(() => {
         const active = canvas.getActiveObject();
         const single =
-          active && !isEditorChrome(active) && !(active instanceof ActiveSelection) && !isObjectLocked(active)
+          active && !isEditorChrome(active) && !(active instanceof ActiveSelection) && !isMoveLocked(active)
             ? active
             : null;
         setTarget(single ?? null);

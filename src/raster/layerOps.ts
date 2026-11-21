@@ -5,7 +5,7 @@ import {
   isBackgroundObject,
   isEditorChrome,
   isLayerObject,
-  isObjectLocked,
+  isPixelsLocked,
   markBackgroundObject,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
@@ -77,7 +77,7 @@ function selectedLayers(canvas: FabricCanvas): FabricObject[] {
 function checkMergeable(canvas: FabricCanvas, layers: FabricObject[]): MergePlan | Refusal {
   const isShown = shownTest(canvas);
   if (layers.some((layer) => !isShown(layer))) return "Show the layers before merging them";
-  if (layers.some((layer) => !isBackgroundObject(layer) && isObjectLocked(layer))) {
+  if (layers.some((layer) => !isBackgroundObject(layer) && isPixelsLocked(layer))) {
     return "Unlock the layers before merging them";
   }
   return { layers, discard: [] };
@@ -112,7 +112,7 @@ export function planMergeGroup(canvas: FabricCanvas): MergePlan | Refusal {
   const isShown = shownTest(canvas);
   const layers = inside.filter((object) => isLayerObject(object) && isShown(object));
   if (layers.length === 0) return "The group has no visible layers to merge";
-  if (layers.some((layer) => isObjectLocked(layer))) return "Unlock the layers before merging them";
+  if (layers.some((layer) => isPixelsLocked(layer))) return "Unlock the layers before merging them";
   return {
     layers,
     discard: inside.filter((object) => !layers.includes(object)),
@@ -153,7 +153,7 @@ export function planRasterize(canvas: FabricCanvas): MergePlan | Refusal {
   if (selected.length !== 1) return "Select one layer to rasterize";
   const layer = selected[0]!;
   if (isBackgroundObject(layer)) return "The photo is already pixels";
-  if (isObjectLocked(layer)) return "Unlock the layer before rasterizing it";
+  if (isPixelsLocked(layer)) return "Unlock the layer before rasterizing it";
   if (
     layer instanceof FabricImage &&
     layer.filters.length === 0 &&

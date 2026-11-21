@@ -7,6 +7,11 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "__isBackground",
   "__layerId",
   "__locked",
+  // Photoshop's other three locks, and Fill opacity.
+  "__lockTransparency",
+  "__lockPixels",
+  "__lockPosition",
+  "__fill",
   "erasable",
   "selectable",
   "evented",

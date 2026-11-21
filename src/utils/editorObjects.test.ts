@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { ActiveSelection, Rect, type FabricObject } from "fabric";
 import {
+  hasLayerLock,
+  isMoveLocked,
+  isPixelsLocked,
+  isTransparencyLocked,
+  setLayerLock,
   ensureLayerId,
   isObjectLocked,
   isProtectedObject,
@@ -75,6 +80,48 @@ describe("editor object metadata", () => {
   it("treats editor chrome as read-only", () => {
     const cropOverlay = fakeObject({ __isCropOverlay: true });
     expect(isReadOnlySelection(cropOverlay as FabricObject)).toBe(true);
+  });
+});
+
+describe("Photoshop's four layer locks", () => {
+  it("keep position, pixels and transparency apart from Lock all", () => {
+    const rect = new Rect({ width: 10, height: 10 });
+    setLayerLock(rect, "position", true);
+    // The movement flags alone once meant an older build's full lock.
+    expect(rect.lockMovementX).toBe(true);
+    expect(isObjectLocked(rect)).toBe(false);
+    expect(isMoveLocked(rect)).toBe(true);
+    expect(isPixelsLocked(rect)).toBe(false);
+    expect(rect.hasControls).toBe(false);
+
+    setLayerLock(rect, "pixels", true);
+    expect(isPixelsLocked(rect)).toBe(true);
+    expect((rect as FabricObject & { erasable?: boolean }).erasable).toBe(false);
+    setLayerLock(rect, "transparency", true);
+    expect(isTransparencyLocked(rect)).toBe(true);
+
+    // Lock all on and off leaves the others as they were.
+    setLayerLock(rect, "all", true);
+    expect(isObjectLocked(rect)).toBe(true);
+    setLayerLock(rect, "all", false);
+    expect(isMoveLocked(rect)).toBe(true);
+    expect(isPixelsLocked(rect)).toBe(true);
+
+    setLayerLock(rect, "position", false);
+    setLayerLock(rect, "pixels", false);
+    expect(rect.lockMovementX).toBe(false);
+    expect(rect.hasControls).toBe(true);
+    expect(isMoveLocked(rect)).toBe(false);
+    expect(hasLayerLock(rect, "position")).toBe(false);
+    expect((rect as FabricObject & { __lockPosition?: boolean }).__lockPosition).toBeUndefined();
+  });
+
+  it("make a multiple selection immovable when one of its layers is", () => {
+    const free = new Rect({ width: 10, height: 10 });
+    const fixed = new Rect({ width: 10, height: 10 });
+    setLayerLock(fixed, "position", true);
+    expect(isMoveLocked(new ActiveSelection([free, fixed]))).toBe(true);
+    expect(isMoveLocked(new ActiveSelection([free]))).toBe(false);
   });
 });
 

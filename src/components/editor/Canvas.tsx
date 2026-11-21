@@ -22,7 +22,7 @@ import {
   ensureLayerId,
   isBackgroundObject,
   isEditorChrome,
-  isObjectLocked,
+  isPixelsLocked,
   markBackgroundObject,
   normalizeEditorObjects,
   type EditorFabricObject,
@@ -262,7 +262,7 @@ export const Canvas = ({
       if (!object || isEditorChrome(object)) return;
       ensureLayerId(object);
       (object as EditorFabricObject).erasable =
-        !isBackgroundObject(object) && !isObjectLocked(object);
+        !isBackgroundObject(object) && !isPixelsLocked(object);
     };
     canvas.on("object:added", markErasable);
 

@@ -12,6 +12,7 @@ import {
   isEditorChrome,
   isObjectLocked,
   isProtectedObject,
+  isMoveLocked,
   isReadOnlySelection,
   setObjectLocked,
   type EditorFabricObject,
@@ -39,7 +40,7 @@ const notifyModified = (canvas: FabricCanvas, target?: FabricObject) => {
 export function rotate(canvas: FabricCanvas, degrees: number): "selection" | "canvas" | null {
   const active = canvas.getActiveObject();
   if (active) {
-    if (isReadOnlySelection(active)) return null;
+    if (isReadOnlySelection(active) || isMoveLocked(active)) return null;
     active.rotate((((active.angle || 0) + degrees) % 360 + 360) % 360);
     active.setCoords();
     notifyModified(canvas, active);
@@ -78,7 +79,7 @@ export function flip(canvas: FabricCanvas, axis: "x" | "y"): "selection" | "canv
   const active = canvas.getActiveObject();
   const key = axis === "x" ? "flipX" : "flipY";
   if (active) {
-    if (isReadOnlySelection(active)) return null;
+    if (isReadOnlySelection(active) || isMoveLocked(active)) return null;
     active.set(key, !active[key]);
     active.setCoords();
     notifyModified(canvas, active);
