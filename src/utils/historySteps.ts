@@ -96,6 +96,7 @@ const SHAPE_TYPES = new Set(["rect", "ellipse", "circle", "triangle", "polygon",
 
 function addedName(object: SavedObject): string {
   const type = String(object.type ?? "").toLowerCase();
+  if (type === "layergroup" || type === "layergroupend") return "New group";
   if (TEXT_TYPES.has(type)) return "Text";
   if (SHAPE_TYPES.has(type)) return "Shape";
   return "New layer";
@@ -109,9 +110,10 @@ const PROPERTY_STEPS: [keys: string[], name: string, kind: ChangeKind][] = [
   [["layerStyle"], "Layer style", "other"],
   [["text"], "Edit text", "other"],
   [["guides"], "Guides", "other"],
+  [["__clipped"], "Clipping mask", "other"],
   [["visible"], "Visibility", "other"],
   [["opacity"], "Opacity", "other"],
-  [["globalCompositeOperation"], "Blend mode", "other"],
+  [["globalCompositeOperation", "passThrough"], "Blend mode", "other"],
   [["name"], "Rename layer", "other"],
   [["__locked", "lockMovementX", "lockMovementY", "lockRotation", "lockScalingX", "lockScalingY", "selectable", "evented"], "Lock", "other"],
   [["fill", "stroke", "strokeWidth", "strokeDashArray"], "Colour", "other"],

@@ -18,6 +18,10 @@ import {
   Layers,
   CircleDot,
   Sparkle,
+  ChevronRight,
+  CornerDownRight,
+  Folder,
+  FolderOpen,
 } from "lucide-react";
 import { FabricImage, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import { Button } from "@/components/ui/button";
@@ -36,7 +40,6 @@ import {
 } from "@/utils/blendModes";
 import {
   ensureLayerId,
-  findBackgroundImage,
   isBackgroundObject,
   isEditorChrome,
   isObjectLocked,
@@ -45,6 +48,17 @@ import {
   type EditorFabricObject,
 } from "@/utils/editorObjects";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
+import { treeOf } from "@/compositing/compositor";
+import type { LayerGroup } from "@/layers/groupMarkers";
+import {
+  arrangeLayers,
+  deleteGroup,
+  onSelectedGroupChange,
+  selectedGroup,
+  selectGroup,
+} from "@/layers/layerGroups";
+import type { TreeNode } from "@/layers/layerTree";
+import { toast } from "sonner";
 import {
   hasLayerMask,
   layerMaskThumbnail,
@@ -56,6 +70,14 @@ type EditorObject = EditorFabricObject;
 
 interface LayerItem {
   id: string;
+  /** A layer, or a group's header. */
+  kind: "layer" | "group";
+  /** How many groups it is inside. */
+  depth: number;
+  /** Clipped to the layer below it. */
+  clipped: boolean;
+  /** A group folded shut. */
+  collapsed: boolean;
   name: string;
   type: string;
   visible: boolean;
@@ -82,6 +104,9 @@ interface LayersPanelProps {
 // hundreds (or thousands) of synchronous offscreen renders.
 const MAX_LAYER_THUMBNAILS = 120;
 const MAX_CACHED_THUMBNAILS = 160;
+
+/** A group's blend mode when its layers blend straight into what is below. */
+const PASS_THROUGH = "pass-through";
 
 const getTypeIcon = (type: string) => {
   switch (type) {
@@ -159,40 +184,70 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
       return;
     }
 
-    const objects = fabricCanvas.getObjects();
+    const objects = fabricCanvas.getObjects().filter((object) => !isEditorChrome(object));
     const layerItems: LayerItem[] = [];
     const usedIds = new Set<string>();
+    for (const obj of objects) ensureLayerId(obj, usedIds);
     let counter = 1;
 
-    for (const obj of objects as EditorObject[]) {
-      if (isEditorChrome(obj)) continue;
-      const isBackground = isBackgroundObject(obj);
-      const name =
-        obj.name?.trim() ||
-        (isBackground ? "Background" : getLayerName(obj, counter));
-      obj.name = name;
-
-      layerItems.push({
-        id: ensureLayerId(obj, usedIds),
-        name,
-        type: obj.type || "object",
-        visible: obj.visible !== false,
-        locked: isBackground || isObjectLocked(obj),
-        isBackground,
-        thumbnail: "",
-        mask: hasLayerMask(obj) ? { thumbnail: layerMaskThumbnail(obj), enabled: obj.layerMask.enabled } : null,
-        effects: hasEffects((obj as EditorObject & { layerStyle?: LayerStyle }).layerStyle),
-        fabricObject: obj,
-      });
-      if (!isBackground) counter += 1;
-    }
+    // Bottom to top, groups' layers just under their group; a closed
+    // group's layers are not listed.
+    const visit = (nodes: readonly TreeNode[], depth: number) => {
+      for (const node of nodes) {
+        const obj = objects[node.index] as EditorObject;
+        if (node.kind === "group") {
+          const header = obj as unknown as LayerGroup;
+          if (!header.collapsed) visit(node.children, depth + 1);
+          layerItems.push({
+            id: obj.__layerId!,
+            kind: "group",
+            depth,
+            clipped: false,
+            collapsed: header.collapsed === true,
+            name: obj.name?.trim() || "Group",
+            type: "group",
+            visible: obj.visible !== false,
+            locked: false,
+            isBackground: false,
+            thumbnail: "",
+            mask: null,
+            effects: false,
+            fabricObject: obj,
+          });
+          continue;
+        }
+        const isBackground = isBackgroundObject(obj);
+        const name =
+          obj.name?.trim() ||
+          (isBackground ? "Background" : getLayerName(obj, counter));
+        obj.name = name;
+        layerItems.push({
+          id: obj.__layerId!,
+          kind: "layer",
+          depth,
+          clipped: node.clipped,
+          collapsed: false,
+          name,
+          type: obj.type || "object",
+          visible: obj.visible !== false,
+          locked: isBackground || isObjectLocked(obj),
+          isBackground,
+          thumbnail: "",
+          mask: hasLayerMask(obj) ? { thumbnail: layerMaskThumbnail(obj), enabled: obj.layerMask.enabled } : null,
+          effects: hasEffects((obj as EditorObject & { layerStyle?: LayerStyle }).layerStyle),
+          fabricObject: obj,
+        });
+        if (!isBackground) counter += 1;
+      }
+    };
+    visit(treeOf(objects).roots, 0);
 
     // Reverse so topmost layer appears first. Thumbnails are memoized by
     // object identity and invalidated only when that object changes.
     const ordered = layerItems.reverse();
     for (let index = 0; index < ordered.length; index += 1) {
       const layer = ordered[index];
-      if (!layer || index >= MAX_LAYER_THUMBNAILS) continue;
+      if (!layer || layer.kind === "group" || index >= MAX_LAYER_THUMBNAILS) continue;
       const cache = thumbnailCacheRef.current;
       const cached = cache.get(layer.fabricObject);
       if (cache.has(layer.fabricObject)) {
@@ -213,8 +268,11 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
     }
     setLayers(ordered);
 
+    const group = selectedGroup(fabricCanvas) as EditorObject | null;
     const active = fabricCanvas.getActiveObject() as EditorObject | undefined;
-    if (active && !isEditorChrome(active)) {
+    if (group) {
+      setSelectedLayerId(group.__layerId ?? null);
+    } else if (active && !isEditorChrome(active)) {
       setSelectedLayerId(active.__layerId ?? null);
     } else if (!active) {
       setSelectedLayerId(null);
@@ -284,17 +342,21 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
 
   // Blend mode + opacity act on the selected layer (Photoshop-style header)
   const selectedBlend =
-    (selectedLayer?.fabricObject.globalCompositeOperation as string) ||
-    DEFAULT_BLEND_MODE;
+    selectedLayer?.kind === "group" && (selectedLayer.fabricObject as unknown as LayerGroup).passThrough !== false
+      ? PASS_THROUGH
+      : (selectedLayer?.fabricObject.globalCompositeOperation as string) || DEFAULT_BLEND_MODE;
   const selectedOpacity = Math.round(
     (selectedLayer?.fabricObject.opacity ?? 1) * 100
   );
 
   const handleBlendModeChange = (value: string) => {
     if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
+    if (selectedLayer.kind === "group") {
+      (selectedLayer.fabricObject as unknown as LayerGroup).passThrough = value === PASS_THROUGH;
+    }
     selectedLayer.fabricObject.set(
       "globalCompositeOperation",
-      value as GlobalCompositeOperation
+      (value === PASS_THROUGH ? "source-over" : value) as GlobalCompositeOperation
     );
     fabricCanvas.fire("object:modified", { target: selectedLayer.fabricObject });
     fabricCanvas.renderAll();
@@ -371,8 +433,13 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
     fabricCanvas.on("selection:created", onSelectionCreated);
     fabricCanvas.on("selection:updated", onSelectionCreated);
     fabricCanvas.on("selection:cleared", onSelectionCleared);
+    const stopGroup = onSelectedGroupChange(fabricCanvas, () => {
+      const group = selectedGroup(fabricCanvas) as EditorObject | null;
+      if (group) setSelectedLayerId(group.__layerId ?? null);
+    });
 
     return () => {
+      stopGroup();
       fabricCanvas.off("selection:created", onSelectionCreated);
       fabricCanvas.off("selection:updated", onSelectionCreated);
       fabricCanvas.off("selection:cleared", onSelectionCleared);
@@ -381,6 +448,11 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
 
   const handleSelectLayer = (layer: LayerItem) => {
     if (!fabricCanvas) return;
+    if (layer.kind === "group") {
+      selectGroup(fabricCanvas, layer.fabricObject as unknown as LayerGroup);
+      setSelectedLayerId(layer.id);
+      return;
+    }
     fabricCanvas.setActiveObject(layer.fabricObject);
     fabricCanvas.renderAll();
     setSelectedLayerId(layer.id);
@@ -419,46 +491,44 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
 
   const handleDelete = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
+    if (!fabricCanvas) return;
+    if (layer.kind === "group") {
+      const result = deleteGroup(fabricCanvas, layer.fabricObject as unknown as LayerGroup);
+      if (typeof result === "string") toast.error(result);
+      return;
+    }
+    if (isProtectedObject(layer.fabricObject)) return;
     fabricCanvas.remove(layer.fabricObject);
     fabricCanvas.renderAll();
   };
 
+  /** Open or fold a group in the list (not a change to the document). */
+  const handleToggleCollapsed = (layer: LayerItem, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const header = layer.fabricObject as unknown as LayerGroup;
+    header.collapsed = !header.collapsed;
+    scheduleRefresh(layer.fabricObject);
+  };
+
+  // Up and down within the layer's group, past whole groups, and out at its edges.
   const handleMoveUp = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
-
-    const objects = fabricCanvas.getObjects();
-    const index = objects.indexOf(layer.fabricObject);
-    if (index < objects.length - 1) {
-      // Move forward in z-order (visually up)
-      fabricCanvas.moveObjectTo(layer.fabricObject, index + 1);
-      fabricCanvas.fire("object:modified", { target: layer.fabricObject });
-      fabricCanvas.renderAll();
-    }
+    if (!fabricCanvas || (layer.kind === "layer" && isProtectedObject(layer.fabricObject))) return;
+    arrangeLayers(fabricCanvas, [layer.id], "forward");
   };
 
   const handleMoveDown = (layer: LayerItem, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!fabricCanvas || isProtectedObject(layer.fabricObject)) return;
-
-    const objects = fabricCanvas.getObjects();
-    const index = objects.indexOf(layer.fabricObject);
-    // Don't move below the background image
-    const background = findBackgroundImage(fabricCanvas);
-    const bgIndex = background ? objects.indexOf(background) : -1;
-    if (index > bgIndex + 1) {
-      fabricCanvas.moveObjectTo(layer.fabricObject, index - 1);
-      fabricCanvas.fire("object:modified", { target: layer.fabricObject });
-      fabricCanvas.renderAll();
-    }
+    if (!fabricCanvas || (layer.kind === "layer" && isProtectedObject(layer.fabricObject))) return;
+    arrangeLayers(fabricCanvas, [layer.id], "backward");
   };
 
   return (
     <div className="flex h-full w-full flex-col">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
         <span>
-          {layers.length} layer{layers.length === 1 ? "" : "s"}
+          {layers.filter((layer) => layer.kind === "layer").length} layer
+          {layers.filter((layer) => layer.kind === "layer").length === 1 ? "" : "s"}
         </span>
         <span className="ml-auto">Top of the list is in front</span>
       </div>
@@ -477,6 +547,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
               onChange={(e) => handleBlendModeChange(e.target.value)}
               className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
             >
+              {selectedLayer.kind === "group" && <option value={PASS_THROUGH}>Pass Through</option>}
               {BLEND_MODES.map((mode) => (
                 <option key={mode.value} value={mode.value}>
                   {mode.label}
@@ -503,7 +574,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
               {selectedOpacity}
             </span>
           </div>
-          {!isObjectLocked(selectedLayer.fabricObject) && (onAddMask || onLayerStyle) && (
+          {selectedLayer.kind === "layer" && !isObjectLocked(selectedLayer.fabricObject) && (onAddMask || onLayerStyle) && (
             <div className="flex gap-2">
               {onAddMask && selectedLayer.fabricObject instanceof FabricImage && !selectedLayer.mask && (
                 <Button variant="outline" size="sm" className="h-7 flex-1 gap-1.5 text-xs" onClick={onAddMask}>
@@ -541,9 +612,11 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
                 <div
                   key={layer.id}
                   data-layer-id={layer.id}
+                  data-layer-kind={layer.kind}
                   role="group"
                   tabIndex={0}
-                  aria-label={`${layer.name} layer`}
+                  aria-label={layer.kind === "group" ? `${layer.name} group` : `${layer.name} layer`}
+                  style={{ paddingLeft: `${8 + layer.depth * 14}px` }}
                   aria-current={isSelected ? "true" : undefined}
                   onClick={() => handleSelectLayer(layer)}
                   onKeyDown={(event) => {
@@ -567,7 +640,26 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
                     ${!layer.visible ? "opacity-50" : ""}
                   `}
                 >
+                  {layer.kind === "group" && (
+                    <button
+                      type="button"
+                      aria-label={`${layer.collapsed ? "Open" : "Close"} ${layer.name}`}
+                      aria-expanded={!layer.collapsed}
+                      onClick={(e) => handleToggleCollapsed(layer, e)}
+                      className="-mr-1 flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                    >
+                      <ChevronRight className={`h-3 w-3 transition-transform ${layer.collapsed ? "" : "rotate-90"}`} />
+                    </button>
+                  )}
+                  {layer.clipped && (
+                    <CornerDownRight aria-label="Clipped to the layer below" className="-mr-1 h-3 w-3 shrink-0 text-muted-foreground" />
+                  )}
                   {/* Thumbnail with a checkerboard so transparency reads */}
+                  {layer.kind === "group" ? (
+                    <div className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
+                      {layer.collapsed ? <Folder className="h-4 w-4" /> : <FolderOpen className="h-4 w-4" />}
+                    </div>
+                  ) : (
                   <div
                     role={layer.mask ? "button" : undefined}
                     aria-label={layer.mask ? `Paint on ${layer.name}` : undefined}
@@ -594,6 +686,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
                       <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
                     )}
                   </div>
+                  )}
 
                   {layer.mask && (
                     <button
@@ -736,6 +829,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
                     </TooltipContent>
                   </Tooltip>
 
+                  {layer.kind === "group" ? <span className="h-6 w-6 shrink-0" /> : (
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -757,6 +851,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
                       <p>{layer.locked ? "Unlock" : "Lock"}</p>
                     </TooltipContent>
                   </Tooltip>
+                  )}
                 </div>
               );
             })}

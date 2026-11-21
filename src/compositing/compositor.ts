@@ -1,0 +1,257 @@
+import { Canvas, StaticCanvas, type FabricObject, type Point } from "fabric";
+import { buildTree, clippingRuns, type GroupNode, type LayerTree, type TreeNode } from "@/layers/layerTree";
+import { entriesOf, isClipped, isGroupHeader, isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
+
+/**
+ * Draws the layer stack as Photoshop composes it. Ordinary layers draw
+ * straight onto the canvas as Fabric always drew them (with their masks and
+ * styles); only groups that are not Pass Through at full opacity, and
+ * clipping masks, go through buffers the size of the canvas being drawn:
+ *
+ * - a group is drawn into its own buffer, then onto what is below with the
+ *   group's opacity and blend mode;
+ * - a clipping mask draws its base into a buffer, the clipped layers only
+ *   where the base has pixels, then the whole onto what is below with the
+ *   base's opacity and blend mode.
+ *
+ * Exports go through the same path (toCanvasElement → renderCanvas →
+ * _renderObjects), so files look as the screen does.
+ *
+ * A group's opacity, blend mode and isolation apply when its header is among
+ * the objects being drawn; its visibility always does. So merging layers
+ * inside a group renders them as they are within it, and the merged layer,
+ * still in the group, gets the group's settings once, from the group.
+ */
+
+type RenderInternals = { _renderObjects(ctx: CanvasRenderingContext2D, objects: FabricObject[]): void; _objects: FabricObject[] };
+
+/** Buffers kept between frames, up to about a 4K screen each. */
+const KEEP_BUFFER_PIXELS = 8_300_000;
+
+const buffers: HTMLCanvasElement[] = [];
+let depth = 0;
+
+function acquire(ctx: CanvasRenderingContext2D): CanvasRenderingContext2D {
+  let element = buffers[depth];
+  if (!element) {
+    element = document.createElement("canvas");
+    buffers[depth] = element;
+  }
+  depth += 1;
+  const { width, height } = ctx.canvas;
+  if (element.width !== width || element.height !== height) {
+    element.width = width;
+    element.height = height;
+  }
+  const buffer = element.getContext("2d")!;
+  buffer.setTransform(1, 0, 0, 1, 0, 0);
+  buffer.globalAlpha = 1;
+  buffer.globalCompositeOperation = "source-over";
+  buffer.clearRect(0, 0, width, height);
+  buffer.setTransform(ctx.getTransform());
+  buffer.imageSmoothingEnabled = ctx.imageSmoothingEnabled;
+  return buffer;
+}
+
+function release(): void {
+  depth -= 1;
+}
+
+/** Free buffers grown for a large export once the render is over. */
+function trimBuffers(): void {
+  if (depth !== 0) return;
+  for (const element of buffers) {
+    if (element.width * element.height > KEEP_BUFFER_PIXELS) {
+      element.width = 0;
+      element.height = 0;
+    }
+  }
+}
+
+/** Draw a buffer onto a context, pixel for pixel. */
+function drawBuffer(ctx: CanvasRenderingContext2D, buffer: CanvasRenderingContext2D, alpha: number, blend: GlobalCompositeOperation) {
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha *= alpha;
+  ctx.globalCompositeOperation = blend;
+  ctx.drawImage(buffer.canvas, 0, 0);
+  ctx.restore();
+}
+
+/** Draw an object with some of its settings changed for the moment. */
+function renderWith(object: FabricObject, ctx: CanvasRenderingContext2D, changes: { opacity?: number; globalCompositeOperation?: GlobalCompositeOperation }) {
+  const saved = { opacity: object.opacity, globalCompositeOperation: object.globalCompositeOperation };
+  Object.assign(object, changes);
+  try {
+    object.render(ctx);
+  } finally {
+    Object.assign(object, saved);
+  }
+}
+
+const blendOf = (object: FabricObject): GlobalCompositeOperation => (object.globalCompositeOperation || "source-over") as GlobalCompositeOperation;
+
+/** The blend a group composes with: Pass Through acts as Normal once isolated. */
+const groupBlend = (header: LayerGroup): GlobalCompositeOperation => (header.passThrough === false ? blendOf(header) : "source-over");
+
+class Composition {
+  private readonly drawn = new Map<TreeNode, boolean>();
+
+  constructor(
+    private readonly all: readonly FabricObject[],
+    private readonly included: ReadonlySet<FabricObject>
+  ) {}
+
+  /** Whether any layer the render asked for is in this node. */
+  private draws(node: TreeNode): boolean {
+    let known = this.drawn.get(node);
+    if (known === undefined) {
+      known = node.kind === "layer" ? this.included.has(this.all[node.index]!) : node.children.some((child) => this.draws(child));
+      this.drawn.set(node, known);
+    }
+    return known;
+  }
+
+  list(ctx: CanvasRenderingContext2D, nodes: readonly TreeNode[]): void {
+    for (const { base, clipped } of clippingRuns(nodes)) {
+      if (clipped.length === 0) this.node(ctx, base);
+      else this.clipping(ctx, base, clipped);
+    }
+  }
+
+  private node(ctx: CanvasRenderingContext2D, node: TreeNode): void {
+    if (node.kind === "layer") {
+      const object = this.all[node.index]!;
+      if (this.included.has(object)) object.render(ctx);
+      return;
+    }
+    const header = this.all[node.index] as LayerGroup;
+    if (!header.visible || !this.draws(node)) return;
+    if (!this.included.has(header) || (header.passThrough !== false && header.opacity >= 1)) {
+      this.list(ctx, node.children);
+      return;
+    }
+    const buffer = acquire(ctx);
+    try {
+      this.list(buffer, node.children);
+      drawBuffer(ctx, buffer, header.opacity, groupBlend(header));
+    } finally {
+      release();
+    }
+  }
+
+  /** Base and clipped layers in a buffer of their own. */
+  private clipping(ctx: CanvasRenderingContext2D, base: TreeNode, clipped: readonly TreeNode[]): void {
+    const baseObject = this.all[base.index]!;
+    if (!baseObject.visible || !this.draws(base)) return;
+    const buffer = acquire(ctx);
+    try {
+      if (base.kind === "layer") renderWith(baseObject, buffer, { opacity: 1, globalCompositeOperation: "source-over" });
+      else this.list(buffer, (base as GroupNode).children);
+      for (const node of clipped) {
+        const object = this.all[node.index]!;
+        if (!object.visible || !this.included.has(object)) continue;
+        const blend = blendOf(object);
+        if (blend === "source-over") {
+          // Normal: only where the base already has pixels, keeping its shape.
+          renderWith(object, buffer, { globalCompositeOperation: "source-atop" });
+          continue;
+        }
+        const layer = acquire(ctx);
+        try {
+          renderWith(object, layer, { globalCompositeOperation: "source-over" });
+          layer.save();
+          layer.setTransform(1, 0, 0, 1, 0, 0);
+          layer.globalCompositeOperation = "destination-in";
+          layer.drawImage(buffer.canvas, 0, 0);
+          layer.restore();
+          drawBuffer(buffer, layer, 1, blend);
+        } finally {
+          release();
+        }
+      }
+      if (base.kind === "layer") drawBuffer(ctx, buffer, baseObject.opacity, blendOf(baseObject));
+      else if (this.included.has(baseObject)) drawBuffer(ctx, buffer, baseObject.opacity, groupBlend(baseObject as LayerGroup));
+      else drawBuffer(ctx, buffer, 1, "source-over");
+    } finally {
+      release();
+    }
+  }
+}
+
+/** Skip the compositor while `render` runs: each layer drawn on its own, as it is. */
+let rawDepth = 0;
+export function withoutCompositing<T>(render: () => T): T {
+  rawDepth += 1;
+  try {
+    return render();
+  } finally {
+    rawDepth -= 1;
+  }
+}
+
+const needsCompositing = (all: readonly FabricObject[], objects: readonly FabricObject[]) =>
+  rawDepth === 0 && (all.some(isGroupMarker) || objects.some(isClipped));
+
+/** The stack's structure, for the objects of a canvas. */
+export const treeOf = (objects: readonly FabricObject[]): LayerTree => buildTree(entriesOf(objects));
+
+/** Layers that do not show because a group they are in is hidden. */
+export function hiddenByGroups(objects: readonly FabricObject[]): Set<FabricObject> {
+  const hidden = new Set<FabricObject>();
+  if (!objects.some(isGroupHeader)) return hidden;
+  const hide = (nodes: readonly TreeNode[]) => {
+    for (const node of nodes) {
+      hidden.add(objects[node.index]!);
+      if (node.kind === "group") hide(node.children);
+    }
+  };
+  const visit = (nodes: readonly TreeNode[]) => {
+    for (const node of nodes) {
+      if (node.kind !== "group") continue;
+      if (objects[node.index]!.visible) visit(node.children);
+      else hide(node.children);
+    }
+  };
+  visit(treeOf(objects).roots);
+  return hidden;
+}
+
+let installed = false;
+
+/** Teach every Fabric canvas to draw groups and clipping masks. */
+export function installCompositor(): void {
+  if (installed) return;
+  installed = true;
+  const prototype = StaticCanvas.prototype as unknown as RenderInternals;
+  const renderObjects = prototype._renderObjects;
+  prototype._renderObjects = function (this: RenderInternals, ctx: CanvasRenderingContext2D, objects: FabricObject[]) {
+    const all = this._objects;
+    if (!needsCompositing(all, objects)) {
+      renderObjects.call(this, ctx, objects);
+      return;
+    }
+    // The structure comes from the whole stack, so a render of some layers
+    // (an export without the helpers, say) still sees the groups around them.
+    const included = new Set(objects);
+    const composition = new Composition(all, included);
+    composition.list(ctx, treeOf(all).roots);
+    // Anything drawn that is not in the stack (none today) still shows.
+    for (const object of objects) if (!all.includes(object)) object.render(ctx);
+    trimBuffers();
+  };
+
+  // A layer in a hidden group cannot be clicked on the canvas.
+  const interactive = Canvas.prototype as unknown as {
+    searchPossibleTargets(objects: FabricObject[], pointer: Point): unknown;
+    _objects: FabricObject[];
+  };
+  const search = interactive.searchPossibleTargets;
+  interactive.searchPossibleTargets = function (this: typeof interactive, objects: FabricObject[], pointer: Point) {
+    if (objects === this._objects) {
+      const hidden = hiddenByGroups(objects);
+      if (hidden.size) objects = objects.filter((object) => !hidden.has(object));
+    }
+    return search.call(this, objects, pointer);
+  };
+}

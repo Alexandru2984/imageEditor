@@ -53,6 +53,9 @@ const ALLOWED_SERIALIZED_TYPES = new Set([
   "fixed",
   "fit-content",
   "clip-path",
+  // Layer groups: the header above a group's layers and the marker below them.
+  "layergroup",
+  "layergroupend",
 ]);
 
 type FilterParameterRule = (value: unknown) => boolean;
@@ -416,6 +419,9 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
       if (key === "guides") {
         if (!isGuideList(child)) throw new Error("Project contains invalid guides");
         continue;
+      }
+      if ((key === "__clipped" || key === "passThrough" || key === "collapsed") && typeof child !== "boolean") {
+        throw new Error("Project contains an invalid layer group setting");
       }
       if (key === "layerStyle") {
         if (!isValidLayerStyle(child)) throw new Error("Project contains an invalid layer style");

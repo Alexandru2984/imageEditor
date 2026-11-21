@@ -1,5 +1,6 @@
 // Fabric defaults must be set before any Fabric object is constructed; this
 // module is the editor chunk's entry point.
+import { watchGroupSelection } from "@/layers/layerGroups";
 import { documentAsPsd } from "@/psd/savePsd";
 import { downloadBlob } from "@/utils/download";
 import { HistoryPanel } from "./HistoryPanel";
@@ -254,6 +255,10 @@ export const EditorWorkspace = ({
     },
     []
   );
+
+  // A group picked in the Layers panel stays picked until the canvas
+  // selection changes some other way.
+  useEffect(() => (fabricCanvas ? watchGroupSelection(fabricCanvas) : undefined), [fabricCanvas]);
 
   // Copied layers belong to the document they came from.
   useEffect(() => {

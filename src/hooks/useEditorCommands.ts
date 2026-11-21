@@ -81,7 +81,23 @@ import {
   XCircle,
   ZoomIn,
   ZoomOut,
+  FolderPlus,
+  Group,
+  Ungroup,
+  CornerDownRight,
 } from "lucide-react";
+import {
+  addGroup,
+  canUngroup,
+  clippingAction,
+  deleteGroup,
+  duplicateGroup,
+  groupSelected,
+  hasClippedSelection,
+  selectedGroup,
+  setClipping,
+  ungroupSelected,
+} from "@/layers/layerGroups";
 import { toast } from "sonner";
 import { KEYMAP } from "@/commands/keymap";
 import { formatShortcut } from "@/commands/shortcuts";
@@ -142,6 +158,7 @@ import {
 import {
   addEmptyLayer,
   planFlatten,
+  planMergeGroup,
   planMergeDown,
   planMergeVisible,
   planRasterize,
@@ -315,7 +332,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
   const { isProcessing: aiBusy, removeBackground, extractSubject, selectSubject } = ai;
 
   return useMemo(() => {
-    const selected = () => hasSelection(canvas);
+    // A layer on the canvas, or a group picked in the Layers panel.
+    const selected = () => hasSelection(canvas) || (!!canvas && !!selectedGroup(canvas));
     const pixelSelection = () => (canvas ? selectionOf(canvas).current() : null);
 
     /** Delete with a selection: clear its pixels on the layer (or the photo). */
@@ -702,8 +720,12 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.delete,
         run: () => {
           const selection = pixelSelection();
+          const group = canvas ? selectedGroup(canvas) : null;
           if (selection) clearPixels(selection);
-          else removeSelection();
+          else if (canvas && group) {
+            const result = deleteGroup(canvas, group);
+            if (typeof result === "string") toast.error(result);
+          } else removeSelection();
         },
         isEnabled: () => selected() || !!pixelSelection(),
       },
@@ -936,7 +958,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.duplicate,
         // With a pixel selection, Ctrl+J is New layer via copy.
         run: () => {
+          const group = canvas ? selectedGroup(canvas) : null;
           if (pixelSelection()) layerViaSelection(false);
+          else if (canvas && group) duplicateGroup(canvas, group).catch(reportFailure);
           else duplicate();
         },
         isEnabled: () => selected() || !!pixelSelection(),
@@ -1093,6 +1117,68 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         },
         isEnabled: () => !!canvas,
       },
+      {
+        id: "layer.newGroup",
+        label: "New group",
+        icon: FolderPlus,
+        run: () => {
+          if (canvas) addGroup(canvas);
+        },
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "folder layers",
+      },
+      {
+        id: "layer.group",
+        label: "Group layers",
+        icon: Group,
+        shortcuts: KEYMAP.groupLayers,
+        run: () => {
+          if (!canvas) return;
+          const result = groupSelected(canvas);
+          if (typeof result === "string") toast(result);
+        },
+        isEnabled: selected,
+        keywords: "folder",
+      },
+      {
+        id: "layer.ungroup",
+        label: "Ungroup layers",
+        icon: Ungroup,
+        shortcuts: KEYMAP.ungroupLayers,
+        run: () => {
+          if (!canvas) return;
+          const result = ungroupSelected(canvas);
+          if (typeof result === "string") toast(result);
+        },
+        isEnabled: () => !!canvas && canUngroup(canvas),
+        keywords: "folder",
+      },
+      {
+        id: "layer.createClippingMask",
+        label: "Create clipping mask",
+        icon: CornerDownRight,
+        shortcuts: KEYMAP.clippingMask,
+        // Ctrl+Alt+G toggles, as in Photoshop.
+        run: () => {
+          if (!canvas) return;
+          const clip = clippingAction(canvas);
+          if (clip === null) toast("Select a layer to clip to the one below");
+          else setClipping(canvas, clip);
+        },
+        isEnabled: () => !!canvas && clippingAction(canvas) !== null,
+        keywords: "clip inside below",
+      },
+      {
+        id: "layer.releaseClippingMask",
+        label: "Release clipping mask",
+        icon: CornerDownRight,
+        run: () => {
+          if (canvas) setClipping(canvas, false);
+        },
+        isEnabled: () => !!canvas && hasClippedSelection(canvas),
+        keywords: "unclip",
+      },
+      layerOp("layer.mergeGroup", "Merge group", Merge, planMergeGroup, undefined, "group flatten combine folder"),
       layerOp("layer.rasterize", "Rasterize layer", Grid2x2, planRasterize, undefined, "pixels convert text shape bake"),
       layerOp("layer.mergeDown", "Merge down", Merge, planMergeDown, KEYMAP.mergeDown, "merge layers combine"),
       layerOp("layer.mergeVisible", "Merge visible", Combine, planMergeVisible, KEYMAP.mergeVisible, "merge all combine"),

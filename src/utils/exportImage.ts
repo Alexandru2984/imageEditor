@@ -1,5 +1,5 @@
 import type { Canvas as FabricCanvas, TBBox } from "fabric";
-import { findBackgroundImage, isEditorChrome } from "./editorObjects";
+import { findBackgroundImage, isLayerObject } from "./editorObjects";
 import {
   nativeMultiplier,
   planRasterization,
@@ -42,7 +42,7 @@ export function exportRegion(canvas: FabricCanvas): TBBox | null {
   const background = findBackgroundImage(canvas);
   if (background) return background.getBoundingRect();
 
-  const objects = canvas.getObjects().filter((object) => !isEditorChrome(object));
+  const objects = canvas.getObjects().filter(isLayerObject);
   if (objects.length === 0) return null;
   let left = Infinity;
   let top = Infinity;

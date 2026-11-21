@@ -1,6 +1,6 @@
 import { FabricImage, Point, util, type Canvas as FabricCanvas, type FabricObject, type TMat2D } from "fabric";
 import { transformGuides } from "@/utils/guides";
-import { findBackgroundImage, isEditorChrome } from "@/utils/editorObjects";
+import { findBackgroundImage, isEditorChrome, isLayerObject } from "@/utils/editorObjects";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE, renderObjectsRegion } from "@/utils/flatten";
 import { documentGrid, selectionOf } from "@/selection/state";
 import { hasLayerMask, hydrateLayerMask, type MaskedImage } from "./layerMask";
@@ -127,7 +127,7 @@ interface Change {
 const busy = new WeakSet<FabricCanvas>();
 
 const documentObjects = (canvas: FabricCanvas): FabricObject[] =>
-  canvas.getObjects().filter((object) => !isEditorChrome(object));
+  canvas.getObjects().filter(isLayerObject);
 
 /** Anything that stops the document from being changed as a whole. */
 function refusal(canvas: FabricCanvas): Refusal | null {

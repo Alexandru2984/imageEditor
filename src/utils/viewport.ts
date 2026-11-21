@@ -1,5 +1,5 @@
 import type { Canvas as FabricCanvas, TBBox, TMat2D } from "fabric";
-import { findBackgroundImage, isEditorChrome } from "./editorObjects";
+import { findBackgroundImage, isLayerObject } from "./editorObjects";
 
 export { findBackgroundImage } from "./editorObjects";
 
@@ -14,7 +14,7 @@ function contentBounds(canvas: FabricCanvas): TBBox | null {
   const bg = findBackgroundImage(canvas);
   if (bg) return bg.getBoundingRect();
 
-  const objects = canvas.getObjects().filter((object) => !isEditorChrome(object));
+  const objects = canvas.getObjects().filter(isLayerObject);
   if (objects.length === 0) return null;
 
   let left = Infinity;

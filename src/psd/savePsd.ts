@@ -1,7 +1,8 @@
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { releaseSurface } from "@/raster/pixelLayer";
 import { documentGrid } from "@/selection/state";
-import { isEditorChrome } from "@/utils/editorObjects";
+import { withoutCompositing } from "@/compositing/compositor";
+import { isEditorChrome, isLayerObject } from "@/utils/editorObjects";
 import { renderObjectsRegion } from "@/utils/flatten";
 import { guidesOf } from "@/utils/guides";
 import type { DecodedLayer, PsdToWrite } from "./psdDocument";
@@ -66,7 +67,7 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
   };
 
   const layers: Layer[] = [];
-  for (const object of objects) {
+  for (const object of objects.filter(isLayerObject)) {
     signal?.throwIfAborted();
     // Drawn plainly: its opacity, blend and visibility go into the file as settings.
     const settings = { visible: object.visible, opacity: object.opacity, blend: object.globalCompositeOperation };
@@ -75,7 +76,8 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
     object.opacity = 1;
     object.globalCompositeOperation = "source-over";
     try {
-      surface = render((candidate) => candidate === object);
+      // The layer's own pixels: its group and clipping are settings in the file.
+      surface = withoutCompositing(() => render((candidate) => candidate === object));
     } finally {
       object.visible = settings.visible;
       object.opacity = settings.opacity;

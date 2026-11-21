@@ -6,7 +6,7 @@ import {
   type TPointerEvent,
   type Transform,
 } from "fabric";
-import { findBackgroundImage, isEditorChrome } from "@/utils/editorObjects";
+import { findBackgroundImage, isLayerObject } from "@/utils/editorObjects";
 import { computeSnap, type Box, type SnapLine } from "@/utils/snapping";
 
 /** Screen pixels within which a layer snaps to a guide. */
@@ -35,7 +35,7 @@ function referenceBoxes(canvas: FabricCanvas, target: FabricObject): Box[] {
   const photo = findBackgroundImage(canvas);
   if (photo) boxes.push(toBox(photo));
   for (const object of canvas.getObjects()) {
-    if (object === photo || moving.has(object) || !object.visible || isEditorChrome(object)) {
+    if (object === photo || moving.has(object) || !object.visible || !isLayerObject(object)) {
       continue;
     }
     boxes.push(toBox(object));

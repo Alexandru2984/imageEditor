@@ -334,6 +334,21 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts layer groups and clipped layers, and rejects malformed group settings", async () => {
+    const objects = [
+      { type: "image", src: "__snapshot_src_0" },
+      { type: "LayerGroupEnd", __layerId: "end-1" },
+      { type: "rect", __clipped: true },
+      { type: "LayerGroup", __layerId: "group-1", name: "Group 1", passThrough: false, collapsed: true, opacity: 0.5, globalCompositeOperation: "multiply" },
+    ];
+    const ok = { json: JSON.stringify({ objects }), srcs: [PNG_DATA_URL] };
+    await expect(readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: ok })))).resolves.toEqual(ok);
+    for (const bad of [{ passThrough: "yes" }, { collapsed: 1 }, { __clipped: "true" }, { opacity: 3 }]) {
+      const snapshot = { json: JSON.stringify({ objects: [{ type: "LayerGroup", ...bad }] }), srcs: [] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot }))), JSON.stringify(bad)).rejects.toThrow();
+    }
+  });
+
   it("accepts a layer style the editor writes", async () => {
     const style = {
       dropShadow: { enabled: true, color: "#000000", opacity: 75, angle: 120, distance: 10, size: 10 },

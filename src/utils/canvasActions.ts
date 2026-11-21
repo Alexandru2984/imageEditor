@@ -1,3 +1,4 @@
+import { arrangeLayers, selectedGroup } from "@/layers/layerGroups";
 import { transformGuides } from "./guides";
 import { ActiveSelection, FabricImage, Point } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
@@ -14,6 +15,7 @@ import {
   isReadOnlySelection,
   setObjectLocked,
   type EditorFabricObject,
+  isLayerObject,
 } from "./editorObjects";
 import { fitToScreen } from "./viewport";
 
@@ -44,7 +46,7 @@ export function rotate(canvas: FabricCanvas, degrees: number): "selection" | "ca
     return "selection";
   }
 
-  const objects = canvas.getObjects().filter((object) => !isEditorChrome(object));
+  const objects = canvas.getObjects().filter(isLayerObject);
   if (objects.length === 0) return null;
   const background = findBackgroundImage(canvas);
   const pivot = background
@@ -83,7 +85,7 @@ export function flip(canvas: FabricCanvas, axis: "x" | "y"): "selection" | "canv
     return "selection";
   }
 
-  const objects = canvas.getObjects().filter((object) => !isEditorChrome(object));
+  const objects = canvas.getObjects().filter(isLayerObject);
   if (objects.length === 0) return null;
   const background = findBackgroundImage(canvas);
   const pivot = background
@@ -108,29 +110,21 @@ export function flip(canvas: FabricCanvas, axis: "x" | "y"): "selection" | "canv
 
 export type ArrangeAction = "front" | "forward" | "backward" | "back";
 
-/** Change stacking order without ever moving below the background photo. */
+/**
+ * Change stacking order without ever moving below the background photo, as
+ * Photoshop's Arrange: within the layer's group, past whole groups, and out
+ * of a group at its top or bottom. A group picked in the panel moves whole.
+ */
 export function arrange(canvas: FabricCanvas, action: ArrangeAction): boolean {
-  const targets = selectedObjects(canvas).filter((object) => !isProtectedObject(object));
+  const group = selectedGroup(canvas);
+  const targets = group ? [group] : selectedObjects(canvas).filter((object) => !isProtectedObject(object));
   if (targets.length === 0) return false;
-  const background = findBackgroundImage(canvas);
-  const floor = () => (background ? canvas.getObjects().indexOf(background) + 1 : 0);
-
-  const ordered = [...targets].sort(
-    (a, b) => canvas.getObjects().indexOf(a) - canvas.getObjects().indexOf(b)
+  for (const target of targets) ensureLayerId(target);
+  arrangeLayers(
+    canvas,
+    targets.map((target) => (target as EditorFabricObject).__layerId!),
+    action
   );
-  if (action === "front") {
-    for (const object of ordered) canvas.bringObjectToFront(object);
-  } else if (action === "back") {
-    for (const object of [...ordered].reverse()) canvas.moveObjectTo(object, floor());
-  } else if (action === "forward") {
-    for (const object of [...ordered].reverse()) canvas.bringObjectForward(object);
-  } else {
-    for (const object of ordered) {
-      const index = canvas.getObjects().indexOf(object);
-      if (index > floor()) canvas.moveObjectTo(object, index - 1);
-    }
-  }
-  notifyModified(canvas, targets[0]);
   return true;
 }
 
@@ -245,7 +239,7 @@ export async function addImageLayer(
 export function selectAllLayers(canvas: FabricCanvas): number {
   const objects = canvas
     .getObjects()
-    .filter((object) => !isEditorChrome(object) && !isProtectedObject(object));
+    .filter((object) => isLayerObject(object) && !isProtectedObject(object));
   if (objects.length === 0) return 0;
   canvas.setActiveObject(
     objects.length === 1 ? objects[0]! : new ActiveSelection(objects, { canvas })
@@ -280,7 +274,7 @@ export function toggleSelectionLock(canvas: FabricCanvas): boolean | null {
 export function clearUnlockedLayers(canvas: FabricCanvas): number {
   const removable = canvas
     .getObjects()
-    .filter((object) => !isEditorChrome(object) && !isProtectedObject(object));
+    .filter((object) => isLayerObject(object) && !isProtectedObject(object));
   if (removable.length === 0) return 0;
   canvas.discardActiveObject();
   canvas.remove(...removable);

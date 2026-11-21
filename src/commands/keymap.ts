@@ -26,6 +26,9 @@ export const KEYMAP = {
   freeTransform: [{ key: "t", mod: true, alt: true }, { key: "t", mod: true }],
 
   duplicate: [{ key: "j", mod: true }],
+  groupLayers: [{ key: "g", mod: true }],
+  ungroupLayers: [{ key: "g", mod: true, shift: true }],
+  clippingMask: [{ key: "g", mod: true, alt: true }],
   layerViaCut: [{ key: "j", mod: true, shift: true }],
   editLayerMask: [{ key: "\\", mod: true }],
   // Ctrl+Shift+N is the browser's private window; Photoshop's no-dialog

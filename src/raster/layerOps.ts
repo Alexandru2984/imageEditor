@@ -4,10 +4,15 @@ import {
   findBackgroundImage,
   isBackgroundObject,
   isEditorChrome,
+  isLayerObject,
   isObjectLocked,
   markBackgroundObject,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
+import { hiddenByGroups, treeOf } from "@/compositing/compositor";
+import { isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
+import { findNode } from "@/layers/layerTree";
+import { groupObjects, selectedGroup } from "@/layers/layerGroups";
 import { nativeMultiplier, renderObjectsRegion } from "@/utils/flatten";
 import {
   documentPixelSize,
@@ -35,6 +40,11 @@ export interface MergePlan {
   layers: FabricObject[];
   /** Removed without being rendered (hidden layers when flattening). */
   discard: FabricObject[];
+  /**
+   * Merging a group: every layer keeps its own settings in the pixels, and
+   * the result takes the group's name, opacity and blend mode.
+   */
+  as?: { name: string; opacity: number; globalCompositeOperation: GlobalCompositeOperation };
 }
 
 export interface LayerOpResult {
@@ -45,10 +55,16 @@ export interface LayerOpResult {
 
 const busy = new WeakSet<FabricCanvas>();
 
-const documentLayers = (canvas: FabricCanvas): FabricObject[] =>
-  canvas.getObjects().filter((object) => !isEditorChrome(object));
+const documentLayers = (canvas: FabricCanvas): FabricObject[] => canvas.getObjects().filter(isLayerObject);
 
-const isShown = (object: FabricObject) => object.visible !== false;
+/** Shown, with the groups around it: a layer in a hidden group does not show. */
+const shownTest = (canvas: FabricCanvas) => {
+  const hidden = hiddenByGroups(canvas.getObjects());
+  return (object: FabricObject) => object.visible !== false && !hidden.has(object);
+};
+
+/** The markers of every group: merging everything dissolves them. */
+const groupMarkers = (canvas: FabricCanvas): FabricObject[] => canvas.getObjects().filter(isGroupMarker);
 
 /** The selected layers, bottom to top. */
 function selectedLayers(canvas: FabricCanvas): FabricObject[] {
@@ -58,7 +74,8 @@ function selectedLayers(canvas: FabricCanvas): FabricObject[] {
   return documentLayers(canvas).filter((object) => chosen.has(object));
 }
 
-function checkMergeable(layers: FabricObject[]): MergePlan | Refusal {
+function checkMergeable(canvas: FabricCanvas, layers: FabricObject[]): MergePlan | Refusal {
+  const isShown = shownTest(canvas);
   if (layers.some((layer) => !isShown(layer))) return "Show the layers before merging them";
   if (layers.some((layer) => !isBackgroundObject(layer) && isObjectLocked(layer))) {
     return "Unlock the layers before merging them";
@@ -66,22 +83,55 @@ function checkMergeable(layers: FabricObject[]): MergePlan | Refusal {
   return { layers, discard: [] };
 }
 
-/** Merge down (one layer selected) or Merge layers (several). */
+/**
+ * Merge down (one layer selected) into the layer below it in its group,
+ * Merge layers (several), or Merge group (a group picked in the panel).
+ */
 export function planMergeDown(canvas: FabricCanvas): MergePlan | Refusal {
+  if (selectedGroup(canvas)) return planMergeGroup(canvas);
   const selected = selectedLayers(canvas);
   if (selected.length === 0) return "Select a layer to merge down";
-  if (selected.length > 1) return checkMergeable(selected);
+  if (selected.length > 1) return checkMergeable(canvas, selected);
   const layer = selected[0]!;
-  const layers = documentLayers(canvas);
-  const below = layers[layers.indexOf(layer) - 1];
-  if (!below) return "There is no layer below to merge into";
-  return checkMergeable([below, layer]);
+  const objects = canvas.getObjects().filter((object) => !isEditorChrome(object));
+  const found = findNode(treeOf(objects), (layer as EditorFabricObject).__layerId ?? "");
+  const siblings = found?.parent ? found.parent.children : treeOf(objects).roots;
+  const position = found ? siblings.findIndex((node) => node.id === found.node.id) : -1;
+  const belowNode = position > 0 ? siblings[position - 1] : undefined;
+  if (!belowNode) return "There is no layer below to merge into";
+  if (belowNode.kind === "group") return "The layer below is a group: merge the group first";
+  return checkMergeable(canvas, [objects[belowNode.index]!, layer]);
+}
+
+/** Layer › Merge group: the picked group's shown layers into one layer in its place. */
+export function planMergeGroup(canvas: FabricCanvas): MergePlan | Refusal {
+  const group = selectedGroup(canvas);
+  if (!group) return "Pick a group in the Layers panel to merge it";
+  if (!group.visible) return "Show the group before merging it";
+  const inside = groupObjects(canvas, group);
+  const isShown = shownTest(canvas);
+  const layers = inside.filter((object) => isLayerObject(object) && isShown(object));
+  if (layers.length === 0) return "The group has no visible layers to merge";
+  if (layers.some((layer) => isObjectLocked(layer))) return "Unlock the layers before merging them";
+  return {
+    layers,
+    discard: inside.filter((object) => !layers.includes(object)),
+    as: {
+      name: (group as LayerGroup).name || "Group",
+      opacity: group.opacity,
+      globalCompositeOperation: (group.passThrough === false ? group.globalCompositeOperation : "source-over") as GlobalCompositeOperation,
+    },
+  };
 }
 
 export function planMergeVisible(canvas: FabricCanvas): MergePlan | Refusal {
+  const isShown = shownTest(canvas);
   const visible = documentLayers(canvas).filter(isShown);
   if (visible.length < 2) return "Show at least two layers to merge them";
-  return checkMergeable(visible);
+  const plan = checkMergeable(canvas, visible);
+  if (typeof plan === "string") return plan;
+  // The groups' settings go into the pixels, and the groups go.
+  return { ...plan, layers: [...plan.layers, ...groupMarkers(canvas)] };
 }
 
 /** Everything into the photo; hidden layers are discarded, as in Photoshop. */
@@ -90,8 +140,9 @@ export function planFlatten(canvas: FabricCanvas): MergePlan | Refusal {
   const photo = layers.find(isBackgroundObject);
   if (!photo) return "Open a photo first";
   if (layers.length < 2) return "There are no layers to flatten";
+  const isShown = shownTest(canvas);
   return {
-    layers: layers.filter((layer) => layer === photo || isShown(layer)),
+    layers: [...layers.filter((layer) => layer === photo || isShown(layer)), ...groupMarkers(canvas)],
     discard: layers.filter((layer) => layer !== photo && !isShown(layer)),
   };
 }
@@ -162,22 +213,24 @@ export async function runMerge(canvas: FabricCanvas, plan: MergePlan): Promise<L
     base.setCoords();
     // Merging into the photo keeps the photo's frame; anything outside it is
     // cut off, as with Photoshop's background layer.
-    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, plan.layers, multiplier);
+    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, plan.layers.filter(isLayerObject), multiplier);
 
     // The bottom layer's opacity and blend mode stay settings of the result
-    // instead of being baked into its pixels, as Photoshop merges.
-    const kept = {
+    // instead of being baked into its pixels, as Photoshop merges. A merged
+    // group bakes every layer and takes the group's settings instead.
+    const own = {
       opacity: base.opacity,
       globalCompositeOperation: base.globalCompositeOperation,
       visible: base.visible,
     };
+    const kept = plan.as ? { opacity: plan.as.opacity, globalCompositeOperation: plan.as.globalCompositeOperation, visible: true } : own;
     const included = new Set(plan.layers);
-    base.set({ opacity: 1, globalCompositeOperation: "source-over", visible: true });
+    if (!plan.as) base.set({ opacity: 1, globalCompositeOperation: "source-over", visible: true });
     let rendered: ReturnType<typeof renderObjectsRegion>;
     try {
       rendered = renderObjectsRegion(canvas, region, multiplier, (object) => included.has(object));
     } finally {
-      base.set(kept);
+      base.set(own);
     }
     let element: HTMLImageElement;
     try {
@@ -203,7 +256,7 @@ export async function runMerge(canvas: FabricCanvas, plan: MergePlan): Promise<L
     });
     const source = base as EditorFabricObject;
     const layer = result as FabricImage & EditorFabricObject;
-    layer.name = source.name;
+    layer.name = plan.as ? plan.as.name : source.name;
     layer.__layerId = source.__layerId;
     if (intoPhoto) markBackgroundObject(result);
     else layer.erasable = true;

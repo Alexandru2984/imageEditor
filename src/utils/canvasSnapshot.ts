@@ -22,6 +22,10 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "layerStyle",
   // The document's guides, on the photo.
   "guides",
+  // Layer groups and clipping masks.
+  "__clipped",
+  "passThrough",
+  "collapsed",
 ];
 
 export interface CanvasSnapshot {

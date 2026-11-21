@@ -1,6 +1,8 @@
 import { FabricImage, FabricObject } from "fabric";
 import { installLayerMasks } from "@/raster/layerMask";
 import { installLayerStyles } from "@/raster/layerStyle";
+import { installCompositor } from "@/compositing/compositor";
+import { registerGroupClasses } from "@/layers/groupMarkers";
 
 /**
  * Fabric 7 changed the default object origin from left/top to center. Every
@@ -20,6 +22,10 @@ export function applyFabricDefaults(): void {
   installLayerMasks();
   // Layers draw their styles (shadow, glow, overlay, stroke).
   installLayerStyles();
+  // Layer groups and clipping masks: the markers load from files, and every
+  // canvas composes the stack through them.
+  registerGroupClasses();
+  installCompositor();
 }
 
 applyFabricDefaults();

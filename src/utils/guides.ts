@@ -1,6 +1,6 @@
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { documentGrid } from "@/selection/state";
-import { findBackgroundImage, isEditorChrome } from "@/utils/editorObjects";
+import { findBackgroundImage, isLayerObject } from "@/utils/editorObjects";
 import { isGuideList, mapGuides, MAX_GUIDES, nearestLines, type GridSettings, type Guide, type SceneMatrix } from "./guideData";
 import type { Box } from "./snapping";
 
@@ -52,7 +52,7 @@ export function setGuideDraft(canvas: FabricCanvas, draft: GuideDraft | null): v
 function layerStops(canvas: FabricCanvas, axis: "x" | "y"): number[] {
   const stops: number[] = [];
   for (const object of canvas.getObjects()) {
-    if (!object.visible || isEditorChrome(object)) continue;
+    if (!object.visible || !isLayerObject(object)) continue;
     const { left, top, width, height } = object.getBoundingRect();
     if (axis === "x") stops.push(left, left + width / 2, left + width);
     else stops.push(top, top + height / 2, top + height);

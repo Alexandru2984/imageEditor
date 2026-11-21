@@ -1,5 +1,7 @@
 import { ActiveSelection, FabricImage } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
+import { entriesOf, isGroupMarker } from "@/layers/groupMarkers";
+import { repaired } from "@/layers/layerTree";
 
 export type EditorFabricObject = FabricObject & {
   __isBackground?: boolean;
@@ -50,6 +52,9 @@ export const isEditorChrome = (object: FabricObject): boolean => {
   );
 };
 
+/** A document layer: not an editor helper, not a group's marker. */
+export const isLayerObject = (object: FabricObject): boolean => !isEditorChrome(object) && !isGroupMarker(object);
+
 /** Flag a transient helper (drawing preview) so history and layers ignore it. */
 export function markEditorChrome(object: FabricObject): void {
   (object as EditorFabricObject).__isPreview = true;
@@ -99,7 +104,8 @@ export function markBackgroundObject(image: FabricImage): void {
 }
 
 export function setObjectLocked(object: FabricObject, locked: boolean): void {
-  if (isBackgroundObject(object)) return;
+  // Group markers are never picked on the canvas; their group locks through its layers.
+  if (isBackgroundObject(object) || isGroupMarker(object)) return;
   const editorObject = object as EditorFabricObject;
   editorObject.__locked = locked;
   editorObject.erasable = !locked;
@@ -149,6 +155,7 @@ export function normalizeEditorObjects(
   for (const object of canvas.getObjects()) {
     if (isEditorChrome(object)) continue;
     ensureLayerId(object, usedIds);
+    if (isGroupMarker(object)) continue;
     if (object === background) {
       markBackgroundObject(background);
     } else if (isObjectLocked(object)) {
@@ -157,6 +164,14 @@ export function normalizeEditorObjects(
     } else {
       (object as EditorFabricObject).erasable = true;
     }
+  }
+  // A group marker without its partner (a damaged or hand-edited file) goes.
+  const objects = canvas.getObjects().filter((object) => !isEditorChrome(object));
+  if (objects.some(isGroupMarker)) {
+    const entries = entriesOf(objects);
+    const kept = new Set(repaired(entries));
+    const stray = objects.filter((object, index) => isGroupMarker(object) && !kept.has(entries[index]!));
+    if (stray.length) canvas.remove(...stray);
   }
   return background;
 }
