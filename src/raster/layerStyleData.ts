@@ -47,6 +47,14 @@ export interface LayerStyle {
 
 export type EffectName = keyof LayerStyle;
 
+/** The effects in the order the dialog and the Layers panel list them. */
+export const EFFECTS: readonly { name: EffectName; label: string }[] = [
+  { name: "dropShadow", label: "Drop shadow" },
+  { name: "outerGlow", label: "Outer glow" },
+  { name: "colorOverlay", label: "Colour overlay" },
+  { name: "stroke", label: "Stroke" },
+];
+
 export const DEFAULT_EFFECTS: Required<LayerStyle> = {
   dropShadow: { enabled: false, color: "#000000", opacity: 75, angle: 120, distance: 10, size: 10 },
   outerGlow: { enabled: false, color: "#ffffbe", opacity: 75, size: 15 },

@@ -13,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import {
   DEFAULT_EFFECTS,
+  EFFECTS,
   EFFECT_LIMITS,
   hasEffects,
   type EffectName,
@@ -22,13 +23,6 @@ import {
 
 type Styled = FabricObject & { layerStyle?: LayerStyle };
 type Effects = Required<LayerStyle>;
-
-const EFFECTS: { name: EffectName; label: string }[] = [
-  { name: "dropShadow", label: "Drop shadow" },
-  { name: "outerGlow", label: "Outer glow" },
-  { name: "colorOverlay", label: "Colour overlay" },
-  { name: "stroke", label: "Stroke" },
-];
 
 const POSITIONS: { value: StrokePosition; label: string }[] = [
   { value: "outside", label: "Outside" },

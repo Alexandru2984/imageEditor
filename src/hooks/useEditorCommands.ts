@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { selectLayerPixels } from "@/selection/layerPixels";
 import { nameNextStep } from "@/utils/historySteps";
 import type { GuideDialogKind } from "@/components/editor/GuideDialog";
 import { guidesOf, setGuides } from "@/utils/guides";
@@ -90,7 +91,9 @@ import {
   addGroup,
   canUngroup,
   clippingAction,
-  deleteGroup,
+  deleteSelectedLayers,
+  pickedGroups,
+  selectedLayerObjects,
   duplicateGroup,
   groupSelected,
   hasClippedSelection,
@@ -469,8 +472,11 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     };
 
     /** The layer a layer style goes on: the selected one, else the photo. */
+    // Groups take no mask or style yet: not their layers, nor the photo instead.
+    const GROUP_REFUSAL = "Select a layer, not a group";
     const styleLayer = (): FabricObject | string => {
       if (!canvas) return "Open a photo first";
+      if (pickedGroups(canvas).length) return GROUP_REFUSAL;
       const active = canvas.getActiveObject();
       const layer = active && !isEditorChrome(active) ? active : findBackgroundImage(canvas);
       if (!layer) return "Open a photo first";
@@ -487,13 +493,13 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
 
     /** The layer mask commands' layer, when they can act on it. */
     const maskedLayer = (): MaskedImage | null => {
-      if (!canvas) return null;
+      if (!canvas || pickedGroups(canvas).length) return null;
       const layer = maskLayer(canvas);
       return typeof layer === "string" ? null : layer;
     };
     const withMaskLayer = (run: (canvas: FabricCanvas, layer: MaskedImage) => unknown) => () => {
       if (!canvas) return;
-      const layer = maskLayer(canvas);
+      const layer = pickedGroups(canvas).length ? GROUP_REFUSAL : maskLayer(canvas);
       if (typeof layer === "string") {
         toast.error(layer);
         return;
@@ -720,10 +726,10 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.delete,
         run: () => {
           const selection = pixelSelection();
-          const group = canvas ? selectedGroup(canvas) : null;
           if (selection) clearPixels(selection);
-          else if (canvas && group) {
-            const result = deleteGroup(canvas, group);
+          else if (canvas && pickedGroups(canvas).length) {
+            // Groups picked in the Layers panel go with everything in them.
+            const result = deleteSelectedLayers(canvas);
             if (typeof result === "string") toast.error(result);
           } else removeSelection();
         },
@@ -1299,6 +1305,23 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         },
         isEnabled: aiIdle,
         keywords: "ai person object select subject",
+      },
+      {
+        id: "select.layerPixels",
+        label: "Layer pixels",
+        icon: SquareDashed,
+        // As Ctrl+click on the layer's thumbnail in the Layers panel.
+        run: () => {
+          const layer = canvas ? selectedLayerObjects(canvas) : [];
+          if (!canvas || layer.length !== 1) {
+            toast("Select one layer to select its pixels");
+            return;
+          }
+          if (!selectLayerPixels(canvas, layer[0]!)) toast("The layer has no pixels to select");
+          else if (!isSelectionTool(activeTool)) onToolChange(lastMarqueeTool);
+        },
+        isEnabled: () => !!canvas && selectedLayerObjects(canvas).length === 1,
+        keywords: "load selection transparency alpha layer",
       },
       {
         id: "select.allLayers",

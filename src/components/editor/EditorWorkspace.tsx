@@ -868,11 +868,7 @@ export const EditorWorkspace = ({
         <AdjustPanel fabricCanvas={fabricCanvas} />
       </TabsContent>
       <TabsContent value="layers" className="mt-0 min-h-0 flex-1">
-        <LayersPanel
-          fabricCanvas={fabricCanvas}
-          onAddMask={commands["layer.mask.add"]?.run}
-          onLayerStyle={commands["layer.style"]?.run}
-        />
+        <LayersPanel fabricCanvas={fabricCanvas} commands={commands} />
       </TabsContent>
     </Tabs>
   );

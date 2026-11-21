@@ -142,6 +142,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "select.inverse",
       "-",
       "select.subject",
+      "select.layerPixels",
       "select.allLayers",
       "-",
       { label: "Modify", items: ["select.feather", "select.expand", "select.contract"] },

@@ -386,3 +386,36 @@ test("the clone stamp takes its source from a tap after Set source", async ({ pa
     )
     .toEqual([255, 0, 0]);
 });
+
+test("a finger drags a layer by its handle, and the layer options fit the screen", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Toggle properties" }).tap();
+  await page.getByRole("tab", { name: "Layers" }).tap();
+  await page.getByRole("button", { name: "Create a new layer" }).tap();
+  await page.getByRole("button", { name: "Create a new layer" }).tap();
+  const names = async () => (await autosavedObjects(page)).map((object) => object.name);
+  await expect.poll(names).toEqual(["Background", "Layer 1", "Layer 2"]);
+
+  // Layer 1's handle, dragged up over the top half of Layer 2: real touch events.
+  const handle = (await page.getByLabel("Drag Layer 1").boundingBox())!;
+  const target = (await page.getByRole("group", { name: "Layer 2 layer" }).boundingBox())!;
+  const touch = await page.context().newCDPSession(page);
+  const at = (x: number, y: number) => [{ x: Math.round(x), y: Math.round(y) }];
+  let x = handle.x + handle.width / 2;
+  let y = handle.y + handle.height / 2;
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(x, y) });
+  const toY = target.y + 6;
+  for (let step = 1; step <= 8; step += 1) {
+    y += (toY - y) / (9 - step);
+    x += 0;
+    await touch.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(x, y) });
+  }
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect.poll(names).toEqual(["Background", "Layer 2", "Layer 1"]);
+
+  await page.getByRole("button", { name: "Layer options" }).tap();
+  await expectOnScreen(page, page.getByRole("menu", { name: "Layer options" }));
+  await page.getByRole("menuitem", { name: /Group layers/ }).tap();
+  await expect.poll(names).toEqual(["Background", "Layer 2", undefined, "Layer 1", "Group 1"]);
+  await expectNoSidewaysScroll(page);
+});

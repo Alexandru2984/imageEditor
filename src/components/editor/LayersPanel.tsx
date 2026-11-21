@@ -1,102 +1,54 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useMaskTarget } from "@/hooks/useMaskTarget";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
+import type { Canvas as FabricCanvas, FabricObject } from "fabric";
+import { CircleDot, FolderPlus, Layers, MoreHorizontal, Pencil, Search, SquareDashed, SquarePlus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import {
-  Eye,
-  EyeOff,
-  Lock,
-  Unlock,
-  Trash2,
-  ChevronUp,
-  ChevronDown,
-  Square,
-  Circle,
-  Minus,
-  Type,
-  Pencil,
-  Image as ImageIcon,
-  MoveRight,
-  Layers,
-  CircleDot,
-  Sparkle,
-  ChevronRight,
-  CornerDownRight,
-  Folder,
-  FolderOpen,
-} from "lucide-react";
-import { FabricImage, type Canvas as FabricCanvas, type FabricObject } from "fabric";
-import { Button } from "@/components/ui/button";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
-import { Label } from "@/components/ui/label";
+import type { CommandMap, MenuEntry } from "@/commands/types";
+import { useMaskTarget } from "@/hooks/useMaskTarget";
+import { isGroupHeader, isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  BLEND_MODES,
-  DEFAULT_BLEND_MODE,
-  objectThumbnail,
-} from "@/utils/blendModes";
+  deleteSelectedLayers,
+  groupObjects,
+  groupPath,
+  moveLayers,
+  onSelectedGroupChange,
+  selectionIds,
+  selectLayers,
+} from "@/layers/layerGroups";
+import type { Anchor } from "@/layers/layerTree";
+import { hasLayerMask, maskTargetOf, setLayerMaskEnabled } from "@/raster/layerMask";
+import type { EffectName, LayerStyle } from "@/raster/layerStyleData";
+import { selectionModeOf, selectLayerPixels } from "@/selection/layerPixels";
+import { BLEND_MODES, DEFAULT_BLEND_MODE, objectThumbnail } from "@/utils/blendModes";
 import {
   ensureLayerId,
   isBackgroundObject,
   isEditorChrome,
+  isLayerObject,
   isObjectLocked,
   isProtectedObject,
   setObjectLocked,
-  type EditorFabricObject,
 } from "@/utils/editorObjects";
-import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
-import { treeOf } from "@/compositing/compositor";
-import type { LayerGroup } from "@/layers/groupMarkers";
-import {
-  arrangeLayers,
-  deleteGroup,
-  onSelectedGroupChange,
-  selectedGroup,
-  selectGroup,
-} from "@/layers/layerGroups";
-import type { TreeNode } from "@/layers/layerTree";
-import { toast } from "sonner";
-import {
-  hasLayerMask,
-  layerMaskThumbnail,
-  maskTargetOf,
-  setLayerMaskEnabled,
-} from "@/raster/layerMask";
-
-type EditorObject = EditorFabricObject;
-
-interface LayerItem {
-  id: string;
-  /** A layer, or a group's header. */
-  kind: "layer" | "group";
-  /** How many groups it is inside. */
-  depth: number;
-  /** Clipped to the layer below it. */
-  clipped: boolean;
-  /** A group folded shut. */
-  collapsed: boolean;
-  name: string;
-  type: string;
-  visible: boolean;
-  locked: boolean;
-  isBackground: boolean;
-  thumbnail: string;
-  /** The layer mask, when the layer has one. */
-  mask: { thumbnail: string; enabled: boolean } | null;
-  /** Whether layer style effects are on. */
-  effects: boolean;
-  fabricObject: EditorObject;
-}
+import { cn } from "@/lib/utils";
+import { CommandDropdownItems } from "./EditorMenus";
+import { LayerRow, type LayerRowHandlers } from "./layers/LayerRow";
+import { isFiltering, layerRows, NO_FILTER, rowRange, type EditorObject, type KindFilter, type LayerItem, type RowFilter } from "./layers/layerRows";
+import { useLayerDrag, type DropTarget } from "./layers/useLayerDrag";
 
 interface LayersPanelProps {
   fabricCanvas: FabricCanvas | null;
-  /** Layer › Layer mask › Add layer mask. */
-  onAddMask?: () => void;
-  /** Layer › Layer style…, for the selected layer. */
-  onLayerStyle?: () => void;
+  /** The editor's commands, for the panel's buttons and its right-click menu. */
+  commands: CommandMap;
 }
 
 // Generating a Fabric data URL is a real canvas render. Keep previews for the
@@ -108,176 +60,105 @@ const MAX_CACHED_THUMBNAILS = 160;
 /** A group's blend mode when its layers blend straight into what is below. */
 const PASS_THROUGH = "pass-through";
 
-const getTypeIcon = (type: string) => {
-  switch (type) {
-    case "rect":
-      return Square;
-    case "circle":
-    case "ellipse":
-      return Circle;
-    case "line":
-      return Minus;
-    case "path":
-    case "pencilBrush":
-      return Pencil;
-    case "i-text":
-    case "text":
-    case "textbox":
-      return Type;
-    case "image":
-      return ImageIcon;
-    case "triangle":
-    case "polygon":
-      return MoveRight;
-    default:
-      return Square;
-  }
-};
+const KIND_FILTERS: { value: KindFilter; label: string }[] = [
+  { value: "all", label: "All kinds" },
+  { value: "pixel", label: "Pixel" },
+  { value: "text", label: "Text" },
+  { value: "shape", label: "Shape" },
+  { value: "group", label: "Group" },
+];
 
-const getLayerName = (obj: EditorObject, index: number): string => {
-  if (obj.name) return obj.name;
+/** The commands of the panel's right-click menu and its ⋯ button. */
+const layerMenu = (clipped: boolean): readonly MenuEntry[] => [
+  "layer.duplicate",
+  "layer.group",
+  "layer.ungroup",
+  "-",
+  "layer.mask.add",
+  "layer.style",
+  "layer.style.clear",
+  "-",
+  // As in Photoshop, the one that applies.
+  clipped ? "layer.releaseClippingMask" : "layer.createClippingMask",
+  "layer.toggleLock",
+  "-",
+  "layer.rasterize",
+  "layer.mergeDown",
+  "layer.mergeGroup",
+  "layer.mergeVisible",
+  "layer.flatten",
+];
 
-  const type = obj.type || "object";
-  switch (type) {
-    case "rect":
-      return `Rectangle ${index}`;
-    case "circle":
-      return `Circle ${index}`;
-    case "ellipse":
-      return `Ellipse ${index}`;
-    case "line":
-      return `Line ${index}`;
-    case "path":
-      return `Drawing ${index}`;
-    case "i-text":
-    case "text":
-    case "textbox":
-      return `Text ${index}`;
-    case "image":
-      return `Image ${index}`;
-    case "triangle":
-      return `Triangle ${index}`;
-    case "polygon":
-      return `Polygon ${index}`;
-    case "group":
-      return `Group ${index}`;
-    default:
-      return `Object ${index}`;
-  }
-};
+type Styled = FabricObject & { layerStyle?: LayerStyle };
 
-export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPanelProps) => {
+const idOf = (object: FabricObject) => (object as EditorObject).__layerId ?? "";
+
+export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
   const [layers, setLayers] = useState<LayerItem[]>([]);
+  const [layerCount, setLayerCount] = useState(0);
   // Which layer's mask the paint tools work on.
   const maskTargetLayer = useMaskTarget(fabricCanvas);
-  const [selectedLayerId, setSelectedLayerId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [openEffects, setOpenEffects] = useState<ReadonlySet<string>>(new Set());
+  const [filter, setFilter] = useState<RowFilter>(NO_FILTER);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const anchorRef = useRef<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const thumbnailCacheRef = useRef<Map<FabricObject, string>>(new Map());
   const refreshFrameRef = useRef<number | null>(null);
   const pendingOpacityCommitRef = useRef<FabricObject | null>(null);
   const opacityCommitTimerRef = useRef<number | null>(null);
+  const eyeStrokeRef = useRef<{ value: boolean; changed: FabricObject[] } | null>(null);
+  const eyeByPointerRef = useRef(false);
+  const soloRef = useRef<{ id: string; saved: Map<FabricObject, boolean> } | null>(null);
+  // Rename… starts once its menu has closed and let go of the focus.
+  const renameAfterMenuRef = useRef<LayerItem | null>(null);
+
+  const syncSelection = useCallback(() => {
+    setSelectedIds(fabricCanvas ? new Set(selectionIds(fabricCanvas)) : new Set());
+  }, [fabricCanvas]);
 
   const refreshLayers = useCallback(() => {
     if (!fabricCanvas) {
       setLayers([]);
+      setLayerCount(0);
       return;
     }
-
     const objects = fabricCanvas.getObjects().filter((object) => !isEditorChrome(object));
-    const layerItems: LayerItem[] = [];
     const usedIds = new Set<string>();
-    for (const obj of objects) ensureLayerId(obj, usedIds);
-    let counter = 1;
+    for (const object of objects) ensureLayerId(object, usedIds);
+    const rows = layerRows(objects, filter);
 
-    // Bottom to top, groups' layers just under their group; a closed
-    // group's layers are not listed.
-    const visit = (nodes: readonly TreeNode[], depth: number) => {
-      for (const node of nodes) {
-        const obj = objects[node.index] as EditorObject;
-        if (node.kind === "group") {
-          const header = obj as unknown as LayerGroup;
-          if (!header.collapsed) visit(node.children, depth + 1);
-          layerItems.push({
-            id: obj.__layerId!,
-            kind: "group",
-            depth,
-            clipped: false,
-            collapsed: header.collapsed === true,
-            name: obj.name?.trim() || "Group",
-            type: "group",
-            visible: obj.visible !== false,
-            locked: false,
-            isBackground: false,
-            thumbnail: "",
-            mask: null,
-            effects: false,
-            fabricObject: obj,
-          });
-          continue;
-        }
-        const isBackground = isBackgroundObject(obj);
-        const name =
-          obj.name?.trim() ||
-          (isBackground ? "Background" : getLayerName(obj, counter));
-        obj.name = name;
-        layerItems.push({
-          id: obj.__layerId!,
-          kind: "layer",
-          depth,
-          clipped: node.clipped,
-          collapsed: false,
-          name,
-          type: obj.type || "object",
-          visible: obj.visible !== false,
-          locked: isBackground || isObjectLocked(obj),
-          isBackground,
-          thumbnail: "",
-          mask: hasLayerMask(obj) ? { thumbnail: layerMaskThumbnail(obj), enabled: obj.layerMask.enabled } : null,
-          effects: hasEffects((obj as EditorObject & { layerStyle?: LayerStyle }).layerStyle),
-          fabricObject: obj,
-        });
-        if (!isBackground) counter += 1;
-      }
-    };
-    visit(treeOf(objects).roots, 0);
-
-    // Reverse so topmost layer appears first. Thumbnails are memoized by
-    // object identity and invalidated only when that object changes.
-    const ordered = layerItems.reverse();
-    for (let index = 0; index < ordered.length; index += 1) {
-      const layer = ordered[index];
-      if (!layer || layer.kind === "group" || index >= MAX_LAYER_THUMBNAILS) continue;
-      const cache = thumbnailCacheRef.current;
-      const cached = cache.get(layer.fabricObject);
-      if (cache.has(layer.fabricObject)) {
-        const thumbnail = cached ?? "";
-        layer.thumbnail = thumbnail;
+    // Thumbnails are memoized by object identity and invalidated only when
+    // that object changes.
+    const cache = thumbnailCacheRef.current;
+    let drawn = 0;
+    for (const row of rows) {
+      if (row.kind === "group") continue;
+      if (drawn >= MAX_LAYER_THUMBNAILS) break;
+      drawn += 1;
+      if (cache.has(row.fabricObject)) {
+        const thumbnail = cache.get(row.fabricObject) ?? "";
+        row.thumbnail = thumbnail;
         // Refresh insertion order so the bounded map behaves as a small LRU.
-        cache.delete(layer.fabricObject);
-        cache.set(layer.fabricObject, thumbnail);
+        cache.delete(row.fabricObject);
+        cache.set(row.fabricObject, thumbnail);
       } else {
-        const thumbnail = objectThumbnail(layer.fabricObject);
-        cache.set(layer.fabricObject, thumbnail);
+        const thumbnail = objectThumbnail(row.fabricObject);
+        cache.set(row.fabricObject, thumbnail);
         if (cache.size > MAX_CACHED_THUMBNAILS) {
           const oldest = cache.keys().next().value as FabricObject | undefined;
           if (oldest) cache.delete(oldest);
         }
-        layer.thumbnail = thumbnail;
+        row.thumbnail = thumbnail;
       }
     }
-    setLayers(ordered);
-
-    const group = selectedGroup(fabricCanvas) as EditorObject | null;
-    const active = fabricCanvas.getActiveObject() as EditorObject | undefined;
-    if (group) {
-      setSelectedLayerId(group.__layerId ?? null);
-    } else if (active && !isEditorChrome(active)) {
-      setSelectedLayerId(active.__layerId ?? null);
-    } else if (!active) {
-      setSelectedLayerId(null);
-    }
-  }, [fabricCanvas]);
+    setLayers(rows);
+    setLayerCount(objects.filter((object) => !isGroupMarker(object)).length);
+    syncSelection();
+  }, [fabricCanvas, filter, syncSelection]);
 
   const scheduleRefresh = useCallback(
     (target?: FabricObject) => {
@@ -292,17 +173,68 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
     [refreshLayers]
   );
 
-  const selectedLayer = layers.find((l) => l.id === selectedLayerId) ?? null;
+  useEffect(() => {
+    if (!fabricCanvas) return;
+    const thumbnailCache = thumbnailCacheRef.current;
+    refreshLayers();
+    const events = ["object:added", "object:removed", "object:modified"] as const;
+    const handler = (event: { target?: FabricObject }) => scheduleRefresh(event.target);
+    events.forEach((event) => fabricCanvas.on(event, handler));
+    return () => {
+      events.forEach((event) => fabricCanvas.off(event, handler));
+      if (refreshFrameRef.current !== null) {
+        window.cancelAnimationFrame(refreshFrameRef.current);
+        refreshFrameRef.current = null;
+      }
+      thumbnailCache.clear();
+    };
+  }, [fabricCanvas, refreshLayers, scheduleRefresh]);
+
+  // The selection follows the canvas, once each change has settled (picking
+  // groups changes the canvas selection, then the groups).
+  useEffect(() => {
+    if (!fabricCanvas) return;
+    let queued = false;
+    const later = () => {
+      if (queued) return;
+      queued = true;
+      queueMicrotask(() => {
+        queued = false;
+        syncSelection();
+      });
+    };
+    const events = ["selection:created", "selection:updated", "selection:cleared"] as const;
+    events.forEach((event) => fabricCanvas.on(event, later));
+    const stopGroups = onSelectedGroupChange(fabricCanvas, later);
+    syncSelection();
+    return () => {
+      stopGroups();
+      events.forEach((event) => fabricCanvas.off(event, later));
+    };
+  }, [fabricCanvas, syncSelection]);
+
+  // What is selected, top of the stack first (also what is folded away).
+  const selection = useMemo(() => {
+    if (!fabricCanvas || selectedIds.size === 0) return [];
+    return fabricCanvas
+      .getObjects()
+      .filter((object) => !isEditorChrome(object) && selectedIds.has(idOf(object)))
+      .reverse() as EditorObject[];
+    // The rows change whenever the stack does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fabricCanvas, selectedIds, layers]);
+  const primary = selection[0] ?? null;
+  const selectionLocked = selection.some(
+    (object) => !isGroupHeader(object) && (isBackgroundObject(object) || isObjectLocked(object))
+  );
+  const allGroups = selection.length > 0 && selection.every(isGroupHeader);
+  const single = selection.length === 1 ? layers.find((row) => row.id === idOf(selection[0]!)) ?? null : null;
+
+  // ---------- Opacity and blend mode ----------
 
   const fireOpacityCommit = useCallback(
     (target: FabricObject): boolean => {
-      if (
-        !fabricCanvas ||
-        isProtectedObject(target) ||
-        !fabricCanvas.getObjects().includes(target)
-      ) {
-        return false;
-      }
+      if (!fabricCanvas || isProtectedObject(target) || !fabricCanvas.getObjects().includes(target)) return false;
       fabricCanvas.fire("object:modified", { target });
       return true;
     },
@@ -322,9 +254,7 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
   const scheduleOpacityCommit = useCallback(
     (target: FabricObject) => {
       pendingOpacityCommitRef.current = target;
-      if (opacityCommitTimerRef.current !== null) {
-        window.clearTimeout(opacityCommitTimerRef.current);
-      }
+      if (opacityCommitTimerRef.current !== null) window.clearTimeout(opacityCommitTimerRef.current);
       opacityCommitTimerRef.current = window.setTimeout(() => {
         opacityCommitTimerRef.current = null;
         const pending = pendingOpacityCommitRef.current;
@@ -335,46 +265,45 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
     [fireOpacityCommit]
   );
 
-  useEffect(
-    () => () => flushOpacityCommit(),
-    [fabricCanvas, flushOpacityCommit]
-  );
+  useEffect(() => () => flushOpacityCommit(), [fabricCanvas, flushOpacityCommit]);
 
-  // Blend mode + opacity act on the selected layer (Photoshop-style header)
   const selectedBlend =
-    selectedLayer?.kind === "group" && (selectedLayer.fabricObject as unknown as LayerGroup).passThrough !== false
+    primary && isGroupHeader(primary) && primary.passThrough !== false
       ? PASS_THROUGH
-      : (selectedLayer?.fabricObject.globalCompositeOperation as string) || DEFAULT_BLEND_MODE;
-  const selectedOpacity = Math.round(
-    (selectedLayer?.fabricObject.opacity ?? 1) * 100
-  );
+      : (primary?.globalCompositeOperation as string) || DEFAULT_BLEND_MODE;
+  const selectedOpacity = Math.round((primary?.opacity ?? 1) * 100);
 
   const handleBlendModeChange = (value: string) => {
-    if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
-    if (selectedLayer.kind === "group") {
-      (selectedLayer.fabricObject as unknown as LayerGroup).passThrough = value === PASS_THROUGH;
+    if (!fabricCanvas || !primary || selectionLocked) return;
+    for (const object of selection) {
+      if (isGroupHeader(object)) object.passThrough = value === PASS_THROUGH;
+      object.set("globalCompositeOperation", (value === PASS_THROUGH ? "source-over" : value) as GlobalCompositeOperation);
     }
-    selectedLayer.fabricObject.set(
-      "globalCompositeOperation",
-      (value === PASS_THROUGH ? "source-over" : value) as GlobalCompositeOperation
-    );
-    fabricCanvas.fire("object:modified", { target: selectedLayer.fabricObject });
-    fabricCanvas.renderAll();
+    fabricCanvas.fire("object:modified", { target: primary });
+    fabricCanvas.requestRenderAll();
   };
 
   const handleOpacityChange = (value: number[]) => {
-    if (!fabricCanvas || !selectedLayer || selectedLayer.locked) return;
     const opacity = value[0];
-    if (opacity === undefined) return;
-    selectedLayer.fabricObject.set("opacity", opacity / 100);
-    fabricCanvas.renderAll();
-    // Reflect the new value without waiting for a full refresh
-    setLayers((prev) => [...prev]);
-    scheduleOpacityCommit(selectedLayer.fabricObject);
+    if (!fabricCanvas || !primary || selectionLocked || opacity === undefined) return;
+    for (const object of selection) object.set("opacity", opacity / 100);
+    fabricCanvas.requestRenderAll();
+    // Reflect the new value without waiting for a full refresh.
+    setLayers((previous) => [...previous]);
+    scheduleOpacityCommit(primary);
   };
 
-  const handleOpacityCommit = () => {
-    flushOpacityCommit();
+  // ---------- Selecting ----------
+
+  const pick = (ids: readonly string[]) => {
+    if (!fabricCanvas) return;
+    if (ids.length === 0) {
+      fabricCanvas.discardActiveObject();
+      fabricCanvas.requestRenderAll();
+    } else {
+      selectLayers(fabricCanvas, ids);
+    }
+    syncSelection();
   };
 
   const startRename = (layer: LayerItem) => {
@@ -388,476 +317,481 @@ export const LayersPanel = ({ fabricCanvas, onAddMask, onLayerStyle }: LayersPan
       setRenamingId(null);
       return;
     }
-    const layer = layers.find((l) => l.id === renamingId);
-    const name = renameValue.trim();
-    if (layer && !layer.locked && name) {
+    const layer = layers.find((row) => row.id === renamingId);
+    const name = renameValue.trim().slice(0, 256);
+    if (layer && !layer.locked && name && name !== layer.name) {
       layer.fabricObject.name = name;
       fabricCanvas.fire("object:modified", { target: layer.fabricObject });
     }
     setRenamingId(null);
   };
 
-  useEffect(() => {
+  // ---------- Visibility ----------
+
+  const setShown = (object: FabricObject, visible: boolean) => {
+    object.set("visible", visible);
+    fabricCanvas?.requestRenderAll();
+    scheduleRefresh(object);
+  };
+
+  const commitVisibility = (changed: readonly FabricObject[]) => {
+    if (fabricCanvas && changed.length) fabricCanvas.fire("object:modified", { target: changed[0]! });
+  };
+
+  /** Alt+click on an eye: only that layer (and the groups around it) shows; again, all comes back. */
+  const solo = (layer: LayerItem) => {
     if (!fabricCanvas) return;
-    const thumbnailCache = thumbnailCacheRef.current;
-
-    refreshLayers();
-
-    const events = ["object:added", "object:removed", "object:modified"] as const;
-
-    const handler = (event: { target?: FabricObject }) =>
-      scheduleRefresh(event.target);
-    events.forEach((event) => fabricCanvas.on(event, handler));
-
-    return () => {
-      events.forEach((event) => fabricCanvas.off(event, handler));
-      if (refreshFrameRef.current !== null) {
-        window.cancelAnimationFrame(refreshFrameRef.current);
-        refreshFrameRef.current = null;
+    const all = fabricCanvas.getObjects();
+    const objects = all.filter((object) => isLayerObject(object) || isGroupHeader(object));
+    const previous = soloRef.current;
+    const changed: FabricObject[] = [];
+    if (previous?.id === layer.id) {
+      for (const [object, visible] of previous.saved) {
+        if (!all.includes(object) || object.visible === visible) continue;
+        object.set("visible", visible);
+        changed.push(object);
       }
-      thumbnailCache.clear();
-    };
-  }, [fabricCanvas, refreshLayers, scheduleRefresh]);
-
-  // Sync selection state
-  useEffect(() => {
-    if (!fabricCanvas) return;
-
-    const onSelectionCreated = (e: { selected?: FabricObject[] }) => {
-      const obj = e.selected?.[0] as EditorObject | undefined;
-      setSelectedLayerId(obj?.__layerId ?? null);
-    };
-
-    const onSelectionCleared = () => setSelectedLayerId(null);
-
-    fabricCanvas.on("selection:created", onSelectionCreated);
-    fabricCanvas.on("selection:updated", onSelectionCreated);
-    fabricCanvas.on("selection:cleared", onSelectionCleared);
-    const stopGroup = onSelectedGroupChange(fabricCanvas, () => {
-      const group = selectedGroup(fabricCanvas) as EditorObject | null;
-      if (group) setSelectedLayerId(group.__layerId ?? null);
-    });
-
-    return () => {
-      stopGroup();
-      fabricCanvas.off("selection:created", onSelectionCreated);
-      fabricCanvas.off("selection:updated", onSelectionCreated);
-      fabricCanvas.off("selection:cleared", onSelectionCleared);
-    };
-  }, [fabricCanvas]);
-
-  const handleSelectLayer = (layer: LayerItem) => {
-    if (!fabricCanvas) return;
-    if (layer.kind === "group") {
-      selectGroup(fabricCanvas, layer.fabricObject as unknown as LayerGroup);
-      setSelectedLayerId(layer.id);
-      return;
+      soloRef.current = null;
+    } else {
+      const saved = new Map(objects.map((object) => [object, object.visible !== false]));
+      const keep = new Set<FabricObject>([layer.fabricObject, ...groupPath(fabricCanvas, layer.fabricObject).map((node) => all[node.index]!)]);
+      // A group shown alone keeps its layers as they are.
+      const inside = isGroupHeader(layer.fabricObject) ? new Set(groupObjects(fabricCanvas, layer.fabricObject)) : new Set();
+      for (const object of objects) {
+        if (inside.has(object) && !keep.has(object)) continue;
+        const visible = keep.has(object);
+        if ((object.visible !== false) === visible) continue;
+        object.set("visible", visible);
+        changed.push(object);
+      }
+      soloRef.current = { id: layer.id, saved };
     }
-    fabricCanvas.setActiveObject(layer.fabricObject);
-    fabricCanvas.renderAll();
-    setSelectedLayerId(layer.id);
+    fabricCanvas.requestRenderAll();
+    commitVisibility(changed);
   };
 
-  /** Click a thumbnail to paint on the layer or its mask; Shift+click turns the mask off. */
-  const handleThumbnail = (layer: LayerItem, mask: boolean, event: React.MouseEvent) => {
-    event.stopPropagation();
+  // ---------- Drag and drop ----------
+
+  const handleDrop = (ids: string[], target: DropTarget) => {
     if (!fabricCanvas) return;
-    const object = layer.fabricObject;
-    if (mask && event.shiftKey && hasLayerMask(object)) {
-      setLayerMaskEnabled(fabricCanvas, object, !object.layerMask.enabled);
-      return;
-    }
-    handleSelectLayer(layer);
-    maskTargetOf(fabricCanvas).set(mask ? object : null);
-  };
-
-  const handleToggleVisibility = (layer: LayerItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!fabricCanvas) return;
-    layer.fabricObject.set("visible", !layer.visible);
-    fabricCanvas.fire("object:modified", { target: layer.fabricObject });
-    fabricCanvas.renderAll();
-  };
-
-  const handleToggleLock = (layer: LayerItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!fabricCanvas || layer.isBackground) return;
-
-    const isLocked = layer.locked;
-    setObjectLocked(layer.fabricObject, !isLocked);
-    fabricCanvas.fire("object:modified", { target: layer.fabricObject });
-    fabricCanvas.renderAll();
-  };
-
-  const handleDelete = (layer: LayerItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!fabricCanvas) return;
-    if (layer.kind === "group") {
-      const result = deleteGroup(fabricCanvas, layer.fabricObject as unknown as LayerGroup);
+    if ("trash" in target) {
+      selectLayers(fabricCanvas, ids);
+      const result = deleteSelectedLayers(fabricCanvas);
       if (typeof result === "string") toast.error(result);
       return;
     }
-    if (isProtectedObject(layer.fabricObject)) return;
-    fabricCanvas.remove(layer.fabricObject);
-    fabricCanvas.renderAll();
+    const anchor: Anchor = target.where === "inside" ? { id: target.id, where: "insideTop" } : { id: target.id, where: target.where };
+    if (!moveLayers(fabricCanvas, ids, anchor)) {
+      toast("The layers cannot go there");
+      return;
+    }
+    selectLayers(fabricCanvas, ids);
   };
 
-  /** Open or fold a group in the list (not a change to the document). */
-  const handleToggleCollapsed = (layer: LayerItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const header = layer.fabricObject as unknown as LayerGroup;
-    header.collapsed = !header.collapsed;
-    scheduleRefresh(layer.fabricObject);
+  const drag = useLayerDrag({ listRef, enabled: !isFiltering(filter) && !!fabricCanvas, onDrop: handleDrop });
+
+  /** What a drag from this row carries: the selection, when the row is in it. */
+  const dragIds = (layer: LayerItem): string[] => {
+    const ids = selectedIds.has(layer.id) ? layers.filter((row) => selectedIds.has(row.id)).map((row) => row.id) : [layer.id];
+    return ids.filter((id) => !layers.find((row) => row.id === id)?.isBackground);
   };
 
-  // Up and down within the layer's group, past whole groups, and out at its edges.
-  const handleMoveUp = (layer: LayerItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!fabricCanvas || (layer.kind === "layer" && isProtectedObject(layer.fabricObject))) return;
-    arrangeLayers(fabricCanvas, [layer.id], "forward");
+  const deleteSelection = () => {
+    if (!fabricCanvas) return;
+    const result = deleteSelectedLayers(fabricCanvas);
+    if (typeof result === "string") toast.error(result);
   };
 
-  const handleMoveDown = (layer: LayerItem, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!fabricCanvas || (layer.kind === "layer" && isProtectedObject(layer.fabricObject))) return;
-    arrangeLayers(fabricCanvas, [layer.id], "backward");
+  // ---------- Rows ----------
+
+  const handlers: LayerRowHandlers = {
+    onClick(layer, event) {
+      if (drag.isDragClick() || !fabricCanvas) return;
+      if (event.shiftKey && anchorRef.current) {
+        pick(rowRange(layers, anchorRef.current, layer.id));
+        return;
+      }
+      anchorRef.current = layer.id;
+      if (event.ctrlKey || event.metaKey) {
+        const next = new Set(selectedIds);
+        if (next.has(layer.id)) next.delete(layer.id);
+        else next.add(layer.id);
+        pick([...next]);
+        return;
+      }
+      pick([layer.id]);
+    },
+    onPointerDown(layer, event) {
+      if (event.pointerType !== "mouse" || layer.isBackground || renamingId === layer.id) return;
+      if ((event.target as HTMLElement).closest("button, input")) return;
+      drag.begin(event, dragIds(layer));
+    },
+    onHandlePointerDown(layer, event) {
+      event.stopPropagation();
+      drag.begin(event, dragIds(layer));
+    },
+    onContextMenu(layer, event) {
+      event.preventDefault();
+      if (!selectedIds.has(layer.id)) {
+        anchorRef.current = layer.id;
+        pick([layer.id]);
+      }
+      let { clientX: x, clientY: y } = event;
+      // From the keyboard (the menu key, Shift+F10): at the row.
+      if (x === 0 && y === 0) {
+        const box = event.currentTarget.getBoundingClientRect();
+        x = box.left + 24;
+        y = box.bottom;
+      }
+      setContextMenu({ x, y });
+    },
+    onKeyDown(layer, event: KeyboardEvent) {
+      if (event.target !== event.currentTarget) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        anchorRef.current = layer.id;
+        pick([layer.id]);
+      } else if (event.key === "F2" && !layer.locked) {
+        event.preventDefault();
+        startRename(layer);
+      }
+    },
+    onEyePointerDown(layer, event: PointerEvent) {
+      event.stopPropagation();
+      if (event.button !== 0 || event.pointerType !== "mouse") return;
+      eyeByPointerRef.current = true;
+      if (event.altKey) {
+        solo(layer);
+        return;
+      }
+      // Dragging across eyes sets them all as the first one became: one step.
+      const stroke = { value: !layer.visible, changed: [layer.fabricObject as FabricObject] };
+      eyeStrokeRef.current = stroke;
+      setShown(layer.fabricObject, stroke.value);
+      window.addEventListener(
+        "pointerup",
+        () => {
+          eyeStrokeRef.current = null;
+          commitVisibility(stroke.changed);
+        },
+        { once: true }
+      );
+    },
+    onEyePointerEnter(layer, event) {
+      const stroke = eyeStrokeRef.current;
+      if (!stroke || !(event.buttons & 1) || layer.visible === stroke.value) return;
+      stroke.changed.push(layer.fabricObject);
+      setShown(layer.fabricObject, stroke.value);
+    },
+    onEyeClick(layer, event: MouseEvent) {
+      event.stopPropagation();
+      if (eyeByPointerRef.current) {
+        eyeByPointerRef.current = false;
+        return;
+      }
+      // From the keyboard or a touch.
+      if (event.altKey) solo(layer);
+      else {
+        setShown(layer.fabricObject, !layer.visible);
+        commitVisibility([layer.fabricObject]);
+      }
+    },
+    onToggleCollapsed(layer, event) {
+      event.stopPropagation();
+      // Not a change to the document: no history step.
+      const header = layer.fabricObject as unknown as LayerGroup;
+      header.collapsed = !header.collapsed;
+      scheduleRefresh(layer.fabricObject);
+    },
+    onThumbnail(layer, mask, event) {
+      if (!fabricCanvas) return;
+      const object = layer.fabricObject;
+      // Ctrl+click: the layer's pixels become the selection (Shift adds, Alt subtracts).
+      if (!mask && (event.ctrlKey || event.metaKey)) {
+        event.stopPropagation();
+        if (!selectLayerPixels(fabricCanvas, object, selectionModeOf(event))) toast("The layer has no pixels to select");
+        return;
+      }
+      // Click a thumbnail to paint on the layer or its mask; Shift+click turns the mask off.
+      if (!layer.mask) return;
+      event.stopPropagation();
+      if (mask && event.shiftKey && hasLayerMask(object)) {
+        setLayerMaskEnabled(fabricCanvas, object, !object.layerMask.enabled);
+        return;
+      }
+      anchorRef.current = layer.id;
+      pick([layer.id]);
+      maskTargetOf(fabricCanvas).set(mask ? object : null);
+    },
+    onToggleLock(layer, event) {
+      event.stopPropagation();
+      if (!fabricCanvas || layer.isBackground) return;
+      setObjectLocked(layer.fabricObject, !layer.locked);
+      fabricCanvas.fire("object:modified", { target: layer.fabricObject });
+      fabricCanvas.requestRenderAll();
+    },
+    onStartRename: startRename,
+    onRenameChange: setRenameValue,
+    onCommitRename: commitRename,
+    onCancelRename: () => setRenamingId(null),
+    onToggleEffects(layer, event) {
+      event.stopPropagation();
+      setOpenEffects((open) => {
+        const next = new Set(open);
+        if (next.has(layer.id)) next.delete(layer.id);
+        else next.add(layer.id);
+        return next;
+      });
+    },
+    onToggleEffect(layer, name: EffectName) {
+      if (!fabricCanvas) return;
+      const object = layer.fabricObject as Styled;
+      const style = object.layerStyle;
+      const effect = style?.[name];
+      if (!style || !effect) return;
+      if (isObjectLocked(object)) {
+        toast("Unlock the layer first");
+        return;
+      }
+      object.layerStyle = { ...style, [name]: { ...effect, enabled: !effect.enabled } };
+      object.dirty = true;
+      fabricCanvas.requestRenderAll();
+      fabricCanvas.fire("object:modified", { target: object });
+    },
+    onEditEffects(layer) {
+      anchorRef.current = layer.id;
+      pick([layer.id]);
+      commands["layer.style"]?.run();
+    },
   };
+
+  const dropOn = (id: string) => {
+    const target = drag.target;
+    return target && !("trash" in target) && target.id === id ? target.where : null;
+  };
+
+  // ---------- The panel's buttons and menu ----------
+
+  const commandButton = (id: string, label: string, icon: React.ReactNode) => {
+    const command = commands[id];
+    const enabled = !!command && (command.isEnabled ? command.isEnabled() : true);
+    return (
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        disabled={!enabled}
+        onClick={() => command?.run()}
+        className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+      >
+        {icon}
+      </button>
+    );
+  };
+
+  const selectPixels = commands["select.layerPixels"];
+  const menuItems = (
+    <>
+      <DropdownMenuItem
+        disabled={!single || single.locked}
+        onSelect={() => {
+          renameAfterMenuRef.current = single;
+        }}
+      >
+        <Pencil /> Rename… <DropdownMenuShortcut>F2</DropdownMenuShortcut>
+      </DropdownMenuItem>
+      <DropdownMenuItem
+        disabled={!selectPixels || (selectPixels.isEnabled ? !selectPixels.isEnabled() : false)}
+        onSelect={() => selectPixels?.run()}
+      >
+        <SquareDashed /> Select pixels
+      </DropdownMenuItem>
+      <DropdownMenuSeparator />
+      <CommandDropdownItems
+        entries={layerMenu(selection.some((object) => (object as EditorObject & { __clipped?: boolean }).__clipped === true))}
+        commands={commands}
+      />
+      <DropdownMenuSeparator />
+      <DropdownMenuItem
+        disabled={selection.length === 0 || selectionLocked}
+        onSelect={deleteSelection}
+        className="text-destructive focus:text-destructive [&_svg]:text-destructive"
+      >
+        <Trash2 /> Delete
+      </DropdownMenuItem>
+    </>
+  );
+
+  const afterMenu = (event: Event) => {
+    event.preventDefault();
+    const layer = renameAfterMenuRef.current;
+    renameAfterMenuRef.current = null;
+    if (layer) startRename(layer);
+  };
+
+  const trashTarget = !!drag.target && "trash" in drag.target;
 
   return (
     <div className="flex h-full w-full flex-col">
-      <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-xs text-muted-foreground">
-        <span>
-          {layers.filter((layer) => layer.kind === "layer").length} layer
-          {layers.filter((layer) => layer.kind === "layer").length === 1 ? "" : "s"}
-        </span>
-        <span className="ml-auto">Top of the list is in front</span>
-      </div>
-
-      {/* Blend mode + opacity for the selected layer */}
-      {selectedLayer && (
-        <div className="px-3 py-2.5 border-b border-border space-y-2.5">
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground w-14 shrink-0">
-              Blend
-            </Label>
-            <select
-              value={selectedBlend}
-              aria-label="Layer blend mode"
-              disabled={selectedLayer.locked}
-              onChange={(e) => handleBlendModeChange(e.target.value)}
-              className="flex-1 h-7 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
-            >
-              {selectedLayer.kind === "group" && <option value={PASS_THROUGH}>Pass Through</option>}
-              {BLEND_MODES.map((mode) => (
-                <option key={mode.value} value={mode.value}>
-                  {mode.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground w-14 shrink-0">
-              Opacity
-            </Label>
-            <Slider
-              value={[selectedOpacity]}
-              aria-label="Layer opacity"
-              disabled={selectedLayer.locked}
-              onValueChange={handleOpacityChange}
-              onValueCommit={handleOpacityCommit}
-              min={0}
-              max={100}
-              step={1}
-              className="flex-1"
+      <div className="space-y-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2">
+          <select
+            value={filter.kind}
+            aria-label="Filter layers by kind"
+            onChange={(event) => setFilter((current) => ({ ...current, kind: event.target.value as KindFilter }))}
+            className="h-7 w-24 shrink-0 rounded-md border border-border bg-background px-1.5 text-xs"
+          >
+            {KIND_FILTERS.map((kind) => (
+              <option key={kind.value} value={kind.value}>
+                {kind.label}
+              </option>
+            ))}
+          </select>
+          <div className="relative min-w-0 flex-1">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="search"
+              value={filter.query}
+              aria-label="Filter layers by name"
+              placeholder="Name"
+              maxLength={100}
+              onChange={(event) => setFilter((current) => ({ ...current, query: event.target.value }))}
+              className="h-7 w-full min-w-0 rounded-md border border-border bg-background pl-6 pr-2 text-xs"
             />
-            <span className="text-xs text-muted-foreground tabular-nums w-8 text-right">
-              {selectedOpacity}
-            </span>
           </div>
-          {selectedLayer.kind === "layer" && !isObjectLocked(selectedLayer.fabricObject) && (onAddMask || onLayerStyle) && (
-            <div className="flex gap-2">
-              {onAddMask && selectedLayer.fabricObject instanceof FabricImage && !selectedLayer.mask && (
-                <Button variant="outline" size="sm" className="h-7 flex-1 gap-1.5 text-xs" onClick={onAddMask}>
-                  <CircleDot className="h-3.5 w-3.5" />
-                  Add layer mask
-                </Button>
-              )}
-              {onLayerStyle && (
-                <Button variant="outline" size="sm" className="h-7 flex-1 gap-1.5 text-xs" onClick={onLayerStyle}>
-                  <Sparkle className="h-3.5 w-3.5" />
-                  Layer style
-                </Button>
-              )}
-            </div>
-          )}
         </div>
-      )}
+        <div className="flex items-center gap-2">
+          <select
+            value={selectedBlend}
+            aria-label="Layer blend mode"
+            disabled={!primary || selectionLocked}
+            onChange={(event) => handleBlendModeChange(event.target.value)}
+            className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
+          >
+            {allGroups && <option value={PASS_THROUGH}>Pass Through</option>}
+            {BLEND_MODES.map((mode) => (
+              <option key={mode.value} value={mode.value}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Label className="w-14 shrink-0 text-xs text-muted-foreground">Opacity</Label>
+          <Slider
+            value={[selectedOpacity]}
+            aria-label="Layer opacity"
+            disabled={!primary || selectionLocked}
+            onValueChange={handleOpacityChange}
+            onValueCommit={flushOpacityCommit}
+            min={0}
+            max={100}
+            step={1}
+            className="flex-1"
+          />
+          <span className="w-8 text-right text-xs tabular-nums text-muted-foreground">{selectedOpacity}</span>
+        </div>
+      </div>
 
       <ScrollArea className="flex-1">
         {layers.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-            <Layers className="h-10 w-10 text-muted-foreground/40 mb-3" />
-            <p className="text-sm text-muted-foreground">No layers yet</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">
-              Draw or add shapes to create layers
-            </p>
+          <div className="flex flex-col items-center justify-center px-4 py-12 text-center">
+            <Layers className="mb-3 h-10 w-10 text-muted-foreground/40" />
+            {isFiltering(filter) ? (
+              <p className="text-sm text-muted-foreground">No layers match</p>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">No layers yet</p>
+                <p className="mt-1 text-xs text-muted-foreground/60">Draw or add shapes to create layers</p>
+              </>
+            )}
           </div>
         ) : (
-          <div className="p-2 space-y-0.5">
-            {layers.map((layer) => {
-              const TypeIcon = getTypeIcon(layer.type);
-              const isSelected = selectedLayerId === layer.id;
-
-              return (
-                <div
-                  key={layer.id}
-                  data-layer-id={layer.id}
-                  data-layer-kind={layer.kind}
-                  role="group"
-                  tabIndex={0}
-                  aria-label={layer.kind === "group" ? `${layer.name} group` : `${layer.name} layer`}
-                  style={{ paddingLeft: `${8 + layer.depth * 14}px` }}
-                  aria-current={isSelected ? "true" : undefined}
-                  onClick={() => handleSelectLayer(layer)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      handleSelectLayer(layer);
-                    } else if (event.key === "F2" && !layer.locked) {
-                      event.preventDefault();
-                      startRename(layer);
-                    }
-                  }}
-                  className={`
-                    group flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer
-                    transition-colors duration-100 [content-visibility:auto] [contain-intrinsic-size:auto_40px]
-                    ${
-                      isSelected
-                        ? "bg-primary/15 border border-primary/30"
-                        : "hover:bg-accent border border-transparent"
-                    }
-                    ${!layer.visible ? "opacity-50" : ""}
-                  `}
-                >
-                  {layer.kind === "group" && (
-                    <button
-                      type="button"
-                      aria-label={`${layer.collapsed ? "Open" : "Close"} ${layer.name}`}
-                      aria-expanded={!layer.collapsed}
-                      onClick={(e) => handleToggleCollapsed(layer, e)}
-                      className="-mr-1 flex h-5 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                    >
-                      <ChevronRight className={`h-3 w-3 transition-transform ${layer.collapsed ? "" : "rotate-90"}`} />
-                    </button>
-                  )}
-                  {layer.clipped && (
-                    <CornerDownRight aria-label="Clipped to the layer below" className="-mr-1 h-3 w-3 shrink-0 text-muted-foreground" />
-                  )}
-                  {/* Thumbnail with a checkerboard so transparency reads */}
-                  {layer.kind === "group" ? (
-                    <div className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
-                      {layer.collapsed ? <Folder className="h-4 w-4" /> : <FolderOpen className="h-4 w-4" />}
-                    </div>
-                  ) : (
-                  <div
-                    role={layer.mask ? "button" : undefined}
-                    aria-label={layer.mask ? `Paint on ${layer.name}` : undefined}
-                    aria-pressed={layer.mask ? maskTargetLayer !== layer.fabricObject : undefined}
-                    onClick={layer.mask ? (event) => handleThumbnail(layer, false, event) : undefined}
-                    className={`h-7 w-7 shrink-0 rounded border bg-[length:8px_8px] bg-[position:0_0,4px_4px] flex items-center justify-center overflow-hidden ${
-                      layer.mask && isSelected && maskTargetLayer !== layer.fabricObject
-                        ? "border-primary ring-1 ring-primary"
-                        : "border-border"
-                    }`}
-                    style={{
-                      backgroundImage:
-                        "linear-gradient(45deg,hsl(var(--muted)) 25%,transparent 25%,transparent 75%,hsl(var(--muted)) 75%),linear-gradient(45deg,hsl(var(--muted)) 25%,transparent 25%,transparent 75%,hsl(var(--muted)) 75%)",
-                    }}
-                  >
-                    {layer.thumbnail ? (
-                      <img
-                        src={layer.thumbnail}
-                        alt=""
-                        className="max-h-full max-w-full object-contain"
-                        draggable={false}
-                      />
-                    ) : (
-                      <TypeIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                    )}
-                  </div>
-                  )}
-
-                  {layer.mask && (
-                    <button
-                      type="button"
-                      aria-label={`${layer.name} layer mask`}
-                      aria-pressed={maskTargetLayer === layer.fabricObject}
-                      title="Click to paint on the mask · Shift+click to turn it off"
-                      onClick={(event) => handleThumbnail(layer, true, event)}
-                      className={`relative -ml-1 h-7 w-7 shrink-0 overflow-hidden rounded border bg-black ${
-                        maskTargetLayer === layer.fabricObject
-                          ? "border-primary ring-1 ring-primary"
-                          : "border-border"
-                      }`}
-                    >
-                      {layer.mask.thumbnail && (
-                        <img
-                          src={layer.mask.thumbnail}
-                          alt=""
-                          className="h-full w-full object-contain"
-                          draggable={false}
-                        />
-                      )}
-                      {!layer.mask.enabled && (
-                        <svg viewBox="0 0 28 28" className="absolute inset-0 h-full w-full text-red-500" aria-hidden>
-                          <path d="M4 4 24 24M24 4 4 24" stroke="currentColor" strokeWidth="2.5" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
-
-                  {renamingId === layer.id ? (
-                    <input
-                      autoFocus
-                      aria-label={`Rename ${layer.name}`}
-                      value={renameValue}
-                      onChange={(e) => setRenameValue(e.target.value)}
-                      onBlur={commitRename}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") commitRename();
-                        else if (e.key === "Escape") setRenamingId(null);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs flex-1 min-w-0 h-6 rounded border border-primary bg-background px-1"
-                    />
-                  ) : (
-                    <span
-                      className="text-xs truncate flex-1 min-w-0"
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        startRename(layer);
-                      }}
-                    >
-                      {layer.name}
-                    </span>
-                  )}
-                  {layer.effects && (
-                    <span
-                      title="Layer style"
-                      aria-label="Has a layer style"
-                      className="shrink-0 text-[10px] font-semibold italic text-muted-foreground"
-                    >
-                      fx
-                    </span>
-                  )}
-
-                  <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Move ${layer.name} up`}
-                          disabled={layer.locked}
-                          className="h-6 w-6"
-                          onClick={(e) => handleMoveUp(layer, e)}
-                        >
-                          <ChevronUp className="h-3 w-3" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left">
-                        <p>Move Up</p>
-                      </TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Move ${layer.name} down`}
-                          disabled={layer.locked}
-                          className="h-6 w-6"
-                          onClick={(e) => handleMoveDown(layer, e)}
-                        >
-                          <ChevronDown className="h-3 w-3" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left">
-                        <p>Move Down</p>
-                      </TooltipContent>
-                    </Tooltip>
-
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Delete ${layer.name}`}
-                          disabled={layer.locked}
-                          className="h-6 w-6 hover:text-destructive"
-                          onClick={(e) => handleDelete(layer, e)}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent side="left">
-                        <p>Delete</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
-                        className="h-6 w-6 shrink-0"
-                        onClick={(e) => handleToggleVisibility(layer, e)}
-                      >
-                        {layer.visible ? (
-                          <Eye className="h-3 w-3" />
-                        ) : (
-                          <EyeOff className="h-3 w-3" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      <p>{layer.visible ? "Hide" : "Show"}</p>
-                    </TooltipContent>
-                  </Tooltip>
-
-                  {layer.kind === "group" ? <span className="h-6 w-6 shrink-0" /> : (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`}
-                        disabled={layer.isBackground}
-                        className="h-6 w-6 shrink-0"
-                        onClick={(e) => handleToggleLock(layer, e)}
-                      >
-                        {layer.locked ? (
-                          <Lock className="h-3 w-3 text-amber-500" />
-                        ) : (
-                          <Unlock className="h-3 w-3" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="left">
-                      <p>{layer.locked ? "Unlock" : "Lock"}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                  )}
-                </div>
-              );
-            })}
+          <div ref={listRef} className={cn("space-y-0.5 p-2", drag.dragged && "cursor-grabbing")}>
+            {layers.map((layer) => (
+              <LayerRow
+                key={layer.id}
+                layer={layer}
+                selected={selectedIds.has(layer.id)}
+                paintingMask={maskTargetLayer === layer.fabricObject}
+                renaming={renamingId === layer.id}
+                renameValue={renameValue}
+                effectsOpen={openEffects.has(layer.id)}
+                drop={dropOn(layer.id)}
+                dragged={!!drag.dragged?.includes(layer.id)}
+                handlers={handlers}
+              />
+            ))}
           </div>
         )}
       </ScrollArea>
+
+      <div className="flex items-center gap-0.5 border-t border-border px-2 py-1">
+        <span className="mr-auto truncate text-xs text-muted-foreground">
+          {layerCount} layer{layerCount === 1 ? "" : "s"}
+        </span>
+        {commandButton("layer.style", "Add a layer style", <span className="text-[11px] font-semibold italic">fx</span>)}
+        {commandButton("layer.mask.add", "Add a mask", <CircleDot className="h-4 w-4" />)}
+        {commandButton("layer.newGroup", "Create a new group", <FolderPlus className="h-4 w-4" />)}
+        {commandButton("layer.new", "Create a new layer", <SquarePlus className="h-4 w-4" />)}
+        <button
+          type="button"
+          aria-label="Delete layer"
+          title="Delete layer (or drag layers here)"
+          data-layer-drop="trash"
+          disabled={selection.length === 0 && !drag.dragged}
+          onClick={deleteSelection}
+          className={cn(
+            "flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-destructive disabled:opacity-40",
+            trashTarget && "bg-destructive/15 text-destructive"
+          )}
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Layer options"
+              title="Layer options"
+              className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <MoreHorizontal className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            side="top"
+            collisionPadding={8}
+            className="w-72"
+            aria-label="Layer options"
+            onCloseAutoFocus={afterMenu}
+          >
+            {menuItems}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Right-click on a row. */}
+      <DropdownMenu open={!!contextMenu} onOpenChange={(open) => !open && setContextMenu(null)} modal={false}>
+        <DropdownMenuTrigger asChild>
+          <span
+            aria-hidden="true"
+            className="pointer-events-none fixed h-px w-px"
+            style={{ left: contextMenu?.x ?? 0, top: contextMenu?.y ?? 0 }}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          sideOffset={2}
+          collisionPadding={8}
+          className="w-72"
+          aria-label="Layer options"
+          onCloseAutoFocus={afterMenu}
+        >
+          {menuItems}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 };

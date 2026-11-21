@@ -178,6 +178,11 @@ function MenuEntries({
   );
 }
 
+/** Commands as the items of a dropdown menu (context menus), with their shortcuts. */
+export function CommandDropdownItems({ entries, commands }: { entries: readonly MenuEntry[]; commands: CommandMap }) {
+  return <MenuEntries entries={entries} commands={commands} kit={DROPDOWN_KIT} showShortcuts />;
+}
+
 /** File, Edit, Image, … across the top of the editor on wide screens. */
 export function EditorMenuBar({ commands }: { commands: CommandMap }) {
   return (

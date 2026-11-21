@@ -65,34 +65,56 @@ function applyStack(canvas: FabricCanvas, entries: readonly Entry[], created: re
 // ---------- The selected group ----------
 
 type Listener = () => void;
-const selectedGroups = new WeakMap<FabricCanvas, { id: string | null; listeners: Set<Listener> }>();
+const selectedGroups = new WeakMap<FabricCanvas, { ids: readonly string[]; listeners: Set<Listener> }>();
 
 function groupSelectionState(canvas: FabricCanvas) {
   let state = selectedGroups.get(canvas);
   if (!state) {
-    state = { id: null, listeners: new Set() };
+    state = { ids: [], listeners: new Set() };
     selectedGroups.set(canvas, state);
   }
   return state;
 }
 
 /**
- * The group picked in the Layers panel, if any. Picking a group selects its
- * layers on the canvas too, so they move together; this says it was the
- * group, for commands such as Ungroup.
+ * The groups picked in the Layers panel. Picking a group selects its layers
+ * on the canvas too, so they move together; this says it was the group, for
+ * commands such as Ungroup.
+ */
+export function pickedGroups(canvas: FabricCanvas): LayerGroup[] {
+  const { ids } = groupSelectionState(canvas);
+  if (ids.length === 0) return [];
+  const headers = new Map(canvas.getObjects().filter(isGroupHeader).map((header) => [idOf(header), header]));
+  return ids.map((id) => headers.get(id)).filter((header): header is LayerGroup => !!header);
+}
+
+/** Layers inside any of the given groups. */
+function membersOf(canvas: FabricCanvas, groups: readonly LayerGroup[]): Set<FabricObject> {
+  const inside = new Set<FabricObject>();
+  for (const group of groups) for (const object of groupObjects(canvas, group)) inside.add(object);
+  return inside;
+}
+
+/**
+ * The one group picked, when it is all that is selected (layers picked
+ * besides it make it a mixed selection).
  */
 export function selectedGroup(canvas: FabricCanvas): LayerGroup | null {
-  const { id } = groupSelectionState(canvas);
-  if (!id) return null;
-  const header = canvas.getObjects().find((object) => isGroupHeader(object) && idOf(object) === id);
-  return (header as LayerGroup | undefined) ?? null;
+  const groups = pickedGroups(canvas);
+  if (groups.length !== 1) return null;
+  const inside = membersOf(canvas, groups);
+  return canvas.getActiveObjects().every((object) => inside.has(object)) ? groups[0]! : null;
 }
 
 export function setSelectedGroup(canvas: FabricCanvas, group: LayerGroup | null): void {
+  setPickedGroups(canvas, group ? [group] : []);
+}
+
+function setPickedGroups(canvas: FabricCanvas, groups: readonly LayerGroup[]): void {
   const state = groupSelectionState(canvas);
-  const id = group ? idOf(group) : null;
-  if (state.id === id) return;
-  state.id = id;
+  const ids = groups.map(idOf);
+  if (state.ids.length === ids.length && state.ids.every((id, index) => id === ids[index])) return;
+  state.ids = ids;
   for (const listener of state.listeners) listener();
 }
 
@@ -122,23 +144,51 @@ export function groupObjects(canvas: FabricCanvas, group: LayerGroup): FabricObj
 
 /** Select a group: its layers on the canvas, the group itself for the panel. */
 export function selectGroup(canvas: FabricCanvas, group: LayerGroup): void {
-  const members = groupMembers(canvas, group).filter((object) => object.visible && !hiddenByGroups(canvas.getObjects()).has(object));
-  // Setting the canvas selection clears the group; set it again after.
+  selectLayers(canvas, [idOf(group)]);
+}
+
+/**
+ * Pick layers and groups in the Layers panel (by id): the layers, and the
+ * groups' shown layers, are selected on the canvas so they move together.
+ */
+export function selectLayers(canvas: FabricCanvas, ids: readonly string[]): void {
+  const { objects } = stackOf(canvas);
+  const chosen = new Set(ids);
+  const groups = objects.filter((object): object is LayerGroup => isGroupHeader(object) && chosen.has(idOf(object)));
+  const hidden = hiddenByGroups(canvas.getObjects());
+  const inside = membersOf(canvas, groups);
+  const targets = new Set<FabricObject>();
+  for (const object of objects) {
+    if (!isLayerObject(object)) continue;
+    if (chosen.has(idOf(object)) && !inside.has(object)) targets.add(object);
+    else if (inside.has(object) && object.visible && !hidden.has(object)) targets.add(object);
+  }
+  const list = objects.filter((object) => targets.has(object));
+  // Setting the canvas selection clears the groups; set them again after.
   canvas.discardActiveObject();
-  if (members.length === 1) canvas.setActiveObject(members[0]!);
-  else if (members.length > 1) canvas.setActiveObject(new ActiveSelection(members, { canvas }));
-  setSelectedGroup(canvas, group);
+  if (list.length === 1) canvas.setActiveObject(list[0]!);
+  else if (list.length > 1) canvas.setActiveObject(new ActiveSelection(list, { canvas }));
+  setPickedGroups(canvas, groups);
   canvas.requestRenderAll();
 }
 
-/** The ids of what is selected: the picked group, or the selected layers. */
+/** The ids of what is selected: picked groups, and the layers selected outside them. */
 function selectedIds(canvas: FabricCanvas): string[] {
-  const group = selectedGroup(canvas);
-  if (group) return [idOf(group)];
-  return canvas
-    .getActiveObjects()
-    .filter((object) => isLayerObject(object))
-    .map(idOf);
+  const groups = pickedGroups(canvas);
+  const inside = membersOf(canvas, groups);
+  return [
+    ...groups.map(idOf),
+    ...canvas
+      .getActiveObjects()
+      .filter((object) => isLayerObject(object) && !inside.has(object))
+      .map(idOf),
+  ];
+}
+
+/** The selected layers themselves (not those of picked groups). */
+export function selectedLayerObjects(canvas: FabricCanvas): FabricObject[] {
+  const inside = membersOf(canvas, pickedGroups(canvas));
+  return canvas.getActiveObjects().filter((object) => isLayerObject(object) && !inside.has(object));
 }
 
 /** The group a layer (or group) is directly in, if any. */
@@ -231,7 +281,7 @@ export const canUngroup = (canvas: FabricCanvas): boolean => !!(selectedGroup(ca
 
 /** Whether any selected layer is clipped. */
 export const hasClippedSelection = (canvas: FabricCanvas): boolean =>
-  canvas.getActiveObjects().some((object) => (object as StackObject).__clipped === true);
+  selectedLayerObjects(canvas).some((object) => (object as StackObject).__clipped === true);
 
 /** Forget the picked group when the canvas selection changes some other way. */
 export function watchGroupSelection(canvas: FabricCanvas): () => void {
@@ -248,10 +298,37 @@ export function watchGroupSelection(canvas: FabricCanvas): () => void {
 
 /** The group every selected layer is in, when they share one. */
 function enclosingGroupOfSelection(canvas: FabricCanvas): LayerGroup | null {
-  const selected = canvas.getActiveObjects().filter(isLayerObject);
+  const ids = new Set(selectedIds(canvas));
+  const selected = canvas.getObjects().filter((object) => ids.has(idOf(object)));
   if (selected.length === 0) return null;
   const parents = new Set(selected.map((object) => parentGroup(canvas, object)));
   return parents.size === 1 ? [...parents][0]! : null;
+}
+
+/**
+ * Delete what is selected in the panel: picked groups with everything in
+ * them, and the selected layers. Refused while any of it is locked.
+ */
+export function deleteSelectedLayers(canvas: FabricCanvas): number | Refusal {
+  const { objects } = stackOf(canvas);
+  const tree = treeOf(objects);
+  const doomed = new Set<FabricObject>();
+  for (const id of selectedIds(canvas)) {
+    const found = findNode(tree, id);
+    if (!found) continue;
+    const [first, last] = found.node.kind === "group" ? rangeOf(found.node) : [found.node.index, found.node.index];
+    for (const object of objects.slice(first, last + 1)) doomed.add(object);
+  }
+  const layers = [...doomed].filter(isLayerObject);
+  if (layers.some((object) => isObjectLocked(object) || (object as StackObject).__isBackground)) {
+    return "Unlock the layers first";
+  }
+  if (doomed.size === 0) return "Select the layers to delete";
+  setPickedGroups(canvas, []);
+  canvas.discardActiveObject();
+  canvas.remove(...objects.filter((object) => doomed.has(object)));
+  canvas.requestRenderAll();
+  return layers.length;
 }
 
 /** Layer › Delete › Group: the group and everything in it. */
@@ -296,9 +373,9 @@ export function arrangeLayers(canvas: FabricCanvas, ids: readonly string[], acti
 
 /** Layer › Create Clipping Mask / Release Clipping Mask (Ctrl+Alt+G toggles). */
 export function setClipping(canvas: FabricCanvas, clipped: boolean): number {
-  const layers = canvas
-    .getActiveObjects()
-    .filter((object) => isLayerObject(object) && !(object as StackObject).__isBackground && !isObjectLocked(object)) as StackObject[];
+  const layers = selectedLayerObjects(canvas).filter(
+    (object) => !(object as StackObject).__isBackground && !isObjectLocked(object)
+  ) as StackObject[];
   const changing = layers.filter((layer) => (layer.__clipped === true) !== clipped);
   for (const layer of changing) layer.__clipped = clipped;
   if (changing.length) {
@@ -310,7 +387,7 @@ export function setClipping(canvas: FabricCanvas, clipped: boolean): number {
 
 /** Whether Ctrl+Alt+G would clip (true) or release (false) the selection. */
 export function clippingAction(canvas: FabricCanvas): boolean | null {
-  const layers = canvas.getActiveObjects().filter((object) => isLayerObject(object) && !(object as StackObject).__isBackground) as StackObject[];
+  const layers = selectedLayerObjects(canvas).filter((object) => !(object as StackObject).__isBackground) as StackObject[];
   if (layers.length === 0) return null;
   return !layers.every((layer) => layer.__clipped === true);
 }
