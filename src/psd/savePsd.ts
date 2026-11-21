@@ -2,15 +2,19 @@ import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { releaseSurface } from "@/raster/pixelLayer";
 import { documentGrid } from "@/selection/state";
 import { withoutCompositing } from "@/compositing/compositor";
-import { isEditorChrome, isLayerObject } from "@/utils/editorObjects";
+import { isGroupEnd, isGroupHeader } from "@/layers/groupMarkers";
+import { fillOf } from "@/raster/layerStyle";
+import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
+import { isEditorChrome } from "@/utils/editorObjects";
 import { renderObjectsRegion } from "@/utils/flatten";
 import { guidesOf } from "@/utils/guides";
-import type { DecodedLayer, PsdToWrite } from "./psdDocument";
+import type { PsdToWrite } from "./psdDocument";
 import { runPsdWorker } from "./psdWorkerClient";
 
 const WRITE_TIMEOUT_MS = 120_000;
 
-type Layer = Omit<DecodedLayer, "mask">;
+type Entry = PsdToWrite["layers"][number];
+type Layered = FabricObject & { name?: string; __clipped?: boolean; __fill?: number; layerStyle?: LayerStyle };
 
 /** The pixels of a rendered surface that are not transparent, and where they start. */
 function trimmed(surface: HTMLCanvasElement): { left: number; top: number; width: number; height: number; pixels: Uint8ClampedArray } | null {
@@ -48,8 +52,8 @@ const nextFrame = () => new Promise<void>((resolve) => window.setTimeout(resolve
 /**
  * The document as a Photoshop file: every layer as a pixel layer at the
  * document's resolution (text, shapes, masks and styles drawn into it), with
- * its name, opacity, blend mode and visibility; the flattened image; and the
- * guides.
+ * its name, opacity, Fill, blend mode, visibility and clipping; the groups;
+ * the flattened image; and the guides.
  */
 export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal): Promise<Blob> {
   const grid = documentGrid(canvas);
@@ -66,15 +70,37 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
     return element;
   };
 
-  const layers: Layer[] = [];
-  for (const object of objects.filter(isLayerObject)) {
+  const layers: Entry[] = [];
+  for (const object of objects) {
     signal?.throwIfAborted();
-    // Drawn plainly: its opacity, blend and visibility go into the file as settings.
-    const settings = { visible: object.visible, opacity: object.opacity, blend: object.globalCompositeOperation };
+    const item = object as Layered;
+    if (isGroupEnd(object)) {
+      layers.push({ kind: "end" });
+      continue;
+    }
+    if (isGroupHeader(object)) {
+      layers.push({
+        kind: "group",
+        name: (item.name ?? "").slice(0, 200) || "Group",
+        opacity: object.opacity ?? 1,
+        visible: object.visible !== false,
+        passThrough: object.passThrough !== false,
+        blend: (object.globalCompositeOperation ?? "source-over") as GlobalCompositeOperation,
+        collapsed: object.collapsed === true,
+      });
+      continue;
+    }
+    // Drawn plainly: its opacity, blend and visibility go into the file as
+    // settings. Fill does too, unless effects are drawn into the pixels (the
+    // file's Fill would fade them as well).
+    const fill = fillOf(object);
+    const fillAsSetting = !hasEffects(item.layerStyle);
+    const settings = { visible: object.visible, opacity: object.opacity, blend: object.globalCompositeOperation, fill: item.__fill };
     let surface: HTMLCanvasElement;
     object.visible = true;
     object.opacity = 1;
     object.globalCompositeOperation = "source-over";
+    if (fillAsSetting) item.__fill = undefined;
     try {
       // The layer's own pixels: its group and clipping are settings in the file.
       surface = withoutCompositing(() => render((candidate) => candidate === object));
@@ -82,18 +108,21 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
       object.visible = settings.visible;
       object.opacity = settings.opacity;
       object.globalCompositeOperation = settings.blend;
+      item.__fill = settings.fill;
     }
     try {
-      const area = trimmed(surface);
-      if (area) {
-        layers.push({
-          ...area,
-          name: ((object as FabricObject & { name?: string }).name ?? "").slice(0, 200) || `Layer ${layers.length + 1}`,
-          opacity: settings.opacity ?? 1,
-          visible: settings.visible !== false,
-          blend: (settings.blend ?? "source-over") as GlobalCompositeOperation,
-        });
-      }
+      // A layer without pixels stays, as what a clipped layer above it clips to.
+      const area = trimmed(surface) ?? { left: 0, top: 0, width: 0, height: 0, pixels: new Uint8ClampedArray(0) };
+      layers.push({
+        kind: "layer",
+        ...area,
+        name: (item.name ?? "").slice(0, 200) || `Layer ${layers.length + 1}`,
+        opacity: settings.opacity ?? 1,
+        visible: settings.visible !== false,
+        blend: (settings.blend ?? "source-over") as GlobalCompositeOperation,
+        clipped: item.__clipped === true,
+        fill: fillAsSetting ? fill : 1,
+      });
     } finally {
       releaseSurface(surface);
     }
@@ -121,7 +150,10 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
       position: (guide.position - (guide.axis === "x" ? grid.left : grid.top)) * grid.scale,
     })),
   };
-  const transfer = [composite.buffer as ArrayBuffer, ...layers.map((layer) => layer.pixels.buffer as ArrayBuffer)];
+  const transfer = [
+    composite.buffer as ArrayBuffer,
+    ...layers.flatMap((layer) => (layer.kind === "layer" && layer.pixels.byteLength ? [layer.pixels.buffer as ArrayBuffer] : [])),
+  ];
   const buffer = await runPsdWorker<ArrayBuffer>({ type: "write", document }, transfer, {
     signal,
     timeoutMs: WRITE_TIMEOUT_MS,

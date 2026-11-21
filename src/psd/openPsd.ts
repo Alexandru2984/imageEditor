@@ -80,8 +80,8 @@ export interface OpenedPsd {
 /**
  * A Photoshop file as an editor document: its bottom layer (when it fills
  * the canvas) or a transparent canvas as the photo, every other pixel layer
- * above it in place, with its name, opacity, blend mode, visibility and
- * mask, and the file's guides.
+ * above it in place, with its name, opacity, Fill, blend mode, visibility,
+ * mask and clipping, its groups, and the file's guides.
  */
 export async function readPsdFile(file: File, signal?: AbortSignal): Promise<OpenedPsd> {
   if (file.size > MAX_PSD_BYTES) throw new Error(`Photoshop files can be at most ${MAX_PSD_BYTES / 1024 / 1024} MB`);
@@ -111,14 +111,15 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
   const layers = [...psd.layers];
   const bottom = layers[0];
   const fillsCanvas =
-    bottom &&
+    bottom?.kind === "layer" &&
     bottom.left === 0 &&
     bottom.top === 0 &&
     bottom.width === psd.width &&
     bottom.height === psd.height &&
     !bottom.mask &&
+    bottom.fill === 1 &&
     bottom.blend === "source-over";
-  const photoLayer = fillsCanvas ? layers.shift()! : null;
+  const photoLayer = fillsCanvas ? (layers.shift() as DecodedLayer) : null;
 
   let photoSrc: string;
   if (photoLayer) photoSrc = await pixelsPng(psd.width, psd.height, photoLayer.pixels);
@@ -142,6 +143,23 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
     },
   ];
   for (const layer of layers) {
+    if (layer.kind === "end") {
+      objects.push({ type: "LayerGroupEnd", version: fabricVersion });
+      continue;
+    }
+    if (layer.kind === "group") {
+      objects.push({
+        type: "LayerGroup",
+        version: fabricVersion,
+        name: layer.name,
+        opacity: layer.opacity,
+        visible: layer.visible,
+        globalCompositeOperation: layer.blend,
+        passThrough: layer.passThrough,
+        collapsed: layer.collapsed,
+      });
+      continue;
+    }
     const object: Record<string, unknown> = {
       ...objectOf(layer),
       src: source(await pixelsPng(layer.width, layer.height, layer.pixels)),
@@ -151,6 +169,8 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
       globalCompositeOperation: layer.blend,
     };
     if (layer.mask) object.layerMask = { src: source(await maskPng(layer)), enabled: layer.mask.enabled };
+    if (layer.clipped) object.__clipped = true;
+    if (layer.fill < 1) object.__fill = layer.fill;
     objects.push(object);
     throwIfAborted(signal);
   }

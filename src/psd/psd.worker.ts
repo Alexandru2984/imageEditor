@@ -20,6 +20,7 @@ ctx.addEventListener("message", (event) => {
     const result = decodePsd(message.buffer);
     const transfer = new Set<ArrayBuffer>();
     for (const layer of result.layers) {
+      if (layer.kind !== "layer") continue;
       transfer.add(layer.pixels.buffer as ArrayBuffer);
       if (layer.mask) transfer.add(layer.mask.grey.buffer as ArrayBuffer);
     }

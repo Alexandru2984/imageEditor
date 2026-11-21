@@ -9,6 +9,7 @@ import {
   type Layer,
   type PixelData,
 } from "ag-psd";
+import { MAX_GROUP_DEPTH } from "@/layers/layerTree";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
 import type { Guide } from "@/utils/guideData";
 
@@ -37,6 +38,7 @@ export interface DecodedMask {
 }
 
 export interface DecodedLayer {
+  kind: "layer";
   name: string;
   left: number;
   top: number;
@@ -48,13 +50,37 @@ export interface DecodedLayer {
   /** RGBA, not premultiplied. */
   pixels: Uint8ClampedArray;
   mask?: DecodedMask;
+  /** Clipped to the layer (or group) below it. */
+  clipped: boolean;
+  /** Fill opacity, 0–1. */
+  fill: number;
 }
+
+/** A group's header, above its layers (as the editor keeps groups). */
+export interface DecodedGroup {
+  kind: "group";
+  name: string;
+  opacity: number;
+  visible: boolean;
+  /** Its layers blend straight into what is below (Photoshop's default). */
+  passThrough: boolean;
+  blend: GlobalCompositeOperation;
+  /** Folded shut in the Layers panel. */
+  collapsed: boolean;
+}
+
+/** Where a group ends, below its layers. */
+export interface DecodedGroupEnd {
+  kind: "end";
+}
+
+export type DecodedEntry = DecodedLayer | DecodedGroup | DecodedGroupEnd;
 
 export interface DecodedPsd {
   width: number;
   height: number;
-  /** Bottom to top. */
-  layers: DecodedLayer[];
+  /** Bottom to top; a group is its end, its layers, then its header. */
+  layers: DecodedEntry[];
   /** The flattened image, for files without layers. */
   composite?: Uint8ClampedArray;
   guides: Guide[];
@@ -136,20 +162,42 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
     throw new Error(`The document is too large: at most ${MAX_RASTER_SIDE} pixels a side and ${MAX_RASTER_PIXELS / 1e6} megapixels`);
   }
 
-  const counts = { effects: 0, adjustments: 0, clipping: 0, blend: 0, groupBlend: 0 };
-  const layers: DecodedLayer[] = [];
+  const counts = { effects: 0, adjustments: 0, blend: 0, deep: 0 };
+  const layers: DecodedEntry[] = [];
   let seen = 0;
   let total = 0;
 
-  const walk = (children: Layer[] | undefined, group: { visible: boolean; opacity: number }) => {
+  // Groups deeper than the editor keeps them are flattened: their
+  // visibility and opacity go into their layers.
+  const walk = (children: Layer[] | undefined, depth: number, flattened: { visible: boolean; opacity: number } | null) => {
     for (const layer of children ?? []) {
       seen += 1;
       if (seen > MAX_PSD_LAYERS) throw new Error(`The document has more than ${MAX_PSD_LAYERS} layers`);
-      const visible = group.visible && !layer.hidden;
-      const opacity = group.opacity * (layer.opacity ?? 1);
+      const visible = (flattened?.visible ?? true) && !layer.hidden;
+      const opacity = Math.min(1, Math.max(0, (flattened?.opacity ?? 1) * (layer.opacity ?? 1)));
       if (layer.children) {
-        if (layer.blendMode && layer.blendMode !== "pass through" && layer.blendMode !== "normal") counts.groupBlend += 1;
-        walk(layer.children, { visible, opacity });
+        if (flattened || depth >= MAX_GROUP_DEPTH) {
+          counts.deep += 1;
+          walk(layer.children, depth + 1, { visible, opacity });
+          continue;
+        }
+        const passThrough = layer.blendMode === undefined || layer.blendMode === "pass through";
+        let blend = passThrough ? "source-over" : blendFromPsd(layer.blendMode);
+        if (!blend) {
+          counts.blend += 1;
+          blend = "source-over";
+        }
+        layers.push({ kind: "end" });
+        walk(layer.children, depth + 1, null);
+        layers.push({
+          kind: "group",
+          name: (layer.name ?? "").slice(0, 200) || "Group",
+          opacity,
+          visible,
+          passThrough,
+          blend,
+          collapsed: layer.opened === false,
+        });
         continue;
       }
       if (layer.adjustment) counts.adjustments += 1;
@@ -164,22 +212,25 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
       const data = getLayerImageData(layer);
       if (!data || data.width !== layerWidth || data.height !== layerHeight) continue;
       if (layer.effects) counts.effects += 1;
-      if (layer.clipping) counts.clipping += 1;
       let blend = blendFromPsd(layer.blendMode);
       if (!blend) {
         counts.blend += 1;
         blend = "source-over";
       }
+      const fill = layer.fillOpacity;
       const decoded: DecodedLayer = {
+        kind: "layer",
         name: (layer.name ?? "").slice(0, 200) || `Layer ${layers.length + 1}`,
         left,
         top,
         width: layerWidth,
         height: layerHeight,
-        opacity: Math.min(1, Math.max(0, opacity)),
+        opacity,
         visible,
         blend,
         pixels: bytesOf(data, layerWidth * layerHeight * 4),
+        clipped: layer.clipping === true,
+        fill: typeof fill === "number" && Number.isFinite(fill) ? Math.min(1, Math.max(0, fill)) : 1,
       };
       const mask = layer.mask;
       if (mask && !mask.fromVectorData) {
@@ -207,10 +258,10 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
       layers.push(decoded);
     }
   };
-  walk(psd.children, { visible: true, opacity: 1 });
+  walk(psd.children, 0, null);
 
   let composite: Uint8ClampedArray | undefined;
-  if (layers.length === 0) {
+  if (!layers.some((layer) => layer.kind === "layer")) {
     const flat = getCompositeImageData(psd);
     if (flat && flat.width === width && flat.height === height) composite = bytesOf(flat, width * height * 4);
     else throw new Error("The document has no pixels the editor can open");
@@ -224,17 +275,20 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
   const notes: string[] = [];
   if (counts.effects) notes.push("layer effects were left out");
   if (counts.adjustments) notes.push("adjustment layers were left out");
-  if (counts.clipping) notes.push("clipping masks were left out");
   if (counts.blend) notes.push("some blend modes became Normal");
-  if (counts.groupBlend) notes.push("groups were flattened into their layers");
+  if (counts.deep) notes.push(`groups nested more than ${MAX_GROUP_DEPTH} deep were flattened into their layers`);
   return { width, height, layers, composite, guides, notes };
 }
+
+/** A layer to write; one without pixels has no size. */
+export type LayerToWrite = Omit<DecodedLayer, "mask">;
 
 /** A document to write: its layers' pixels in document pixels, bottom to top. */
 export interface PsdToWrite {
   width: number;
   height: number;
-  layers: Omit<DecodedLayer, "mask">[];
+  /** Bottom to top, groups as the editor keeps them (end, layers, header). */
+  layers: (LayerToWrite | DecodedGroup | DecodedGroupEnd)[];
   /** The flattened document, what other programs show. */
   composite: Uint8ClampedArray;
   /** In document pixels from the top-left corner. */
@@ -244,6 +298,51 @@ export interface PsdToWrite {
 const pixelData = (width: number, height: number, data: Uint8ClampedArray) =>
   ({ width, height, data, colorSpace: "srgb" }) as unknown as ImageData;
 
+/** The flat list (end, layers, header for a group) as Photoshop's nested one. */
+export function nestLayers(entries: PsdToWrite["layers"]): Layer[] {
+  const root: Layer[] = [];
+  const open: Layer[][] = [root];
+  for (const entry of entries) {
+    if (entry.kind === "end") {
+      open.push([]);
+      continue;
+    }
+    if (entry.kind === "group") {
+      // A header without its end (never from the editor) closes nothing.
+      const children = open.length > 1 ? open.pop()! : [];
+      open[open.length - 1]!.push({
+        name: entry.name,
+        opacity: entry.opacity,
+        hidden: !entry.visible,
+        blendMode: entry.passThrough ? "pass through" : blendToPsd(entry.blend),
+        opened: !entry.collapsed,
+        children,
+      });
+      continue;
+    }
+    const layer: Layer = {
+      name: entry.name,
+      left: entry.left,
+      top: entry.top,
+      right: entry.left + entry.width,
+      bottom: entry.top + entry.height,
+      opacity: entry.opacity,
+      hidden: !entry.visible,
+      blendMode: blendToPsd(entry.blend),
+    };
+    if (entry.width > 0 && entry.height > 0) layer.imageData = pixelData(entry.width, entry.height, entry.pixels);
+    if (entry.clipped) layer.clipping = true;
+    if (entry.fill < 1) layer.fillOpacity = entry.fill;
+    open[open.length - 1]!.push(layer);
+  }
+  // Ends without a header (never from the editor) leave their layers in place.
+  while (open.length > 1) {
+    const children = open.pop()!;
+    open[open.length - 1]!.push(...children);
+  }
+  return root;
+}
+
 export function encodePsd(document: PsdToWrite): ArrayBuffer {
   initialize();
   return writePsd(
@@ -251,17 +350,7 @@ export function encodePsd(document: PsdToWrite): ArrayBuffer {
       width: document.width,
       height: document.height,
       imageData: pixelData(document.width, document.height, document.composite),
-      children: document.layers.map((layer) => ({
-        name: layer.name,
-        left: layer.left,
-        top: layer.top,
-        right: layer.left + layer.width,
-        bottom: layer.top + layer.height,
-        opacity: layer.opacity,
-        hidden: !layer.visible,
-        blendMode: blendToPsd(layer.blend),
-        imageData: pixelData(layer.width, layer.height, layer.pixels),
-      })),
+      children: nestLayers(document.layers),
       ...(document.guides.length
         ? {
             imageResources: {
