@@ -4,8 +4,8 @@ import { entriesOf, isClipped, isGroupHeader, isGroupMarker, type LayerGroup } f
 import { isAdjustmentLayer, type AdjustmentLayer } from "@/adjustments/adjustmentLayer";
 import { adjustmentJob, type AdjustmentData } from "@/adjustments/adjustmentData";
 import type { PixelJob } from "@/raster/pixelJobs";
-import { adjustOnGpu, type PixelRect } from "./adjustGpu";
-import { adjustPixels } from "./blendMath";
+import { adjustOnGpu, blendLayerOnGpu, type PixelRect } from "./adjustGpu";
+import { adjustPixels, composePixels, isCustomBlend } from "./blendMath";
 
 /**
  * Draws the layer stack as Photoshop composes it. Ordinary layers draw
@@ -78,8 +78,37 @@ function trimBuffers(): void {
   }
 }
 
+/**
+ * A buffer onto a context in one of Photoshop's blend modes a canvas has not
+ * (Linear Burn, Vivid Light, Dissolve…): on the GPU, else on the CPU.
+ */
+function blendCustom(ctx: CanvasRenderingContext2D, source: HTMLCanvasElement, alpha: number, blend: string) {
+  const opacity = alpha * ctx.globalAlpha;
+  if (!(opacity > 0)) return;
+  const target = ctx.canvas as HTMLCanvasElement;
+  const result = blendLayerOnGpu(target, source, blend, opacity);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalAlpha = 1;
+  if (result) {
+    ctx.globalCompositeOperation = "copy";
+    ctx.drawImage(result, 0, 0);
+  } else {
+    const { width, height } = target;
+    const below = ctx.getImageData(0, 0, width, height);
+    const layer = source.getContext("2d", { willReadFrequently: true })!.getImageData(0, 0, width, height);
+    composePixels(below.data, layer.data, width, blend, opacity);
+    ctx.putImageData(below, 0, 0);
+  }
+  ctx.restore();
+}
+
 /** Draw a buffer onto a context, pixel for pixel. */
 function drawBuffer(ctx: CanvasRenderingContext2D, buffer: CanvasRenderingContext2D, alpha: number, blend: GlobalCompositeOperation) {
+  if (isCustomBlend(blend)) {
+    blendCustom(ctx, buffer.canvas as HTMLCanvasElement, alpha, blend);
+    return;
+  }
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha *= alpha;
@@ -203,8 +232,23 @@ class Composition {
 
   /** Draw a layer, or apply it when it is an adjustment. */
   private draw(ctx: CanvasRenderingContext2D, object: FabricObject): void {
-    if (isAdjustmentLayer(object)) applyAdjustment(ctx, object, this.area);
-    else object.render(ctx);
+    if (isAdjustmentLayer(object)) {
+      applyAdjustment(ctx, object, this.area);
+      return;
+    }
+    const blend = blendOf(object);
+    if (!isCustomBlend(blend) || !object.visible) {
+      object.render(ctx);
+      return;
+    }
+    // On its own first, then blended onto what is below.
+    const buffer = acquire(ctx);
+    try {
+      renderWith(object, buffer, { opacity: 1, globalCompositeOperation: "source-over" });
+      drawBuffer(ctx, buffer, object.opacity, blend);
+    } finally {
+      release();
+    }
   }
 
   /** Whether any layer the render asked for is in this node. */
@@ -305,7 +349,8 @@ export function withoutCompositing<T>(render: () => T): T {
 }
 
 const needsCompositing = (all: readonly FabricObject[], objects: readonly FabricObject[]) =>
-  rawDepth === 0 && (all.some(isGroupMarker) || objects.some(isClipped) || all.some(isAdjustmentLayer));
+  rawDepth === 0 &&
+  (all.some(isGroupMarker) || objects.some(isClipped) || all.some(isAdjustmentLayer) || objects.some((object) => isCustomBlend(blendOf(object))));
 
 /** The stack's structure, for the objects of a canvas. */
 export const treeOf = (objects: readonly FabricObject[]): LayerTree => buildTree(entriesOf(objects));
@@ -350,9 +395,10 @@ export function installCompositor(masks?: AdjustmentMasks): void {
     // (an export without the helpers, say) still sees the groups around them.
     const included = new Set(objects);
     const composition = new Composition(all, included);
-    if (objects.some(isAdjustmentLayer)) {
-      // Adjustments change only the document's own pixels, not what is
-      // already on the context (the checkerboard under the document).
+    if (objects.some((object) => isAdjustmentLayer(object) || isCustomBlend(blendOf(object)))) {
+      // Adjustments and the blends done here change only the document's own
+      // pixels, not what is already on the context (the checkerboard under
+      // the document).
       const stack = acquire(ctx);
       try {
         composition.list(stack, treeOf(all).roots);

@@ -106,6 +106,18 @@ const BLEND_MODES: Partial<Record<BlendMode, GlobalCompositeOperation>> = {
   saturation: "saturation",
   color: "color",
   luminosity: "luminosity",
+  // Blended by the editor's own compositor.
+  dissolve: "dissolve" as GlobalCompositeOperation,
+  "linear burn": "linear-burn" as GlobalCompositeOperation,
+  "darker color": "darker-color" as GlobalCompositeOperation,
+  "linear dodge": "linear-dodge" as GlobalCompositeOperation,
+  "lighter color": "lighter-color" as GlobalCompositeOperation,
+  "vivid light": "vivid-light" as GlobalCompositeOperation,
+  "linear light": "linear-light" as GlobalCompositeOperation,
+  "pin light": "pin-light" as GlobalCompositeOperation,
+  "hard mix": "hard-mix" as GlobalCompositeOperation,
+  subtract: "subtract" as GlobalCompositeOperation,
+  divide: "divide" as GlobalCompositeOperation,
 };
 
 /** The editor's blend mode for a Photoshop one, or null when it has none like it. */

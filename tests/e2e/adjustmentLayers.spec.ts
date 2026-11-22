@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { autosavedLayerPixels, autosavedObjects, chooseMenu, chooseSubmenu, settle } from "./helpers";
+import { BLEND_IDS, blendColors } from "../../src/compositing/blendMath";
 import {
   applyLuts,
   blackWhite,
@@ -54,6 +55,23 @@ async function stripedPng(page: Page, columns = STRIPES.length): Promise<string>
   );
 }
 
+/** A photo-sized PNG all of LAYER_COLOUR. */
+const LAYER_COLOUR: [number, number, number] = [100, 180, 60];
+async function solidPng(page: Page): Promise<string> {
+  return page.evaluate(
+    ({ colour, width, height }) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d")!;
+      context.fillStyle = `rgb(${colour.join(", ")})`;
+      context.fillRect(0, 0, width, height);
+      return canvas.toDataURL("image/png");
+    },
+    { colour: LAYER_COLOUR, width: WIDTH, height: HEIGHT }
+  );
+}
+
 const image = (src: string, width: number, extra: Record<string, unknown> = {}) => ({
   type: "Image",
   version: "7.0.0",
@@ -71,7 +89,7 @@ const image = (src: string, width: number, extra: Record<string, unknown> = {}) 
 
 /** Open a project of the striped photo with more objects above it. */
 async function openProject(page: Page, objects: (srcs: string[]) => Record<string, unknown>[]) {
-  const srcs = [await stripedPng(page), await stripedPng(page, 3)];
+  const srcs = [await stripedPng(page), await stripedPng(page, 3), await solidPng(page)];
   const photo = image("__snapshot_src_0", WIDTH, { __isBackground: true, name: "Background", selectable: false, evented: false, __layerId: "photo" });
   const snapshot = { json: JSON.stringify({ version: "7.0.0", objects: [photo, ...objects(srcs)] }), srcs };
   await page.getByTestId("project-input").setInputFiles({
@@ -539,4 +557,88 @@ test("a selection becomes the mask of a new fill layer", async ({ page }) => {
   await chooseSubmenu(page, "Layer", "New fill layer", "Solid color…");
   await expect.poll(async () => near(await stripes(page), [...original.slice(0, 3), [0, 0, 0], [0, 0, 0], [0, 0, 0]])).toBeUndefined();
   await expect.poll(async () => (await autosavedObjects(page)).at(-1)?.layerMask).toMatchObject({ enabled: true });
+});
+
+const CUSTOM_MODES = ["linear-burn", "linear-dodge", "vivid-light", "linear-light", "pin-light", "hard-mix", "subtract", "divide", "darker-color", "lighter-color"];
+
+/** Each stripe with `source` over it in `mode`, by the formulas in blendMath.ts. */
+const blendedStripes = (mode: string, source: (colour: number[]) => number[]) =>
+  STRIPES.map((colour) => {
+    const cb = colour.map((value) => value / 255) as [number, number, number];
+    const cs = source(colour).map((value) => value / 255) as [number, number, number];
+    return blendColors(BLEND_IDS[mode]!, cb, cs).map((value) => value * 255);
+  });
+
+for (const mode of CUSTOM_MODES) {
+  test(`a layer in ${mode} blends as Photoshop's formula says`, async ({ page }) => {
+    await openProject(page, () => [image("__snapshot_src_2", WIDTH, { __layerId: "top", name: "Top", globalCompositeOperation: mode })]);
+    await expect.poll(() => stripes(page)).not.toEqual(STRIPES.map(() => LAYER_COLOUR));
+    near(await stripes(page), blendedStripes(mode, () => LAYER_COLOUR));
+  });
+}
+
+test("Photoshop's own blend modes work on groups, clipped layers and adjustment layers too", async ({ page }) => {
+  const subtracted = blendedStripes("subtract", () => LAYER_COLOUR);
+  // An isolated group in Subtract, with the layer in Normal inside.
+  await openProject(page, () => [
+    { type: "LayerGroupEnd", version: "7.0.0", __layerId: "end" },
+    image("__snapshot_src_2", WIDTH, { __layerId: "top", name: "Top" }),
+    { type: "LayerGroup", version: "7.0.0", __layerId: "group", name: "Group 1", passThrough: false, globalCompositeOperation: "subtract" },
+  ]);
+  await expect.poll(() => stripes(page)).not.toEqual(STRIPES.map(() => LAYER_COLOUR));
+  near(await stripes(page), subtracted);
+
+  // Clipped to the left half, in Divide.
+  await page.goto("/");
+  await openProject(page, () => [
+    image("__snapshot_src_1", WIDTH / 2, { __layerId: "left", name: "Left" }),
+    image("__snapshot_src_2", WIDTH, { __layerId: "top", name: "Top", __clipped: true, globalCompositeOperation: "divide" }),
+  ]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), [...blendedStripes("divide", () => LAYER_COLOUR).slice(0, 3), ...original.slice(3)]);
+
+  // An Invert adjustment in Linear Light.
+  await page.goto("/");
+  await openProject(page, () => [adjustment("adjust", { kind: "invert", settings: {} }, { globalCompositeOperation: "linear-light" })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), blendedStripes("linear-light", (colour) => colour.map((value) => 255 - value)));
+});
+
+test("Photoshop's own blend modes leave the transparency checkerboard alone", async ({ page }) => {
+  await openProject(page, () => [image("__snapshot_src_2", WIDTH, { __layerId: "top", name: "Top", globalCompositeOperation: "subtract" })]);
+  await expect.poll(() => stripes(page)).not.toEqual(STRIPES.map(() => LAYER_COLOUR));
+  // With nothing under it, a layer shows as it is, whatever its mode.
+  await page.getByRole("tab", { name: "Layers" }).click();
+  await page.getByRole("button", { name: "Hide Background" }).click();
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => LAYER_COLOUR));
+});
+
+test("Dissolve shows each pixel of a layer wholly or not at all, by its opacity", async ({ page }) => {
+  await openProject(page, () => [image("__snapshot_src_2", WIDTH, { __layerId: "top", name: "Top", globalCompositeOperation: "dissolve", opacity: 0.5 })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  const counts = await page.evaluate(
+    ({ colour, stripes }) => {
+      const lower = document.querySelector("canvas.lower-canvas") as HTMLCanvasElement;
+      const { data, width, height } = lower.getContext("2d")!.getImageData(0, 0, lower.width, lower.height);
+      const row = Math.floor(height / 2);
+      let layer = 0;
+      let below = 0;
+      let other = 0;
+      for (let x = 0; x < width; x += 1) {
+        const at = (row * width + x) * 4;
+        if (data[at + 3] === 0) continue;
+        const pixel = [data[at]!, data[at + 1]!, data[at + 2]!];
+        const close = (wanted: number[]) => wanted.every((value, channel) => Math.abs(value - pixel[channel]!) <= 2);
+        if (close(colour)) layer += 1;
+        else if (stripes.some(close)) below += 1;
+        else other += 1;
+      }
+      return { layer, below, other };
+    },
+    { colour: LAYER_COLOUR, stripes: STRIPES }
+  );
+  // A few edge pixels blend with the photo's own edge.
+  expect(counts.other).toBeLessThan((counts.layer + counts.below) * 0.05);
+  expect(counts.layer / (counts.layer + counts.below)).toBeGreaterThan(0.35);
+  expect(counts.layer / (counts.layer + counts.below)).toBeLessThan(0.65);
 });

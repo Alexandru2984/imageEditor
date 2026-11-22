@@ -77,7 +77,13 @@ describe("decodePsd", () => {
 
   it("maps blend modes both ways", () => {
     expect(blendFromPsd("color dodge")).toBe("color-dodge");
-    expect(blendFromPsd("linear burn")).toBeNull();
+    // Photoshop's own, which the compositor blends itself.
+    expect(blendFromPsd("linear burn")).toBe("linear-burn");
+    expect(blendFromPsd("dissolve")).toBe("dissolve");
+    expect(blendToPsd("vivid-light")).toBe("vivid light");
+    expect(blendToPsd("hard-mix")).toBe("hard mix");
+    // Ones the editor has nothing like.
+    expect(blendFromPsd("linear height")).toBeNull();
     expect(blendFromPsd(undefined)).toBe("source-over");
     expect(blendToPsd("soft-light")).toBe("soft light");
     expect(blendToPsd("source-over")).toBe("normal");

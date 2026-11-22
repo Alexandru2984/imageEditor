@@ -16,6 +16,80 @@ void main() {
   gl_Position = vec4(corner * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
+const BLEND_GLSL = `
+float hardLight(float cb, float cs) { return cs <= 0.5 ? cb * 2.0 * cs : cb + (2.0 * cs - 1.0) - cb * (2.0 * cs - 1.0); }
+float colorDodge(float cb, float cs) { return cb == 0.0 ? 0.0 : cs >= 1.0 ? 1.0 : min(1.0, cb / (1.0 - cs)); }
+float colorBurn(float cb, float cs) { return cb >= 1.0 ? 1.0 : cs <= 0.0 ? 0.0 : 1.0 - min(1.0, (1.0 - cb) / cs); }
+
+float separable(int id, float cb, float cs) {
+  if (id == 1) return cb * cs;
+  if (id == 2) return cb + cs - cb * cs;
+  if (id == 3) return hardLight(cs, cb);
+  if (id == 4) return min(cb, cs);
+  if (id == 5) return max(cb, cs);
+  if (id == 6) return colorDodge(cb, cs);
+  if (id == 7) return colorBurn(cb, cs);
+  if (id == 8) return hardLight(cb, cs);
+  if (id == 9) {
+    if (cs <= 0.5) return cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb);
+    float d = cb <= 0.25 ? ((16.0 * cb - 12.0) * cb + 4.0) * cb : sqrt(cb);
+    return cb + (2.0 * cs - 1.0) * (d - cb);
+  }
+  if (id == 10) return abs(cb - cs);
+  if (id == 11) return cb + cs - 2.0 * cb * cs;
+  if (id == 16) return max(0.0, cb + cs - 1.0);
+  if (id == 17) return min(1.0, cb + cs);
+  if (id == 18) return cs <= 0.5 ? colorBurn(cb, 2.0 * cs) : colorDodge(cb, 2.0 * cs - 1.0);
+  if (id == 19) return clamp(cb + 2.0 * cs - 1.0, 0.0, 1.0);
+  if (id == 20) return cs <= 0.5 ? min(cb, 2.0 * cs) : max(cb, 2.0 * cs - 1.0);
+  if (id == 21) return cb + cs >= 1.0 ? 1.0 : 0.0;
+  if (id == 22) return max(0.0, cb - cs);
+  if (id == 23) return cs <= 0.0 ? (cb <= 0.0 ? 0.0 : 1.0) : min(1.0, cb / cs);
+  return cs;
+}
+
+float lum(vec3 c) { return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b; }
+
+vec3 clipColor(vec3 c) {
+  float l = lum(c);
+  float n = min(min(c.r, c.g), c.b);
+  float x = max(max(c.r, c.g), c.b);
+  if (n < 0.0) c = l + (c - l) * l / (l - n);
+  if (x > 1.0) c = l + (c - l) * (1.0 - l) / (x - l);
+  return c;
+}
+
+vec3 setLum(vec3 c, float l) { return clipColor(c + (l - lum(c))); }
+
+float sat(vec3 c) { return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b); }
+
+vec3 setSat(vec3 c, float s) {
+  float mx = max(max(c.r, c.g), c.b);
+  float mn = min(min(c.r, c.g), c.b);
+  if (mx <= mn) return vec3(0.0);
+  return (c - mn) * s / (mx - mn);
+}
+
+vec3 blendColors(int id, vec3 cb, vec3 cs) {
+  if (id == 12) return setLum(setSat(cs, sat(cb)), lum(cb));
+  if (id == 13) return setLum(setSat(cb, sat(cs)), lum(cb));
+  if (id == 14) return setLum(cs, lum(cb));
+  if (id == 15) return setLum(cb, lum(cs));
+  if (id == 24) return cs.r + cs.g + cs.b < cb.r + cb.g + cb.b ? cs : cb;
+  if (id == 25) return cs.r + cs.g + cs.b > cb.r + cb.g + cb.b ? cs : cb;
+  if (id == 26) return cs;
+  return vec3(separable(id, cb.r, cs.r), separable(id, cb.g, cs.g), separable(id, cb.b, cs.b));
+}
+
+// Dissolve's noise, as dissolveNoise() in blendMath.ts works it out.
+float dissolveNoise(int x, int y) {
+  uint h = uint(x) * 374761393u + uint(y) * 668265263u;
+  h = (h ^ (h >> 13u)) * 1274126177u;
+  h = h ^ (h >> 16u);
+  return float(h & 0xffffu) / 65536.0;
+}
+`;
+
 const FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
@@ -36,6 +110,7 @@ uniform bool u_preserve;
 uniform int u_blend;
 uniform float u_strength;
 uniform bool u_masked;
+uniform ivec2 u_size;
 out vec4 outColor;
 
 float clampByte(float value) { return clamp(floor(value + 0.5), 0.0, 255.0); }
@@ -140,56 +215,7 @@ vec3 adjust(ivec3 c) {
   return result;
 }
 
-float hardLight(float cb, float cs) { return cs <= 0.5 ? cb * 2.0 * cs : cb + (2.0 * cs - 1.0) - cb * (2.0 * cs - 1.0); }
-
-float separable(int id, float cb, float cs) {
-  if (id == 1) return cb * cs;
-  if (id == 2) return cb + cs - cb * cs;
-  if (id == 3) return hardLight(cs, cb);
-  if (id == 4) return min(cb, cs);
-  if (id == 5) return max(cb, cs);
-  if (id == 6) return cb == 0.0 ? 0.0 : cs >= 1.0 ? 1.0 : min(1.0, cb / (1.0 - cs));
-  if (id == 7) return cb >= 1.0 ? 1.0 : cs <= 0.0 ? 0.0 : 1.0 - min(1.0, (1.0 - cb) / cs);
-  if (id == 8) return hardLight(cb, cs);
-  if (id == 9) {
-    if (cs <= 0.5) return cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb);
-    float d = cb <= 0.25 ? ((16.0 * cb - 12.0) * cb + 4.0) * cb : sqrt(cb);
-    return cb + (2.0 * cs - 1.0) * (d - cb);
-  }
-  if (id == 10) return abs(cb - cs);
-  if (id == 11) return cb + cs - 2.0 * cb * cs;
-  return cs;
-}
-
-float lum(vec3 c) { return 0.3 * c.r + 0.59 * c.g + 0.11 * c.b; }
-
-vec3 clipColor(vec3 c) {
-  float l = lum(c);
-  float n = min(min(c.r, c.g), c.b);
-  float x = max(max(c.r, c.g), c.b);
-  if (n < 0.0) c = l + (c - l) * l / (l - n);
-  if (x > 1.0) c = l + (c - l) * (1.0 - l) / (x - l);
-  return c;
-}
-
-vec3 setLum(vec3 c, float l) { return clipColor(c + (l - lum(c))); }
-
-float sat(vec3 c) { return max(max(c.r, c.g), c.b) - min(min(c.r, c.g), c.b); }
-
-vec3 setSat(vec3 c, float s) {
-  float mx = max(max(c.r, c.g), c.b);
-  float mn = min(min(c.r, c.g), c.b);
-  if (mx <= mn) return vec3(0.0);
-  return (c - mn) * s / (mx - mn);
-}
-
-vec3 blendColors(int id, vec3 cb, vec3 cs) {
-  if (id == 12) return setLum(setSat(cs, sat(cb)), lum(cb));
-  if (id == 13) return setLum(setSat(cb, sat(cs)), lum(cb));
-  if (id == 14) return setLum(cs, lum(cb));
-  if (id == 15) return setLum(cb, lum(cs));
-  return vec3(separable(id, cb.r, cs.r), separable(id, cb.g, cs.g), separable(id, cb.b, cs.b));
-}
+${BLEND_GLSL}
 
 void main() {
   ivec2 at = ivec2(gl_FragCoord.xy) + u_offset;
@@ -204,9 +230,41 @@ void main() {
   vec3 blended = u_blend == 0 ? cs : blendColors(u_blend, cb, cs);
   float amount = u_strength;
   if (u_masked) amount *= texelFetch(u_mask, ivec2(gl_FragCoord.xy), 0).r;
+  if (u_blend == 26) amount = dissolveNoise(int(gl_FragCoord.x), u_size.y - 1 - int(gl_FragCoord.y)) < amount ? 1.0 : 0.0;
   vec3 color = clamp(cb + (blended - cb) * amount, 0.0, 1.0);
   // Premultiplied, as the page composes it.
   outColor = vec4(color * backdrop.a, backdrop.a);
+}`;
+
+/**
+ * A layer over what is below it in a blend mode the canvas has not: the
+ * W3C's source-over with blending, as composePixels() in blendMath.ts.
+ */
+const LAYER_FRAGMENT = `#version 300 es
+precision highp float;
+precision highp int;
+
+uniform sampler2D u_backdrop;
+uniform sampler2D u_source;
+uniform int u_blend;
+uniform float u_opacity;
+uniform ivec2 u_size;
+out vec4 outColor;
+
+${BLEND_GLSL}
+
+void main() {
+  ivec2 at = ivec2(gl_FragCoord.xy);
+  vec4 b = texelFetch(u_backdrop, at, 0);
+  vec4 s = texelFetch(u_source, at, 0);
+  float as = s.a * u_opacity;
+  if (u_blend == 26) as = dissolveNoise(at.x, u_size.y - 1 - at.y) < as ? 1.0 : 0.0;
+  float ab = b.a;
+  vec3 blended = (u_blend == 0 || u_blend == 26) ? s.rgb : blendColors(u_blend, b.rgb, s.rgb);
+  vec3 mixed = mix(s.rgb, blended, ab);
+  float ao = as + ab * (1.0 - as);
+  // Premultiplied, as the page composes it.
+  outColor = vec4(as * mixed + (1.0 - as) * ab * b.rgb, ao);
 }`;
 
 const OPS: Record<string, number> = { luts: 0, threshold: 1, gradientMap: 2, blackWhite: 3, hueSaturation: 4, colorBalance: 5 };
@@ -214,15 +272,38 @@ const OPS: Record<string, number> = { luts: 0, threshold: 1, gradientMap: 2, bla
 /** Whether the GPU can run this job (the colour jobs adjustment layers make). */
 export const gpuRuns = (job: PixelJob): boolean => job.op in OPS;
 
+interface Program {
+  program: WebGLProgram;
+  uniforms: Map<string, WebGLUniformLocation | null>;
+}
+
 interface Engine {
   canvas: HTMLCanvasElement;
   gl: WebGL2RenderingContext;
   program: WebGLProgram;
   uniforms: Map<string, WebGLUniformLocation | null>;
+  /** Blending a layer onto what is below it. */
+  layer: Program;
   backdrop: WebGLTexture;
   lut: WebGLTexture;
   mask: WebGLTexture;
+  source: WebGLTexture;
   maxSize: number;
+}
+
+function link(gl: WebGL2RenderingContext, fragment: string): Program {
+  const program = gl.createProgram()!;
+  gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX));
+  gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragment));
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? "The shader did not link");
+  const uniforms = new Map<string, WebGLUniformLocation | null>();
+  const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) as number;
+  for (let index = 0; index < count; index += 1) {
+    const name = gl.getActiveUniform(program, index)!.name.replace(/\[0\]$/, "");
+    uniforms.set(name, gl.getUniformLocation(program, name));
+  }
+  return { program, uniforms };
 }
 
 let engine: Engine | null = null;
@@ -260,29 +341,25 @@ function start(): Engine | null {
       unavailable = true;
       return null;
     }
-    const program = gl.createProgram()!;
-    gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX));
-    gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
-    gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) ?? "The shader did not link");
-    gl.useProgram(program);
+    const { program, uniforms } = link(gl, FRAGMENT);
+    const layer = link(gl, LAYER_FRAGMENT);
     gl.bindVertexArray(gl.createVertexArray());
-    const uniforms = new Map<string, WebGLUniformLocation | null>();
-    const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS) as number;
-    for (let index = 0; index < count; index += 1) {
-      const name = gl.getActiveUniform(program, index)!.name.replace(/\[0\]$/, "");
-      uniforms.set(name, gl.getUniformLocation(program, name));
-    }
     const made: Engine = {
       canvas,
       gl,
       program,
       uniforms,
+      layer,
       backdrop: texture(gl),
       lut: texture(gl),
       mask: texture(gl),
+      source: texture(gl),
       maxSize: gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
     };
+    gl.useProgram(layer.program);
+    gl.uniform1i(layer.uniforms.get("u_backdrop")!, 0);
+    gl.uniform1i(layer.uniforms.get("u_source")!, 3);
+    gl.useProgram(program);
     gl.uniform1i(uniforms.get("u_backdrop")!, 0);
     gl.uniform1i(uniforms.get("u_lut")!, 1);
     gl.uniform1i(uniforms.get("u_mask")!, 2);
@@ -325,6 +402,7 @@ export function adjustOnGpu(
   const state = start();
   if (!state) return null;
   const { gl, canvas, uniforms } = state;
+  gl.useProgram(state.program);
   if (Math.max(source.width, source.height, rect.width, rect.height) > state.maxSize) return null;
   if (canvas.width !== rect.width || canvas.height !== rect.height) {
     canvas.width = rect.width;
@@ -372,6 +450,7 @@ export function adjustOnGpu(
   gl.uniform1i(uniform("u_masked"), mask ? 1 : 0);
 
   gl.uniform1i(uniform("u_op"), op);
+  gl.uniform2i(uniform("u_size"), rect.width, rect.height);
   gl.uniform1i(uniform("u_blend"), blendId(blend));
   gl.uniform1f(uniform("u_strength"), Math.min(1, Math.max(0, strength)));
   if (job.op === "threshold") gl.uniform1f(uniform("u_level"), job.level);
@@ -391,6 +470,51 @@ export function adjustOnGpu(
     gl.uniform3fv(uniform("u_highlights"), highlights);
     gl.uniform1i(uniform("u_preserve"), preserveLuminosity ? 1 : 0);
   }
+  gl.disable(gl.BLEND);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  return canvas;
+}
+
+/**
+ * `source` (a layer drawn on its own) over `backdrop` (what is below it),
+ * both the same size, in `blend` at `opacity`: the result, premultiplied, on
+ * a canvas to draw in place of the backdrop; null when the GPU cannot do it.
+ */
+export function blendLayerOnGpu(
+  backdrop: HTMLCanvasElement,
+  source: HTMLCanvasElement,
+  blend: string,
+  opacity: number
+): HTMLCanvasElement | null {
+  const { width, height } = backdrop;
+  if (source.width !== width || source.height !== height || width <= 0 || height <= 0) return null;
+  const state = start();
+  if (!state) return null;
+  const { gl, canvas, layer } = state;
+  if (Math.max(width, height) > state.maxSize) return null;
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width;
+    canvas.height = height;
+  }
+  if (gl.drawingBufferWidth !== width || gl.drawingBufferHeight !== height) return null;
+  gl.useProgram(layer.program);
+  gl.viewport(0, 0, width, height);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  // Bottom row first, so rows count up as gl_FragCoord does.
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, state.backdrop);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, backdrop);
+  gl.activeTexture(gl.TEXTURE3);
+  gl.bindTexture(gl.TEXTURE_2D, state.source);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, source);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  const uniform = (name: string) => layer.uniforms.get(name) ?? null;
+  gl.uniform1i(uniform("u_blend"), blendId(blend));
+  gl.uniform1f(uniform("u_opacity"), Math.min(1, Math.max(0, opacity)));
+  gl.uniform2i(uniform("u_size"), width, height);
   gl.disable(gl.BLEND);
   gl.drawArrays(gl.TRIANGLES, 0, 3);
   return canvas;
