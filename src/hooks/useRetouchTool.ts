@@ -201,6 +201,11 @@ export function useRetouchTool({
         toast.message("Alt-click (or use Set source) where to copy from first");
         return;
       }
+      // Quick Mask is painted with the brush, eraser, bucket and gradient.
+      if (selectionOf(canvas).quickMask) {
+        toast.message("Leave Quick Mask (Q) to retouch");
+        return;
+      }
       const target = adjustTarget(canvas);
       if (typeof target === "string") {
         toast.error(target);

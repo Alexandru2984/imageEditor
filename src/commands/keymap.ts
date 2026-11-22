@@ -62,6 +62,7 @@ export const KEYMAP = {
     { key: "F7", shift: true },
   ],
   featherSelection: [{ key: "F6", shift: true }],
+  quickMask: [{ key: "q" }],
 
   zoomIn: [{ key: "=", mod: true }, { key: "+", mod: true }, { key: "+" }, { key: "=" }],
   zoomOut: [{ key: "-", mod: true }, { key: "-" }],

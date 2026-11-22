@@ -17,3 +17,13 @@ export function useSelection(canvas: FabricCanvas | null): {
   useSyncExternalStore(subscribe, () => store?.version ?? -1);
   return { selection: store?.peek() ?? null, draft: store?.draft ?? null };
 }
+
+/** Whether the canvas is in Quick Mask mode; renders again only when that changes. */
+export function useQuickMask(canvas: FabricCanvas | null): boolean {
+  const store = canvas ? selectionOf(canvas) : null;
+  const subscribe = useCallback(
+    (listener: () => void) => (store ? store.subscribe(listener) : noSubscription()),
+    [store]
+  );
+  return useSyncExternalStore(subscribe, () => store?.quickMask ?? false);
+}

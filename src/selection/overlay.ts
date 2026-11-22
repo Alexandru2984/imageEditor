@@ -1,6 +1,7 @@
 import type { Canvas as FabricCanvas } from "fabric";
 import type { Mask } from "./mask";
 import { outlineSegments } from "./outline";
+import { QUICK_MASK_OPACITY, quickMaskTint } from "./quickMask";
 import { selectionOf, type DocumentGrid, type SelectionPreview } from "./state";
 
 /** Ants march one step this often (milliseconds). */
@@ -19,8 +20,9 @@ function outlineOf(mask: Mask): Float32Array | null {
 }
 
 /**
- * Draws the selection's marching ants, and the shape being drawn, on a
- * canvas laid over the Fabric canvas. It takes no pointer input and is never
+ * Draws the selection's marching ants (or, in Quick Mask mode, red over what
+ * is not selected), and the shape being drawn, on a canvas laid over the
+ * Fabric canvas. It takes no pointer input and is never
  * part of an export.
  */
 export function installSelectionOverlay(canvas: FabricCanvas, element: HTMLCanvasElement): () => void {
@@ -112,7 +114,16 @@ export function installSelectionOverlay(canvas: FabricCanvas, element: HTMLCanva
     const selection = store.peek();
     const preview = store.preview;
     let animate = false;
-    if (selection) {
+    const quick = store.quickMask ? quickMaskTint(canvas) : null;
+    if (quick) {
+      const [scale, offsetX, offsetY] = deviceTransform(quick.grid, ratio);
+      context.save();
+      context.globalAlpha = QUICK_MASK_OPACITY;
+      context.imageSmoothingEnabled = scale < 1;
+      context.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+      context.drawImage(quick.tint, 0, 0);
+      context.restore();
+    } else if (selection) {
       const outline = outlinePath(selection.mask, selection.grid, ratio);
       if (outline) {
         context.save();

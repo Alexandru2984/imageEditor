@@ -169,6 +169,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "select.allLayers",
       "-",
       { label: "Modify", items: ["select.feather", "select.expand", "select.contract"] },
+      "select.quickMask",
       "-",
       "tool.rectSelect",
       "tool.ellipseSelect",

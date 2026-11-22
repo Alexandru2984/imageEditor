@@ -71,6 +71,8 @@ import { DocumentDialog, type DocumentDialogKind } from "./DocumentDialog";
 import { copySource, selectionLayer } from "@/selection/actions";
 import { selectionOf } from "@/selection/state";
 import { useMaskTarget } from "@/hooks/useMaskTarget";
+import { useQuickMask } from "@/hooks/useSelection";
+import { toggleQuickMask } from "@/selection/quickMask";
 import { maskTargetOf } from "@/raster/layerMask";
 import {
   SNAP_PREFERENCE_KEY,
@@ -663,6 +665,10 @@ export const EditorWorkspace = ({
   const leaveMask = useCallback(() => {
     if (fabricCanvas) maskTargetOf(fabricCanvas).set(null);
   }, [fabricCanvas]);
+  const quickMask = useQuickMask(fabricCanvas);
+  const leaveQuickMask = useCallback(() => {
+    if (fabricCanvas && selectionOf(fabricCanvas).quickMask) toggleQuickMask(fabricCanvas);
+  }, [fabricCanvas]);
   const paintColors = useMemo(
     () => ({ foreground: activeColor, background: backgroundColor }),
     [activeColor, backgroundColor]
@@ -925,6 +931,8 @@ export const EditorWorkspace = ({
       onWarpCancel={() => warpControlsRef.current?.cancel()}
       maskLayerName={maskTargetLayer ? (maskTargetLayer as EditorFabricObject).name ?? "the layer" : null}
       onLeaveMask={leaveMask}
+      quickMask={quickMask}
+      onLeaveQuickMask={leaveQuickMask}
     />
   );
 

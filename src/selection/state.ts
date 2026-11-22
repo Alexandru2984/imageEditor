@@ -104,6 +104,7 @@ export class SelectionStore {
   private currentDraft: SelectionDraft | null = null;
   private revision = 0;
   private lastLabel = "Deselect";
+  private quick = false;
   private readonly listeners = new Set<() => void>();
   private readonly changeListeners = new Set<() => void>();
 
@@ -125,7 +126,18 @@ export class SelectionStore {
     return this.lastLabel;
   }
 
-  /** Changes whenever the selection or the preview does. */
+  /** Quick Mask mode (Q): the selection is shown in red and painted on (quickMask.ts). */
+  get quickMask(): boolean {
+    return this.quick;
+  }
+
+  setQuickMask(on: boolean): void {
+    if (on === this.quick) return;
+    this.quick = on;
+    this.notify();
+  }
+
+  /** Changes whenever the selection, the preview or the mode does. */
   get version(): number {
     return this.revision;
   }

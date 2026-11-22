@@ -111,6 +111,9 @@ interface OptionsBarProps {
   /** The layer whose mask the pixel tools paint on, if any. */
   maskLayerName?: string | null;
   onLeaveMask?: () => void;
+  /** Quick Mask mode is on: the paint tools paint the selection. */
+  quickMask?: boolean;
+  onLeaveQuickMask?: () => void;
 }
 
 const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }> = {
@@ -351,6 +354,8 @@ export function OptionsBar({
   onWarpCancel,
   maskLayerName,
   onLeaveMask,
+  quickMask = false,
+  onLeaveQuickMask,
 }: OptionsBarProps) {
   const shape = isShapeKind(activeTool);
   const info = TOOL_INFO[shape ? "shape" : activeTool] ?? TOOL_INFO.select!;
@@ -834,7 +839,20 @@ export function OptionsBar({
           <Separator orientation="vertical" className="h-6" />
         </>
       )}
-      {maskLayerName && painting && activeTool !== "draw" && (
+      {quickMask && (
+        <button
+          type="button"
+          onClick={onLeaveQuickMask}
+          aria-label="Leave Quick Mask"
+          title="Quick Mask: paint white to select, black to take away (shown red). Click or press Q to turn it into the selection."
+          className="flex h-7 shrink-0 items-center gap-1 rounded-full border border-red-500/50 bg-red-500/10 px-2.5 text-xs text-foreground hover:bg-red-500/20"
+        >
+          <CircleDot className="h-3.5 w-3.5 text-red-500" />
+          Quick Mask
+          <X className="h-3 w-3 text-muted-foreground" />
+        </button>
+      )}
+      {!quickMask && maskLayerName && painting && activeTool !== "draw" && (
         <button
           type="button"
           onClick={onLeaveMask}

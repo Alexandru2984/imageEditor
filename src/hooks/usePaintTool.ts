@@ -25,6 +25,8 @@ import { ensureLayerId, type EditorFabricObject, isObjectLocked, isTransparencyL
 import { nativeMultiplier } from "@/utils/flatten";
 import { releaseCanvas, restrictToClip, selectionClip, snapshotSurface } from "@/selection/clip";
 import { sceneToGrid, selectionOf } from "@/selection/state";
+import { commitQuickMask, isQuickMaskPixels, quickMaskPixels } from "@/selection/quickMask";
+import { toolStepName } from "@/utils/historySteps";
 import type { Tool } from "@/types/editor";
 import { pressureOf, strokeBrushOutline } from "./brushPointer";
 
@@ -133,7 +135,7 @@ export function usePaintTool({
     // The eraser removes drawings with its vector brush unless a pixel layer
     // is being worked on.
     const syncEraserMode = () => {
-      if (erasing) canvas.isDrawingMode = currentTarget() === null;
+      if (erasing) canvas.isDrawingMode = !selectionOf(canvas).quickMask && currentTarget() === null;
     };
     const selectTarget = () => {
       const target = currentTarget();
@@ -150,6 +152,10 @@ export function usePaintTool({
       syncEraserMode();
     });
     const unsubscribePicks = onSelectedGroupChange(canvas, () => {
+      if (!stroke) syncEraserMode();
+    });
+    // Entering or leaving Quick Mask changes what the eraser does.
+    const unsubscribeQuickMask = selectionOf(canvas).subscribe(() => {
       if (!stroke) syncEraserMode();
     });
 
@@ -191,6 +197,15 @@ export function usePaintTool({
      * pixels to change: the layer's own, or its mask's.
      */
     const resolveTarget = (): { layer: MaskableLayer; pixels: FabricImage; mask: boolean; created: boolean } | null => {
+      // In Quick Mask mode the tools paint the selection, whatever layer is picked.
+      if (selectionOf(canvas).quickMask) {
+        const pixels = quickMaskPixels(canvas);
+        if (!pixels) {
+          toast.error("Open a photo before painting");
+          return null;
+        }
+        return { layer: pixels, pixels, mask: true, created: false };
+      }
       const layer = currentTarget();
       if (layer && !layer.visible) {
         toast.error("Show the layer before painting on it");
@@ -221,16 +236,18 @@ export function usePaintTool({
     /** On a mask colours paint as their grey: black hides, white shows. */
     const paintColor = (color: string, mask: boolean) => (mask ? greyOf(color) : color);
 
-    // With a pixel selection, tools only change what is selected.
+    // With a pixel selection, tools only change what is selected (except
+    // in Quick Mask mode, where they paint the selection itself).
     const store = selectionOf(canvas);
+    const limit = () => (store.quickMask ? null : store.current());
     /** The selection in a layer's pixels, when there is one. */
     const clipFor = (layer: FabricImage, surface: HTMLCanvasElement) => {
-      const selection = store.current();
+      const selection = limit();
       return selection ? selectionClip(layer, selection, surface.width, surface.height) : null;
     };
     /** Run an edit that draws straight onto the layer, then undo it outside the selection. */
     const withinSelection = (layer: FabricImage, change: () => boolean): boolean => {
-      const selection = store.current();
+      const selection = limit();
       if (!selection) return change();
       const { surface } = beginPixelEdit(layer);
       const before = snapshotSurface(surface);
@@ -244,13 +261,17 @@ export function usePaintTool({
     };
     /** Whether a scene point is outside the selection (never, without one). */
     const outsideSelection = (point: { x: number; y: number }) => {
-      const selection = store.current();
+      const selection = limit();
       if (!selection) return false;
       const pixel = sceneToGrid(selection.grid, point.x, point.y);
       return !selection.mask.includes(pixel.x, pixel.y);
     };
 
     const commit = (layer: FabricImage) => {
+      if (isQuickMaskPixels(canvas, layer)) {
+        commitQuickMask(canvas, layer, toolStepName(activeTool) ?? "Quick Mask");
+        return;
+      }
       void commitPixelEdit(canvas, layer)
         .then((committed) => {
           if (!committed || released || canvasRef.current !== canvas) return;
@@ -488,6 +509,7 @@ export function usePaintTool({
       canvas.off("selection:created", onSelection);
       canvas.off("selection:updated", onSelection);
       unsubscribeMask();
+      unsubscribeQuickMask();
       unsubscribePicks();
       window.removeEventListener("touchstart", onTouchStart);
       outline = null;

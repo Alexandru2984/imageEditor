@@ -125,6 +125,7 @@ import { SHAPE_KINDS, isShapeKind, type ShapeKind } from "@/utils/shapes";
 import type { AiActions } from "@/hooks/useAiActions";
 import { Mask } from "@/selection/mask";
 import { documentGrid, selectionOf, type PixelSelection } from "@/selection/state";
+import { toggleQuickMask } from "@/selection/quickMask";
 import { copySelectionToLayer } from "@/selection/actions";
 import { clearTarget, editPixels, paintTarget } from "@/selection/edits";
 import {
@@ -1371,6 +1372,19 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         },
         isEnabled: () => !!pixelSelection(),
         keywords: "invert selection",
+      },
+      {
+        id: "select.quickMask",
+        label: "Edit in Quick Mask Mode",
+        icon: Paintbrush,
+        shortcuts: KEYMAP.quickMask,
+        toggle: true,
+        run: () => {
+          if (canvas) toggleQuickMask(canvas);
+        },
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        isChecked: () => !!canvas && selectionOf(canvas).quickMask,
+        keywords: "quick mask paint selection red overlay",
       },
       {
         id: "select.subject",

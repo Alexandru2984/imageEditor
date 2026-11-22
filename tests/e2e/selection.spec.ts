@@ -521,3 +521,75 @@ test("Edit › Fill and Stroke paint the selection on a new layer", async ({ pag
     .toEqual([255, 255, 255, 255]);
   expect((await autosavedLayerPixels(page, "Layer 1", [[200, 150]]))!.pixels[0]).toEqual([168, 85, 247, 255]);
 });
+
+/** Overlay pixels tinted red (Quick Mask), or the grey marching ants. */
+const overlayPixels = (page: Page, red: boolean) =>
+  page.evaluate((red) => {
+    const overlay = document.querySelector<HTMLCanvasElement>('[data-testid="selection-overlay"]')!;
+    const data = overlay.getContext("2d")!.getImageData(0, 0, overlay.width, overlay.height).data;
+    let count = 0;
+    for (let index = 0; index < data.length; index += 4) {
+      if (data[index + 3]! === 0) continue;
+      const tinted = data[index]! > 200 && data[index + 1]! < 40;
+      if (tinted === red) count += 1;
+    }
+    return count;
+  }, red);
+const redPixels = (page: Page) => overlayPixels(page, true);
+const antsOnly = (page: Page) => overlayPixels(page, false);
+
+test("Quick Mask: paint the selection with the brush, then turn it back into a selection", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#808080");
+  await settle(page);
+  const chip = page.getByRole("button", { name: "Leave Quick Mask" });
+
+  // A rectangle, then Q: red over the rest, no ants.
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-60, -40], [60, 40]);
+  await expect.poll(() => antsOnly(page)).toBeGreaterThan(0);
+  await page.keyboard.press("q");
+  await expect(chip).toBeVisible();
+  await expect.poll(() => antsOnly(page)).toBe(0);
+  const outside = await redPixels(page);
+  expect(outside).toBeGreaterThan(1000);
+  // Q again without painting: the same rectangle.
+  await page.keyboard.press("q");
+  await expect(chip).toHaveCount(0);
+  await expect.poll(() => redPixels(page)).toBe(0);
+  await expect.poll(() => antsOnly(page)).toBeGreaterThan(0);
+  await page.keyboard.press("Control+d");
+
+  // With nothing selected, Quick Mask starts clear; black paints red.
+  await page.keyboard.press("q");
+  await expect(chip).toBeVisible();
+  await expect.poll(() => redPixels(page)).toBe(0);
+  await arm(page, "b", "Brush");
+  await page.keyboard.press("d");
+  await drag(page, [-80, 0], [80, 0]);
+  await expect.poll(() => redPixels(page)).toBeGreaterThan(200);
+  const painted = await redPixels(page);
+  expect(painted).toBeLessThan(outside);
+  // The stroke went on the selection, not on a new layer.
+  expect((await autosavedObjects(page)).map((object) => object.name)).not.toContain("Layer 1");
+
+  // The white background colour (the eraser) selects again.
+  await arm(page, "e", "Eraser");
+  await drag(page, [-80, 0], [0, 0]);
+  await expect.poll(() => redPixels(page)).toBeLessThan(painted);
+
+  // Leaving it: everything but the rest of the stroke is selected.
+  await page.keyboard.press("q");
+  await expect(chip).toHaveCount(0);
+  await expect.poll(() => antsOnly(page)).toBeGreaterThan(0);
+  await page.keyboard.press("Control+j");
+  await expect.poll(async () => (await autosavedObjects(page)).some((o) => o.name === "Layer 1")).toBe(true);
+  const copied = (await autosavedLayerPixels(page, "Layer 1", [
+    [200, 20],
+    [250, 150],
+    [150, 150],
+  ]))!;
+  expect(copied.width).toBe(400);
+  expect(copied.pixels[0]![3]).toBe(255);
+  expect(copied.pixels[1]![3]).toBeLessThan(40);
+  expect(copied.pixels[2]![3]).toBe(255);
+});
