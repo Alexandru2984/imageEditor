@@ -505,6 +505,55 @@ export function documentMaskAlpha(layer: DocumentLayer): { alpha: HTMLCanvasElem
 }
 
 /**
+ * An adjustment or fill layer's mask over the document's own pixels, for
+ * files: one grey byte a pixel, trimmed to where it is not white (white
+ * beyond); null without a mask.
+ */
+export async function documentMaskGrey(
+  canvas: FabricCanvas,
+  layer: DocumentLayer
+): Promise<{ left: number; top: number; width: number; height: number; enabled: boolean; grey: Uint8Array } | null> {
+  const data = layer.layerMask;
+  if (!data?.src) return null;
+  await hydrateLayerMask(layer);
+  const runtime = runtimes.get(layer);
+  const grid = documentGrid(canvas);
+  if (!runtime || runtime.src !== data.src || !grid || grid.width <= 0 || grid.height <= 0) return null;
+  const { element, context } = newCanvas(grid.width, grid.height, { willReadFrequently: true });
+  try {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, grid.width, grid.height);
+    const k = grid.scale;
+    context.setTransform(...util.multiplyTransformMatrices([k, 0, 0, k, -grid.left * k, -grid.top * k], placementOf(layer, runtime)));
+    context.drawImage(sourceOf(runtime.pixels), 0, 0);
+    const pixels = context.getImageData(0, 0, grid.width, grid.height).data;
+    let left = grid.width;
+    let right = -1;
+    let top = grid.height;
+    let bottom = -1;
+    for (let y = 0; y < grid.height; y += 1) {
+      for (let x = 0, at = y * grid.width * 4; x < grid.width; x += 1, at += 4) {
+        if (pixels[at] === 255) continue;
+        if (x < left) left = x;
+        if (x > right) right = x;
+        if (y < top) top = y;
+        bottom = y;
+      }
+    }
+    if (right < 0) return { left: 0, top: 0, width: 0, height: 0, enabled: data.enabled, grey: new Uint8Array(0) };
+    const width = right - left + 1;
+    const height = bottom - top + 1;
+    const grey = new Uint8Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) grey[y * width + x] = pixels[((top + y) * grid.width + left + x) * 4]!;
+    }
+    return { left, top, width, height, enabled: data.enabled, grey };
+  } finally {
+    releaseSurface(element);
+  }
+}
+
+/**
  * The layer whose mask the paint tools and filters change: a lone adjustment
  * layer picked in the Layers panel (it has nothing else to paint), else the
  * layer whose mask was picked.

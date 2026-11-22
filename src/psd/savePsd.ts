@@ -2,14 +2,17 @@ import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { releaseSurface } from "@/raster/pixelLayer";
 import { documentGrid } from "@/selection/state";
 import { withoutCompositing } from "@/compositing/compositor";
-import { isDocumentLayer } from "@/adjustments/documentLayer";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer, type DocumentLayer } from "@/adjustments/documentLayer";
+import { isFillLayer } from "@/adjustments/fillLayer";
 import { isGroupEnd, isGroupHeader } from "@/layers/groupMarkers";
 import { fillOf } from "@/raster/layerStyle";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
+import { documentMaskGrey } from "@/raster/layerMask";
 import { isEditorChrome } from "@/utils/editorObjects";
 import { renderObjectsRegion } from "@/utils/flatten";
 import { guidesOf } from "@/utils/guides";
-import type { PsdToWrite } from "./psdDocument";
+import type { DecodedMask, PsdToWrite } from "./psdDocument";
 import { runPsdWorker } from "./psdWorkerClient";
 
 const WRITE_TIMEOUT_MS = 120_000;
@@ -50,11 +53,58 @@ function trimmed(surface: HTMLCanvasElement): { left: number; top: number; width
 
 const nextFrame = () => new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
+/** An adjustment or fill layer as Photoshop's own, its mask in document pixels. */
+async function documentLayerEntry(
+  canvas: FabricCanvas,
+  layer: DocumentLayer,
+  render: (include: (object: FabricObject) => boolean) => HTMLCanvasElement
+): Promise<Entry | null> {
+  const grey = await documentMaskGrey(canvas, layer);
+  const mask: DecodedMask | undefined = grey ? { ...grey, outside: 255 } : undefined;
+  const base = {
+    name: (layer.name ?? "").slice(0, 200) || (isFillLayer(layer) ? "Fill" : "Adjustment"),
+    opacity: layer.opacity ?? 1,
+    visible: layer.visible !== false,
+    blend: (layer.globalCompositeOperation ?? "source-over") as GlobalCompositeOperation,
+    clipped: layer.__clipped === true,
+    fill: fillOf(layer),
+    ...(mask ? { mask } : {}),
+  };
+  if (isAdjustmentLayer(layer)) return { kind: "adjustment", ...base, adjustment: layer.adjustment };
+  if (!isFillLayer(layer)) return null;
+  // Its content as other programs show it: drawn plainly, without its mask
+  // (the file has that on its own).
+  const item = layer as DocumentLayer & { __fill?: number };
+  const saved = { visible: layer.visible, opacity: layer.opacity, blend: layer.globalCompositeOperation, fill: item.__fill, mask: layer.layerMask };
+  layer.visible = true;
+  layer.opacity = 1;
+  layer.globalCompositeOperation = "source-over";
+  item.__fill = undefined;
+  if (saved.mask) layer.layerMask = { ...saved.mask, enabled: false };
+  let surface: HTMLCanvasElement;
+  try {
+    surface = withoutCompositing(() => render((candidate) => candidate === layer));
+  } finally {
+    layer.visible = saved.visible;
+    layer.opacity = saved.opacity;
+    layer.globalCompositeOperation = saved.blend;
+    item.__fill = saved.fill;
+    layer.layerMask = saved.mask;
+  }
+  try {
+    const area = trimmed(surface) ?? { left: 0, top: 0, width: 0, height: 0, pixels: new Uint8ClampedArray(0) };
+    return { kind: "fill", ...base, content: layer.fillContent, ...area };
+  } finally {
+    releaseSurface(surface);
+  }
+}
+
 /**
  * The document as a Photoshop file: every layer as a pixel layer at the
  * document's resolution (text, shapes, masks and styles drawn into it), with
- * its name, opacity, Fill, blend mode, visibility and clipping; the groups;
- * the flattened image; and the guides.
+ * its name, opacity, Fill, blend mode, visibility and clipping; adjustment
+ * and fill layers as Photoshop's own, with their masks; the groups; the
+ * flattened image; and the guides.
  */
 export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal): Promise<Blob> {
   const grid = documentGrid(canvas);
@@ -79,8 +129,11 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
       layers.push({ kind: "end" });
       continue;
     }
-    // Not written as layers yet; the flattened image shows them.
-    if (isDocumentLayer(object)) continue;
+    if (isDocumentLayer(object)) {
+      const entry = await documentLayerEntry(canvas, object, render);
+      if (entry) layers.push(entry);
+      continue;
+    }
     if (isGroupHeader(object)) {
       layers.push({
         kind: "group",
@@ -155,7 +208,8 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
   };
   const transfer = [
     composite.buffer as ArrayBuffer,
-    ...layers.flatMap((layer) => (layer.kind === "layer" && layer.pixels.byteLength ? [layer.pixels.buffer as ArrayBuffer] : [])),
+    ...layers.flatMap((layer) => ("pixels" in layer && layer.pixels.byteLength ? [layer.pixels.buffer as ArrayBuffer] : [])),
+    ...layers.flatMap((layer) => ("mask" in layer && layer.mask?.grey.byteLength ? [layer.mask.grey.buffer as ArrayBuffer] : [])),
   ];
   const buffer = await runPsdWorker<ArrayBuffer>({ type: "write", document }, transfer, {
     signal,

@@ -4,7 +4,7 @@ import { releaseSurface } from "@/raster/pixelLayer";
 import type { CanvasSnapshot } from "@/utils/canvasSnapshot";
 import { validateProjectSnapshot } from "@/utils/projectFile";
 import { throwIfAborted } from "@/utils/abort";
-import type { DecodedLayer, DecodedPsd } from "./psdDocument";
+import type { DecodedLayer, DecodedMask, DecodedPsd } from "./psdDocument";
 import { runPsdWorker } from "./psdWorkerClient";
 
 /** Photoshop files larger than this are not read at all. */
@@ -52,12 +52,15 @@ async function pngOf(width: number, height: number, draw: (context: CanvasRender
 const pixelsPng = (width: number, height: number, pixels: Uint8ClampedArray) =>
   pngOf(width, height, (context) => context.putImageData(new ImageData(pixels as Uint8ClampedArray<ArrayBuffer>, width, height), 0, 0));
 
-/** A layer mask, at the size of its layer as the editor keeps them. */
-function maskPng(layer: DecodedLayer) {
-  const mask = layer.mask!;
-  return pngOf(layer.width, layer.height, (context) => {
+/**
+ * A layer mask over `box` (in document pixels): the size of its layer for a
+ * pixel layer, of the document for an adjustment or fill layer, as the
+ * editor keeps them.
+ */
+function maskPng(mask: DecodedMask, box: { left: number; top: number; width: number; height: number }) {
+  return pngOf(box.width, box.height, (context) => {
     context.fillStyle = `rgb(${mask.outside}, ${mask.outside}, ${mask.outside})`;
-    context.fillRect(0, 0, layer.width, layer.height);
+    context.fillRect(0, 0, box.width, box.height);
     if (mask.width === 0 || mask.height === 0) return;
     const rgba = new Uint8ClampedArray(mask.width * mask.height * 4);
     for (let index = 0; index < mask.grey.length; index += 1) {
@@ -67,7 +70,7 @@ function maskPng(layer: DecodedLayer) {
       rgba[index * 4 + 2] = value;
       rgba[index * 4 + 3] = 255;
     }
-    context.putImageData(new ImageData(rgba, mask.width, mask.height), mask.left - layer.left, mask.top - layer.top);
+    context.putImageData(new ImageData(rgba, mask.width, mask.height), mask.left - box.left, mask.top - box.top);
   });
 }
 
@@ -79,9 +82,10 @@ export interface OpenedPsd {
 
 /**
  * A Photoshop file as an editor document: its bottom layer (when it fills
- * the canvas) or a transparent canvas as the photo, every other pixel layer
- * above it in place, with its name, opacity, Fill, blend mode, visibility,
- * mask and clipping, its groups, and the file's guides.
+ * the canvas) or a transparent canvas as the photo, every other pixel,
+ * adjustment and fill layer above it in place, with its name, opacity, Fill,
+ * blend mode, visibility, mask and clipping, its groups, and the file's
+ * guides.
  */
 export async function readPsdFile(file: File, signal?: AbortSignal): Promise<OpenedPsd> {
   if (file.size > MAX_PSD_BYTES) throw new Error(`Photoshop files can be at most ${MAX_PSD_BYTES / 1024 / 1024} MB`);
@@ -160,6 +164,27 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
       });
       continue;
     }
+    if (layer.kind === "adjustment" || layer.kind === "fill") {
+      // Over the document, whose pixels are the scene's here; so is its mask.
+      const object: Record<string, unknown> = {
+        type: layer.kind === "adjustment" ? "AdjustmentLayer" : "FillLayer",
+        version: fabricVersion,
+        name: layer.name,
+        opacity: layer.opacity,
+        visible: layer.visible,
+        globalCompositeOperation: layer.blend,
+        ...(layer.kind === "adjustment" ? { adjustment: layer.adjustment } : { fillContent: layer.content }),
+      };
+      if (layer.mask) {
+        const src = await maskPng(layer.mask, { left: 0, top: 0, width: psd.width, height: psd.height });
+        object.layerMask = { src: source(src), enabled: layer.mask.enabled };
+      }
+      if (layer.clipped) object.__clipped = true;
+      if (layer.fill < 1) object.__fill = layer.fill;
+      objects.push(object);
+      throwIfAborted(signal);
+      continue;
+    }
     const object: Record<string, unknown> = {
       ...objectOf(layer),
       src: source(await pixelsPng(layer.width, layer.height, layer.pixels)),
@@ -168,7 +193,7 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
       visible: layer.visible,
       globalCompositeOperation: layer.blend,
     };
-    if (layer.mask) object.layerMask = { src: source(await maskPng(layer)), enabled: layer.mask.enabled };
+    if (layer.mask) object.layerMask = { src: source(await maskPng(layer.mask, layer)), enabled: layer.mask.enabled };
     if (layer.clipped) object.__clipped = true;
     if (layer.fill < 1) object.__fill = layer.fill;
     objects.push(object);

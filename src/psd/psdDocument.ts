@@ -7,11 +7,15 @@ import {
   writePsd,
   type BlendMode,
   type Layer,
+  type LayerMaskData,
   type PixelData,
 } from "ag-psd";
+import type { AdjustmentData } from "@/adjustments/adjustmentData";
+import type { FillContent } from "@/adjustments/fillData";
 import { MAX_GROUP_DEPTH } from "@/layers/layerTree";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
 import type { Guide } from "@/utils/guideData";
+import { adjustmentFromPsd, adjustmentToPsd, fillFromPsd, fillToPsd } from "./psdLayerContent";
 
 /**
  * Photoshop documents, read from untrusted files: the structure first, then
@@ -56,6 +60,30 @@ export interface DecodedLayer {
   fill: number;
 }
 
+/** What adjustment and fill layers have, besides what they show. */
+interface DecodedDocumentLayerBase {
+  name: string;
+  opacity: number;
+  visible: boolean;
+  blend: GlobalCompositeOperation;
+  clipped: boolean;
+  fill: number;
+  /** In document pixels; none when it shows everywhere. */
+  mask?: DecodedMask;
+}
+
+/** An adjustment layer: no pixels, only what it does to those below. */
+export interface DecodedAdjustment extends DecodedDocumentLayerBase {
+  kind: "adjustment";
+  adjustment: AdjustmentData;
+}
+
+/** A fill layer: a colour or gradient over the whole document. */
+export interface DecodedFill extends DecodedDocumentLayerBase {
+  kind: "fill";
+  content: FillContent;
+}
+
 /** A group's header, above its layers (as the editor keeps groups). */
 export interface DecodedGroup {
   kind: "group";
@@ -74,7 +102,7 @@ export interface DecodedGroupEnd {
   kind: "end";
 }
 
-export type DecodedEntry = DecodedLayer | DecodedGroup | DecodedGroupEnd;
+export type DecodedEntry = DecodedLayer | DecodedAdjustment | DecodedFill | DecodedGroup | DecodedGroupEnd;
 
 export interface DecodedPsd {
   width: number;
@@ -159,6 +187,36 @@ function initialize() {
 const fits = (width: number, height: number) =>
   width > 0 && height > 0 && width <= MAX_RASTER_SIDE && height <= MAX_RASTER_SIDE && width * height <= MAX_RASTER_PIXELS;
 
+/**
+ * A layer's pixel mask; `at` is where an empty one that hides everything
+ * goes. None for a vector mask, or one that shows everything.
+ */
+function maskOf(layer: Layer, at: { left: number; top: number }): DecodedMask | undefined {
+  const mask = layer.mask;
+  if (!mask || mask.fromVectorData) return undefined;
+  const grey = getLayerMaskImageData(layer);
+  if (grey && fits(grey.width, grey.height)) {
+    const rgba = bytesOf(grey, grey.width * grey.height * 4);
+    const channel = new Uint8Array(grey.width * grey.height);
+    for (let index = 0; index < channel.length; index += 1) channel[index] = rgba[index * 4]!;
+    return {
+      left: mask.left ?? 0,
+      top: mask.top ?? 0,
+      width: grey.width,
+      height: grey.height,
+      outside: mask.defaultColor ?? 0,
+      enabled: !mask.disabled,
+      grey: channel,
+    };
+  }
+  // An empty mask that hides everything.
+  if (!grey && mask.defaultColor === 0) return { ...at, width: 0, height: 0, outside: 0, enabled: !mask.disabled, grey: new Uint8Array(0) };
+  return undefined;
+}
+
+/** A fill layer the editor keeps as one: no shape, stroke or pattern. */
+const isPlainFill = (layer: Layer) => !!layer.vectorFill && !layer.vectorMask && !layer.vectorStroke && layer.vectorFill.type !== "pattern";
+
 export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
   initialize();
   const psd = readPsd(buffer, {
@@ -174,7 +232,7 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
     throw new Error(`The document is too large: at most ${MAX_RASTER_SIDE} pixels a side and ${MAX_RASTER_PIXELS / 1e6} megapixels`);
   }
 
-  const counts = { effects: 0, adjustments: 0, blend: 0, deep: 0 };
+  const counts = { effects: 0, adjustments: 0, simplified: 0, blend: 0, deep: 0 };
   const layers: DecodedEntry[] = [];
   let seen = 0;
   let total = 0;
@@ -212,7 +270,41 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
         });
         continue;
       }
-      if (layer.adjustment) counts.adjustments += 1;
+      if (layer.adjustment || isPlainFill(layer)) {
+        const adjustment = layer.adjustment ? adjustmentFromPsd(layer.adjustment) : null;
+        const fill = layer.adjustment ? null : fillFromPsd(layer.vectorFill);
+        if (adjustment || fill) {
+          let blend = blendFromPsd(layer.blendMode);
+          if (!blend) {
+            counts.blend += 1;
+            blend = "source-over";
+          }
+          if ((adjustment ?? fill)!.simplified) counts.simplified += 1;
+          if (layer.effects) counts.effects += 1;
+          const mask = maskOf(layer, { left: 0, top: 0 });
+          if (mask) {
+            total += mask.width * mask.height;
+            if (total > MAX_TOTAL_LAYER_PIXELS) throw new Error("The document's layers are too large to open together");
+          }
+          const fillOpacity = layer.fillOpacity;
+          const base = {
+            name: (layer.name ?? "").slice(0, 200) || (adjustment ? "Adjustment" : "Fill"),
+            opacity,
+            visible,
+            blend,
+            clipped: layer.clipping === true,
+            fill: typeof fillOpacity === "number" && Number.isFinite(fillOpacity) ? Math.min(1, Math.max(0, fillOpacity)) : 1,
+            ...(mask ? { mask } : {}),
+          };
+          layers.push(adjustment ? { kind: "adjustment", ...base, adjustment: adjustment.value } : { kind: "fill", ...base, content: fill!.value });
+          continue;
+        }
+        // Ones the editor has nothing like; a fill of those still has its pixels.
+        if (layer.adjustment) {
+          counts.adjustments += 1;
+          continue;
+        }
+      }
       const left = layer.left ?? 0;
       const top = layer.top ?? 0;
       const layerWidth = (layer.right ?? 0) - left;
@@ -244,36 +336,15 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
         clipped: layer.clipping === true,
         fill: typeof fill === "number" && Number.isFinite(fill) ? Math.min(1, Math.max(0, fill)) : 1,
       };
-      const mask = layer.mask;
-      if (mask && !mask.fromVectorData) {
-        const grey = getLayerMaskImageData(layer);
-        const maskLeft = mask.left ?? 0;
-        const maskTop = mask.top ?? 0;
-        if (grey && fits(grey.width, grey.height)) {
-          const rgba = bytesOf(grey, grey.width * grey.height * 4);
-          const channel = new Uint8Array(grey.width * grey.height);
-          for (let index = 0; index < channel.length; index += 1) channel[index] = rgba[index * 4]!;
-          decoded.mask = {
-            left: maskLeft,
-            top: maskTop,
-            width: grey.width,
-            height: grey.height,
-            outside: mask.defaultColor ?? 0,
-            enabled: !mask.disabled,
-            grey: channel,
-          };
-        } else if (!grey && mask.defaultColor === 0) {
-          // An empty mask that hides everything.
-          decoded.mask = { left, top, width: 0, height: 0, outside: 0, enabled: !mask.disabled, grey: new Uint8Array(0) };
-        }
-      }
+      const mask = maskOf(layer, { left, top });
+      if (mask) decoded.mask = mask;
       layers.push(decoded);
     }
   };
   walk(psd.children, 0, null);
 
   let composite: Uint8ClampedArray | undefined;
-  if (!layers.some((layer) => layer.kind === "layer")) {
+  if (!layers.some((layer) => layer.kind === "layer" || layer.kind === "adjustment" || layer.kind === "fill")) {
     const flat = getCompositeImageData(psd);
     if (flat && flat.width === width && flat.height === height) composite = bytesOf(flat, width * height * 4);
     else throw new Error("The document has no pixels the editor can open");
@@ -286,7 +357,8 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
 
   const notes: string[] = [];
   if (counts.effects) notes.push("layer effects were left out");
-  if (counts.adjustments) notes.push("adjustment layers were left out");
+  if (counts.adjustments) notes.push("adjustment layers of kinds the editor does not have were left out");
+  if (counts.simplified) notes.push("some adjustment and fill layer settings were simplified");
   if (counts.blend) notes.push("some blend modes became Normal");
   if (counts.deep) notes.push(`groups nested more than ${MAX_GROUP_DEPTH} deep were flattened into their layers`);
   return { width, height, layers, composite, guides, notes };
@@ -295,12 +367,15 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
 /** A layer to write; one without pixels has no size. */
 export type LayerToWrite = Omit<DecodedLayer, "mask">;
 
+/** A fill layer to write, with its content drawn (unmasked) for other programs. */
+export type FillToWrite = DecodedFill & { left: number; top: number; width: number; height: number; pixels: Uint8ClampedArray };
+
 /** A document to write: its layers' pixels in document pixels, bottom to top. */
 export interface PsdToWrite {
   width: number;
   height: number;
   /** Bottom to top, groups as the editor keeps them (end, layers, header). */
-  layers: (LayerToWrite | DecodedGroup | DecodedGroupEnd)[];
+  layers: (LayerToWrite | DecodedAdjustment | FillToWrite | DecodedGroup | DecodedGroupEnd)[];
   /** The flattened document, what other programs show. */
   composite: Uint8ClampedArray;
   /** In document pixels from the top-left corner. */
@@ -309,6 +384,30 @@ export interface PsdToWrite {
 
 const pixelData = (width: number, height: number, data: Uint8ClampedArray) =>
   ({ width, height, data, colorSpace: "srgb" }) as unknown as ImageData;
+
+/** A mask as Photoshop keeps it: grey from the first channel, a colour outside. */
+function maskData(mask: DecodedMask): LayerMaskData {
+  const data: LayerMaskData = {
+    left: mask.left,
+    top: mask.top,
+    right: mask.left + mask.width,
+    bottom: mask.top + mask.height,
+    defaultColor: mask.outside,
+    disabled: !mask.enabled,
+  };
+  if (mask.width > 0 && mask.height > 0) {
+    const rgba = new Uint8ClampedArray(mask.width * mask.height * 4);
+    for (let index = 0; index < mask.grey.length; index += 1) {
+      const value = mask.grey[index]!;
+      rgba[index * 4] = value;
+      rgba[index * 4 + 1] = value;
+      rgba[index * 4 + 2] = value;
+      rgba[index * 4 + 3] = 255;
+    }
+    data.imageData = pixelData(mask.width, mask.height, rgba);
+  }
+  return data;
+}
 
 /** The flat list (end, layers, header for a group) as Photoshop's nested one. */
 export function nestLayers(entries: PsdToWrite["layers"]): Layer[] {
@@ -332,6 +431,20 @@ export function nestLayers(entries: PsdToWrite["layers"]): Layer[] {
       });
       continue;
     }
+    if (entry.kind === "adjustment") {
+      const layer: Layer = {
+        name: entry.name,
+        opacity: entry.opacity,
+        hidden: !entry.visible,
+        blendMode: blendToPsd(entry.blend),
+        adjustment: adjustmentToPsd(entry.adjustment),
+      };
+      if (entry.mask) layer.mask = maskData(entry.mask);
+      if (entry.clipped) layer.clipping = true;
+      if (entry.fill < 1) layer.fillOpacity = entry.fill;
+      open[open.length - 1]!.push(layer);
+      continue;
+    }
     const layer: Layer = {
       name: entry.name,
       left: entry.left,
@@ -343,6 +456,10 @@ export function nestLayers(entries: PsdToWrite["layers"]): Layer[] {
       blendMode: blendToPsd(entry.blend),
     };
     if (entry.width > 0 && entry.height > 0) layer.imageData = pixelData(entry.width, entry.height, entry.pixels);
+    if (entry.kind === "fill") {
+      layer.vectorFill = fillToPsd(entry.content);
+      if (entry.mask) layer.mask = maskData(entry.mask);
+    }
     if (entry.clipped) layer.clipping = true;
     if (entry.fill < 1) layer.fillOpacity = entry.fill;
     open[open.length - 1]!.push(layer);

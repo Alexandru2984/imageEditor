@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { initializeCanvas, writePsd, type Psd } from "ag-psd";
-import { blendFromPsd, blendToPsd, decodePsd, encodePsd, nestLayers, type DecodedGroup, type DecodedLayer } from "./psdDocument";
+import {
+  blendFromPsd,
+  blendToPsd,
+  decodePsd,
+  encodePsd,
+  nestLayers,
+  type DecodedAdjustment,
+  type DecodedFill,
+  type DecodedGroup,
+  type DecodedLayer,
+} from "./psdDocument";
 
 const solid = (width: number, height: number, rgba: [number, number, number, number]) => {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -172,6 +182,106 @@ describe("decodePsd", () => {
     expect(back[5]).toMatchObject({ kind: "group", passThrough: false, blend: "multiply", collapsed: true });
     expect(back[6]).toMatchObject({ kind: "group", passThrough: true, visible: false, collapsed: false });
     expect((back[6] as DecodedGroup).opacity).toBeCloseTo(0.5, 2);
+  });
+
+  it("writes and reads back adjustment and fill layers, with their masks and settings", () => {
+    const pixels = (width: number, height: number, rgba: [number, number, number, number]) => solid(width, height, rgba).data;
+    const grey = new Uint8Array([0, 128, 255, 64]);
+    const written = encodePsd({
+      width: 4,
+      height: 3,
+      layers: [
+        { kind: "layer", name: "Photo", left: 0, top: 0, width: 4, height: 3, opacity: 1, visible: true, blend: "source-over", pixels: pixels(4, 3, [200, 100, 50, 255]), clipped: false, fill: 1 },
+        {
+          kind: "adjustment",
+          name: "Levels 1",
+          opacity: 0.75,
+          visible: false,
+          blend: "luminosity",
+          clipped: true,
+          fill: 0.5,
+          adjustment: {
+            kind: "levels",
+            settings: {
+              rgb: { inBlack: 10, inWhite: 240, gamma: 1.25, outBlack: 0, outWhite: 255 },
+              red: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 },
+              green: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 },
+              blue: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 },
+            },
+          },
+          mask: { left: 1, top: 1, width: 2, height: 2, outside: 255, enabled: false, grey },
+        },
+        {
+          kind: "fill",
+          name: "Gradient Fill 1",
+          opacity: 1,
+          visible: true,
+          blend: "linear-burn" as GlobalCompositeOperation,
+          clipped: false,
+          fill: 1,
+          content: { kind: "gradient", from: "#000000", to: "#ffffff", style: "radial", angle: 30, scale: 80, reverse: true },
+          left: 0,
+          top: 0,
+          width: 4,
+          height: 3,
+          pixels: pixels(4, 3, [128, 128, 128, 255]),
+        },
+        { kind: "adjustment", name: "", opacity: 1, visible: true, blend: "source-over", clipped: false, fill: 1, adjustment: { kind: "invert", settings: {} } },
+      ],
+      composite: pixels(4, 3, [255, 255, 255, 255]),
+      guides: [],
+    });
+    const back = decodePsd(written);
+    expect(back.notes).toEqual([]);
+    expect(back.layers.map((entry) => entry.kind)).toEqual(["layer", "adjustment", "fill", "adjustment"]);
+    const levels = back.layers[1] as DecodedAdjustment;
+    expect(levels).toMatchObject({ name: "Levels 1", visible: false, blend: "luminosity", clipped: true });
+    expect(levels.opacity).toBeCloseTo(0.75, 2);
+    expect(levels.fill).toBeCloseTo(0.5, 2);
+    expect(levels.adjustment).toEqual({
+      kind: "levels",
+      settings: {
+        rgb: { inBlack: 10, inWhite: 240, gamma: 1.25, outBlack: 0, outWhite: 255 },
+        red: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 },
+        green: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 },
+        blue: { inBlack: 0, inWhite: 255, gamma: 1, outBlack: 0, outWhite: 255 },
+      },
+    });
+    expect(levels.mask).toMatchObject({ left: 1, top: 1, width: 2, height: 2, outside: 255, enabled: false });
+    expect([...levels.mask!.grey]).toEqual([...grey]);
+    const fill = back.layers[2] as DecodedFill;
+    expect(fill).toMatchObject({ name: "Gradient Fill 1", blend: "linear-burn" });
+    expect(fill.mask).toBeUndefined();
+    expect(fill.content).toEqual({ kind: "gradient", from: "#000000", to: "#ffffff", style: "radial", angle: 30, scale: 80, reverse: true });
+    expect(back.layers[3]).toMatchObject({ kind: "adjustment", name: "Adjustment", adjustment: { kind: "invert" } });
+  });
+
+  it("leaves out adjustments the editor does not have, and keeps fills it cannot as pixels", () => {
+    const psd: Psd = {
+      width: 2,
+      height: 2,
+      children: [
+        { name: "Photo", left: 0, top: 0, right: 2, bottom: 2, imageData: solid(2, 2, [1, 2, 3, 255]) },
+        { name: "Vibrance 1", adjustment: { type: "vibrance", vibrance: 20 } },
+        {
+          name: "Pattern Fill 1",
+          left: 0,
+          top: 0,
+          right: 2,
+          bottom: 2,
+          imageData: solid(2, 2, [9, 9, 9, 255]),
+          vectorFill: { type: "pattern", name: "Dots", id: "x" },
+        },
+        { name: "Legacy", adjustment: { type: "brightness/contrast", brightness: 20, contrast: 10, useLegacy: true } },
+      ],
+    };
+    const back = decodePsd(writePsd(psd, { generateThumbnail: false }));
+    expect(back.layers.map((entry) => ("name" in entry ? `${entry.kind}:${entry.name}` : entry.kind))).toEqual([
+      "layer:Photo",
+      "layer:Pattern Fill 1",
+      "adjustment:Legacy",
+    ]);
+    expect(back.notes).toEqual(["adjustment layers of kinds the editor does not have were left out", "some adjustment and fill layer settings were simplified"]);
   });
 
   it("nests the flat list as Photoshop does, and flattens groups nested too deep", () => {
