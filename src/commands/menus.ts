@@ -84,6 +84,10 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "layer.new",
       "layer.newGroup",
       {
+        label: "New fill layer",
+        items: ["layer.newFill.solid", "layer.newFill.gradient"],
+      },
+      {
         label: "New adjustment layer",
         items: [
           "layer.newAdjustment.brightnessContrast",

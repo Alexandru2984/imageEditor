@@ -424,8 +424,8 @@ test("an adjustment layer is added from the Layers panel and set in Properties o
   await openPhoto(page);
   await page.getByRole("button", { name: "Toggle properties" }).tap();
   await page.getByRole("tab", { name: "Layers" }).tap();
-  await page.getByRole("button", { name: "Add an adjustment layer" }).tap();
-  const menu = page.getByRole("menu", { name: "Add an adjustment layer" });
+  await page.getByRole("button", { name: "Add a fill or adjustment layer" }).tap();
+  const menu = page.getByRole("menu", { name: "Add a fill or adjustment layer" });
   await expectOnScreen(page, menu);
   await menu.getByRole("menuitem", { name: /^Levels/ }).tap();
   const settings = page.getByRole("region", { name: "Adjustment settings" });

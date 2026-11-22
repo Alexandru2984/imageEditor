@@ -21,8 +21,11 @@ import { applyColor } from "@/utils/shapes";
 import { isSticker } from "@/utils/stickers";
 import { TextControls, type ApplyMode, type TextObject } from "./TextControls";
 import { AdjustmentLayerProperties } from "./adjustments/AdjustmentLayerProperties";
-import type { AdjustmentLayer } from "@/adjustments/adjustmentLayer";
-import { onSelectedGroupChange, selectedAdjustment } from "@/layers/layerGroups";
+import { FillLayerProperties } from "./adjustments/FillLayerProperties";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import type { DocumentLayer } from "@/adjustments/documentLayer";
+import { isFillLayer } from "@/adjustments/fillLayer";
+import { onSelectedGroupChange, selectedDocumentLayer } from "@/layers/layerGroups";
 import {
   AlignStartVertical,
   AlignCenterVertical,
@@ -121,10 +124,10 @@ export const PropertiesPanel = ({
   colors,
 }: PropertiesPanelProps) => {
   // An adjustment layer picked in the Layers panel shows its settings here.
-  const [adjustmentLayer, setAdjustmentLayer] = useState<AdjustmentLayer | null>(null);
+  const [documentLayer, setDocumentLayer] = useState<DocumentLayer | null>(null);
   useEffect(() => {
     if (!fabricCanvas) return;
-    const read = () => setAdjustmentLayer(selectedAdjustment(fabricCanvas));
+    const read = () => setDocumentLayer(selectedDocumentLayer(fabricCanvas));
     read();
     const events = ["selection:created", "selection:updated", "selection:cleared", "object:removed", "object:added"] as const;
     events.forEach((event) => fabricCanvas.on(event, read));
@@ -407,15 +410,16 @@ export const PropertiesPanel = ({
   // Pixels have no fill or stroke of their own.
   const isImageObject = selectedProps?.type === "image";
 
-  if (fabricCanvas && adjustmentLayer) {
+  if (fabricCanvas && isAdjustmentLayer(documentLayer)) {
     return (
       <AdjustmentLayerProperties
         canvas={fabricCanvas}
-        layer={adjustmentLayer}
+        layer={documentLayer}
         colors={colors ?? { foreground: activeColor, background: "#ffffff" }}
       />
     );
   }
+  if (fabricCanvas && isFillLayer(documentLayer)) return <FillLayerProperties canvas={fabricCanvas} layer={documentLayer} />;
 
   return (
     <ScrollArea className="h-full w-full">

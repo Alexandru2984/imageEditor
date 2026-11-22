@@ -15,7 +15,7 @@ import {
 import { StrokePainter } from "@/raster/painter";
 import { bucketFill, bucketFillPixels, type BucketOptions } from "@/raster/fill";
 import { currentMaskPixels, editedMaskLayer, maskTargetOf, type MaskableLayer } from "@/raster/layerMask";
-import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
 import { onSelectedGroupChange } from "@/layers/layerGroups";
 import { greyOf } from "@/raster/maskPixels";
 import { constrainAngle, drawGradient, type GradientOptions } from "@/raster/gradient";
@@ -138,7 +138,7 @@ export function usePaintTool({
     const selectTarget = () => {
       const target = currentTarget();
       // An adjustment layer stays picked in the Layers panel only.
-      if (target && !isAdjustmentLayer(target) && canvas.getActiveObject() !== target) canvas.setActiveObject(target);
+      if (target && !isDocumentLayer(target) && canvas.getActiveObject() !== target) canvas.setActiveObject(target);
       syncEraserMode();
       canvas.requestRenderAll();
     };
@@ -196,11 +196,11 @@ export function usePaintTool({
         toast.error("Show the layer before painting on it");
         return null;
       }
-      if (layer && isAdjustmentLayer(layer) && isObjectLocked(layer)) {
+      if (layer && isDocumentLayer(layer) && isObjectLocked(layer)) {
         toast.error("Unlock the layer first");
         return null;
       }
-      if (layer && (isAdjustmentLayer(layer) || maskTarget.isTarget(layer))) {
+      if (layer && (isDocumentLayer(layer) || maskTarget.isTarget(layer))) {
         const pixels = currentMaskPixels(layer);
         if (!pixels) {
           toast.error("The layer mask is still loading");
@@ -208,7 +208,7 @@ export function usePaintTool({
         }
         return { layer, pixels, mask: true, created: false };
       }
-      if (layer && !isAdjustmentLayer(layer)) return { layer, pixels: layer, mask: false, created: isPendingLayer(layer) };
+      if (layer && !isDocumentLayer(layer)) return { layer, pixels: layer, mask: false, created: isPendingLayer(layer) };
       if (erasing) return null;
       const created = createPendingLayer(canvas);
       if (!created) {

@@ -160,12 +160,12 @@ export function LayerRow({
             <div className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
               {layer.collapsed ? <Folder className="h-4 w-4" /> : <FolderOpen className="h-4 w-4" />}
             </div>
-          ) : layer.adjustment ? (
+          ) : layer.adjustment || layer.fill ? (
             <button
               type="button"
               data-thumbnail=""
               aria-label={`Settings of ${layer.name}`}
-              title="Double-click for the adjustment's settings"
+              title={layer.fill ? "Double-click for the fill's settings" : "Double-click for the adjustment's settings"}
               onClick={(event) => event.detail === 0 && handlers.onEditAdjustment(layer)}
               onDoubleClick={(event) => {
                 event.stopPropagation();
@@ -173,10 +173,14 @@ export function LayerRow({
               }}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border bg-muted text-muted-foreground"
             >
-              {(() => {
-                const Icon = ADJUSTMENT_ICONS[layer.adjustment];
-                return <Icon className="h-4 w-4" />;
-              })()}
+              {layer.adjustment ? (
+                (() => {
+                  const Icon = ADJUSTMENT_ICONS[layer.adjustment];
+                  return <Icon className="h-4 w-4" />;
+                })()
+              ) : (
+                <span className="h-full w-full rounded-[3px]" style={{ background: layer.fill ?? undefined }} />
+              )}
             </button>
           ) : (
             <div

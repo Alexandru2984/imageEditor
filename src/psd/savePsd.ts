@@ -2,7 +2,7 @@ import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { releaseSurface } from "@/raster/pixelLayer";
 import { documentGrid } from "@/selection/state";
 import { withoutCompositing } from "@/compositing/compositor";
-import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
 import { isGroupEnd, isGroupHeader } from "@/layers/groupMarkers";
 import { fillOf } from "@/raster/layerStyle";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
@@ -80,7 +80,7 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
       continue;
     }
     // Not written as layers yet; the flattened image shows them.
-    if (isAdjustmentLayer(object)) continue;
+    if (isDocumentLayer(object)) continue;
     if (isGroupHeader(object)) {
       layers.push({
         kind: "group",

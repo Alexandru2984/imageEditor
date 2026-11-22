@@ -423,3 +423,120 @@ test("a selection becomes the mask of a new adjustment layer", async ({ page }) 
   await expect.poll(() => stripes(page)).toEqual(original);
   await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.name)).toEqual(["Background"]);
 });
+
+const fillLayer = (id: string, fillContent: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+  type: "FillLayer",
+  version: "7.0.0",
+  __layerId: id,
+  name: id,
+  fillContent,
+  ...extra,
+});
+
+const BLUE = [51, 102, 204];
+
+test("a Color Fill layer covers the document with its colour, opacity and blend mode", async ({ page }) => {
+  await openProject(page, () => [fillLayer("Color Fill 1", { kind: "solid", color: "#3366cc" })]);
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => BLUE));
+
+  await page.goto("/");
+  await openProject(page, () => [fillLayer("Color Fill 1", { kind: "solid", color: "#3366cc" }, { opacity: 0.5 })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), STRIPES.map((colour) => colour.map((value, channel) => (value + BLUE[channel]!) / 2)));
+
+  await page.goto("/");
+  await openProject(page, () => [fillLayer("Color Fill 1", { kind: "solid", color: "#3366cc" }, { globalCompositeOperation: "multiply" })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), STRIPES.map((colour) => colour.map((value, channel) => (value * BLUE[channel]!) / 255)));
+
+  // Clipped to a layer over the left half: only there.
+  await page.goto("/");
+  await openProject(page, () => [
+    image("__snapshot_src_1", WIDTH / 2, { __layerId: "left", name: "Left" }),
+    fillLayer("Color Fill 1", { kind: "solid", color: "#3366cc" }, { __clipped: true }),
+  ]);
+  await expect.poll(() => stripes(page)).toEqual([BLUE, BLUE, BLUE, ...original.slice(3)]);
+});
+
+test("a Gradient Fill layer lays its gradient over the document", async ({ page }) => {
+  const gradient = { kind: "gradient", from: "#000000", to: "#ffffff", style: "linear", angle: 0, scale: 100, reverse: false };
+  const across = STRIPES.map((_, index) => {
+    const value = (255 * (index + 0.5)) / STRIPES.length;
+    return [value, value, value];
+  });
+  await openProject(page, () => [fillLayer("Gradient Fill 1", gradient)]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), across, 4);
+
+  // Reversed, it runs the other way; reflected, from black in the middle.
+  await page.goto("/");
+  await openProject(page, () => [fillLayer("Gradient Fill 1", { ...gradient, reverse: true })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), [...across].reverse(), 4);
+
+  await page.goto("/");
+  await openProject(page, () => [fillLayer("Gradient Fill 1", { ...gradient, style: "reflected" })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(
+    await stripes(page),
+    STRIPES.map((_, index) => {
+      const value = 255 * Math.abs(((index + 0.5) / STRIPES.length - 0.5) * 2);
+      return [value, value, value];
+    }),
+    4
+  );
+});
+
+test("a fill layer is made from the Layer menu, set in Properties, and merged into the layer below", async ({ page }) => {
+  await openProject(page, () => [image("__snapshot_src_1", WIDTH / 2, { __layerId: "left", name: "Left" })]);
+  // Black, the default foreground.
+  await page.keyboard.press("d");
+  await chooseSubmenu(page, "Layer", "New fill layer", "Solid color…");
+  const settings = page.getByRole("region", { name: "Fill settings" });
+  await expect(settings).toBeVisible();
+  await expect(settings).toContainText("Color Fill");
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => [0, 0, 0]));
+  await settings.getByLabel("Fill colour").fill("#3366cc");
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => BLUE));
+  await expect
+    .poll(async () => (await autosavedObjects(page)).at(-1)?.fillContent)
+    .toEqual({ kind: "solid", color: "#3366cc" });
+
+  // In the Layers panel, with its swatch; undone, black again.
+  await page.getByRole("tab", { name: "Layers" }).click();
+  const row = page.getByRole("group", { name: "Color Fill 1 layer" });
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => [0, 0, 0]));
+  await page.keyboard.press("Control+Shift+z");
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => BLUE));
+
+  // It stays after a reload.
+  await expect.poll(async () => ((await autosavedObjects(page)).at(-1)?.fillContent as { color?: string })?.color).toBe("#3366cc");
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => BLUE));
+
+  // Double-clicking its swatch opens its settings again; Merge Down makes it pixels over the whole document.
+  await page.getByRole("tab", { name: "Layers" }).click();
+  await row.getByRole("button", { name: "Settings of Color Fill 1" }).dblclick();
+  await expect(settings).toBeVisible();
+  await page.getByRole("tab", { name: "Layers" }).click();
+  await row.click();
+  await page.keyboard.press("Control+e");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => `${object.type}:${object.name}`)).toEqual(["Image:Background", "Image:Left"]);
+  await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => BLUE));
+  const merged = await autosavedLayerPixels(page, "Left", [[220, 30]]);
+  expect(merged!.pixels[0]).toEqual([...BLUE, 255]);
+});
+
+test("a selection becomes the mask of a new fill layer", async ({ page }) => {
+  await openProject(page, () => []);
+  const box = await documentBox(page);
+  await selectPart(page, box, [0.5, -0.3], [1.1, 1.3]);
+  await page.keyboard.press("d");
+  await chooseSubmenu(page, "Layer", "New fill layer", "Solid color…");
+  await expect.poll(async () => near(await stripes(page), [...original.slice(0, 3), [0, 0, 0], [0, 0, 0], [0, 0, 0]])).toBeUndefined();
+  await expect.poll(async () => (await autosavedObjects(page)).at(-1)?.layerMask).toMatchObject({ enabled: true });
+});

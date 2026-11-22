@@ -1,5 +1,5 @@
 import { arrangeLayers, selectedGroup } from "@/layers/layerGroups";
-import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
 import { transformGuides } from "./guides";
 import { ActiveSelection, FabricImage, Point } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
@@ -241,7 +241,7 @@ export async function addImageLayer(
 export function selectAllLayers(canvas: FabricCanvas): number {
   const objects = canvas
     .getObjects()
-    .filter((object) => isLayerObject(object) && !isProtectedObject(object) && !isAdjustmentLayer(object));
+    .filter((object) => isLayerObject(object) && !isProtectedObject(object) && !isDocumentLayer(object));
   if (objects.length === 0) return 0;
   canvas.setActiveObject(
     objects.length === 1 ? objects[0]! : new ActiveSelection(objects, { canvas })

@@ -1,5 +1,5 @@
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
-import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
 import { documentGrid } from "@/selection/state";
 import { findBackgroundImage, isLayerObject } from "@/utils/editorObjects";
 import { isGuideList, mapGuides, MAX_GUIDES, nearestLines, type GridSettings, type Guide, type SceneMatrix } from "./guideData";
@@ -54,7 +54,7 @@ function layerStops(canvas: FabricCanvas, axis: "x" | "y"): number[] {
   const stops: number[] = [];
   for (const object of canvas.getObjects()) {
     // Adjustment layers take no room to line up with.
-    if (!object.visible || !isLayerObject(object) || isAdjustmentLayer(object)) continue;
+    if (!object.visible || !isLayerObject(object) || isDocumentLayer(object)) continue;
     const { left, top, width, height } = object.getBoundingRect();
     if (axis === "x") stops.push(left, left + width / 2, left + width);
     else stops.push(top, top + height / 2, top + height);

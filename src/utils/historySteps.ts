@@ -1,4 +1,5 @@
 import { ADJUSTMENT_TITLES, isAdjustmentLayerKind } from "@/adjustments/adjustmentData";
+import { FILL_TITLES } from "@/adjustments/fillLayer";
 import type { Canvas as FabricCanvas } from "fabric";
 import type { Tool } from "@/types/editor";
 import type { CanvasSnapshot } from "./canvasSnapshot";
@@ -101,10 +102,17 @@ function adjustmentTitle(object: SavedObject): string | null {
   return isAdjustmentLayerKind(kind) ? ADJUSTMENT_TITLES[kind] : null;
 }
 
+/** "Color Fill" for a fill layer's saved content, when it names one. */
+function fillTitle(object: SavedObject): string | null {
+  const kind = (object.fillContent as { kind?: unknown } | undefined)?.kind;
+  return kind === "solid" || kind === "gradient" ? FILL_TITLES[kind] : null;
+}
+
 function addedName(object: SavedObject): string {
   const type = String(object.type ?? "").toLowerCase();
   if (type === "layergroup" || type === "layergroupend") return "New group";
   if (type === "adjustmentlayer") return `New ${adjustmentTitle(object) ?? "adjustment"} layer`;
+  if (type === "filllayer") return `New ${fillTitle(object) ?? "fill"} layer`;
   if (TEXT_TYPES.has(type)) return "Text";
   if (SHAPE_TYPES.has(type)) return "Shape";
   return "New layer";
@@ -174,10 +182,12 @@ export function describeChange(before: CanvasSnapshot | undefined, after: Canvas
         changed.add(key);
         if (key === "src" && object.__isBackground) photoPixels = true;
         if (key === "adjustment") adjusted ??= adjustmentTitle(object);
+        if (key === "fillContent") adjusted ??= fillTitle(object);
       }
     }
   });
   if (changed.has("adjustment")) return { name: `Modify ${adjusted ?? "adjustment"} layer`, kind: "other" };
+  if (changed.has("fillContent")) return { name: `Modify ${adjusted ?? "fill"} layer`, kind: "other" };
   for (const [keys, name, kind] of PROPERTY_STEPS) {
     if (keys.some((key) => changed.has(key))) return { name: name === "Edit pixels" && photoPixels ? "Edit image" : name, kind };
   }

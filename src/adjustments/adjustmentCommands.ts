@@ -9,8 +9,10 @@ import { maskNewAdjustmentLayer } from "@/raster/layerMask";
 import { selectionOf } from "@/selection/state";
 import { ADJUSTMENT_TITLES, type AdjustmentData } from "./adjustmentData";
 import { AdjustmentLayer } from "./adjustmentLayer";
+import type { DocumentLayer } from "./documentLayer";
+import { FILL_TITLES, FillLayer, isFillLayer, type FillContent } from "./fillLayer";
 
-/** Layer › New Adjustment Layer and the rest the editor does with them. */
+/** Layer › New Adjustment Layer, New Fill Layer, and the rest the editor does with them. */
 
 type Named = FabricObject & EditorFabricObject & { name?: string };
 
@@ -49,7 +51,15 @@ function insertionIndex(canvas: FabricCanvas): number {
  * meanwhile.
  */
 export async function addAdjustmentLayer(canvas: FabricCanvas, adjustment: AdjustmentData): Promise<AdjustmentLayer | null> {
-  const layer = new AdjustmentLayer({ adjustment });
+  return addDocumentLayer(canvas, new AdjustmentLayer({ adjustment }), ADJUSTMENT_TITLES[adjustment.kind]);
+}
+
+/** Layer › New Fill Layer: a colour or gradient over the document, as a new adjustment layer goes in. */
+export async function addFillLayer(canvas: FabricCanvas, content: FillContent): Promise<FillLayer | null> {
+  return addDocumentLayer(canvas, new FillLayer({ fillContent: content }), FILL_TITLES[content.kind]);
+}
+
+async function addDocumentLayer<T extends DocumentLayer>(canvas: FabricCanvas, layer: T, title: string): Promise<T | null> {
   const store = selectionOf(canvas);
   const selection = store.current();
   const photo = findBackgroundImage(canvas);
@@ -57,7 +67,7 @@ export async function addAdjustmentLayer(canvas: FabricCanvas, adjustment: Adjus
     await maskNewAdjustmentLayer(canvas, layer, { selection });
     if (findBackgroundImage(canvas) !== photo || store.current() !== selection) return null;
   }
-  layer.name = nextName(canvas, ADJUSTMENT_TITLES[adjustment.kind]);
+  layer.name = nextName(canvas, title);
   ensureLayerId(layer, new Set(canvas.getObjects().map((object) => (object as Named).__layerId ?? "")));
   canvas.insertAt(insertionIndex(canvas), layer);
   if (selection) store.set(null);
@@ -66,19 +76,30 @@ export async function addAdjustmentLayer(canvas: FabricCanvas, adjustment: Adjus
   return layer;
 }
 
-/** Layer › Duplicate on an adjustment layer: a copy just above it. */
-export function duplicateAdjustmentLayer(canvas: FabricCanvas, layer: AdjustmentLayer): AdjustmentLayer | null {
+/** Layer › Duplicate on an adjustment or fill layer: a copy just above it. */
+export function duplicateDocumentLayer(canvas: FabricCanvas, layer: DocumentLayer): DocumentLayer | null {
   const index = canvas.getObjects().indexOf(layer);
   if (index < 0) return null;
-  const copy = new AdjustmentLayer({
-    ...layer.toObject(["__clipped", "__fill", "layerMask"]),
-    adjustment: structuredClone(layer.adjustment),
-    name: `${layer.name ?? ADJUSTMENT_TITLES[layer.adjustment.kind]} copy`.slice(0, 256),
-  });
+  const options = layer.toObject(["__clipped", "__fill", "layerMask"]) as Record<string, unknown>;
+  let copy: DocumentLayer;
+  if (isFillLayer(layer)) {
+    const name = `${layer.name ?? FILL_TITLES[layer.fillContent.kind]} copy`.slice(0, 256);
+    copy = new FillLayer({ ...options, fillContent: structuredClone(layer.fillContent), name });
+  } else {
+    const adjustment = (layer as AdjustmentLayer).adjustment;
+    const name = `${layer.name ?? ADJUSTMENT_TITLES[adjustment.kind]} copy`.slice(0, 256);
+    copy = new AdjustmentLayer({ ...options, adjustment: structuredClone(adjustment), name });
+  }
   ensureLayerId(copy, new Set(canvas.getObjects().map((object) => (object as Named).__layerId ?? "")));
   canvas.insertAt(index + 1, copy);
   selectLayers(canvas, [(copy as Named).__layerId!]);
   return copy;
+}
+
+/** A fill layer's new colour or gradient, shown at once (the caller makes the history step). */
+export function setFill(canvas: FabricCanvas, layer: FillLayer, content: FillContent): void {
+  layer.fillContent = content;
+  canvas.requestRenderAll();
 }
 
 /** New settings for an adjustment layer, shown at once (the caller makes the history step). */

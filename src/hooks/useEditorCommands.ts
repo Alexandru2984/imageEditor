@@ -93,9 +93,9 @@ import {
   clippingAction,
   deleteSelectedLayers,
   hasPicks,
-  pickedAdjustments,
+  pickedDocumentLayers,
   pickedGroups,
-  selectedAdjustment,
+  selectedDocumentLayer,
   selectedLayerObjects,
   duplicateGroup,
   groupSelected,
@@ -144,8 +144,9 @@ import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
 import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
 import { invertLut, uniformLuts } from "@/raster/adjustments";
 import type { PixelJob } from "@/raster/pixelJobs";
-import { addAdjustmentLayer, duplicateAdjustmentLayer } from "@/adjustments/adjustmentCommands";
-import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { addAdjustmentLayer, addFillLayer, duplicateDocumentLayer } from "@/adjustments/adjustmentCommands";
+import { FILL_TITLES, initialFill } from "@/adjustments/fillLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
 import { ADJUSTMENT_TITLES, initialAdjustment, type AdjustmentLayerKind } from "@/adjustments/adjustmentData";
 import { ADJUSTMENT_ICONS } from "@/components/editor/layers/adjustmentIcons";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
@@ -481,9 +482,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     /** The layer a layer style goes on: the selected one, else the photo. */
     // Groups take no mask or style yet: not their layers, nor the photo instead.
     const GROUP_REFUSAL = "Select a layer, not a group";
-    const ADJUSTMENT_REFUSAL = "Select a pixel layer, not an adjustment layer";
+    const ADJUSTMENT_REFUSAL = "Select a pixel layer, not an adjustment or fill layer";
     const pickRefusal = (): string | null =>
-      !canvas ? null : pickedGroups(canvas).length ? GROUP_REFUSAL : pickedAdjustments(canvas).length ? ADJUSTMENT_REFUSAL : null;
+      !canvas ? null : pickedGroups(canvas).length ? GROUP_REFUSAL : pickedDocumentLayers(canvas).length ? ADJUSTMENT_REFUSAL : null;
     const styleLayer = (): FabricObject | string => {
       if (!canvas) return "Open a photo first";
       const refusal = pickRefusal();
@@ -529,7 +530,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         // The selection became the mask.
         if (typeof chosen !== "string") selectionOf(canvas).set(null);
         // An adjustment layer's mask is what the tools paint anyway.
-        if (!isAdjustmentLayer(layer)) maskTargetOf(canvas).set(layer);
+        if (!isDocumentLayer(layer)) maskTargetOf(canvas).set(layer);
       });
     const canAddMask = () => {
       const layer = maskedLayer();
@@ -978,10 +979,10 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         // With a pixel selection, Ctrl+J is New layer via copy.
         run: () => {
           const group = canvas ? selectedGroup(canvas) : null;
-          const adjustment = canvas ? selectedAdjustment(canvas) : null;
+          const documentLayer = canvas ? selectedDocumentLayer(canvas) : null;
           if (pixelSelection()) layerViaSelection(false);
           else if (canvas && group) duplicateGroup(canvas, group).catch(reportFailure);
-          else if (canvas && adjustment) duplicateAdjustmentLayer(canvas, adjustment);
+          else if (canvas && documentLayer) duplicateDocumentLayer(canvas, documentLayer);
           else duplicate();
         },
         isEnabled: () => selected() || !!pixelSelection(),
@@ -1057,7 +1058,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           target.set(target.isTarget(layer) ? null : layer);
         },
         // An adjustment layer has only its mask to paint.
-        isEnabled: () => !!withMask() && !isAdjustmentLayer(withMask()),
+        isEnabled: () => !!withMask() && !isDocumentLayer(withMask()),
         keywords: "paint on mask target",
       },
       {
@@ -1082,7 +1083,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         id: "layer.mask.apply",
         label: "Apply layer mask",
         run: withMaskLayer((canvas, layer) => applyLayerMask(canvas, layer)),
-        isEnabled: () => !!withMask() && !isAdjustmentLayer(withMask()),
+        isEnabled: () => !!withMask() && !isDocumentLayer(withMask()),
         keywords: "bake erase hidden pixels",
       },
       {
@@ -1181,13 +1182,35 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           keywords: `adjustment layer non-destructive ${keywords}`,
         })
       ),
+      ...(
+        [
+          ["solid", "Solid color…", "colour plain"],
+          ["gradient", "Gradient…", "blend ramp"],
+        ] as const
+      ).map(
+        ([kind, label, keywords]): Command => ({
+          id: `layer.newFill.${kind}`,
+          label,
+          icon: kind === "solid" ? PaintBucket : Blend,
+          run: () => {
+            if (!canvas) return;
+            void addFillLayer(canvas, initialFill(kind, colors))
+              .then((layer) => {
+                if (layer) openPanel("properties");
+              })
+              .catch(reportFailure);
+          },
+          isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+          keywords: `fill layer ${FILL_TITLES[kind]} non-destructive ${keywords}`,
+        })
+      ),
       {
         id: "layer.adjustmentProperties",
-        label: "Adjustment settings…",
+        label: "Layer content options…",
         icon: SlidersHorizontal,
         run: () => openPanel("properties"),
-        isEnabled: () => !!canvas && !!selectedAdjustment(canvas),
-        keywords: "properties adjustment layer content options",
+        isEnabled: () => !!canvas && !!selectedDocumentLayer(canvas),
+        keywords: "properties adjustment fill layer settings",
       },
       {
         id: "layer.group",

@@ -14,6 +14,8 @@ import { isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
 import { findNode } from "@/layers/layerTree";
 import { groupObjects, selectedGroup, selectedLayerObjects } from "@/layers/layerGroups";
 import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
+import { isFillLayer } from "@/adjustments/fillLayer";
 import { nativeMultiplier, renderObjectsRegion } from "@/utils/flatten";
 import {
   documentPixelSize,
@@ -73,14 +75,20 @@ function selectedLayers(canvas: FabricCanvas): FabricObject[] {
   return documentLayers(canvas).filter((object) => chosen.has(object));
 }
 
-/** Layers with pixels of their own (not adjustment layers): what a merge's size comes from. */
+/** Layers that show pixels (fill layers too, not adjustment layers). */
 const withPixels = (layers: readonly FabricObject[]) => layers.filter((object) => isLayerObject(object) && !isAdjustmentLayer(object));
+
+/** What a merge's size comes from: a fill layer covers the document, as the photo does. */
+const sizedBy = (canvas: FabricCanvas, layers: readonly FabricObject[]): FabricObject[] => {
+  const photo = findBackgroundImage(canvas);
+  return withPixels(layers).flatMap((object) => (isFillLayer(object) ? (photo ? [photo] : []) : [object]));
+};
 
 function checkMergeable(canvas: FabricCanvas, layers: FabricObject[]): MergePlan | Refusal {
   const isShown = shownTest(canvas);
   if (layers.some((layer) => !isShown(layer))) return "Show the layers before merging them";
   // An adjustment merges into the pixels below it, never the other way round.
-  if (isAdjustmentLayer(layers[0])) return "The bottom layer is an adjustment layer, with no pixels to merge into";
+  if (isDocumentLayer(layers[0])) return "The bottom layer is an adjustment or fill layer, with no pixels to merge into";
   if (layers.some((layer) => !isBackgroundObject(layer) && isPixelsLocked(layer))) {
     return "Unlock the layers before merging them";
   }
@@ -104,7 +112,7 @@ export function planMergeDown(canvas: FabricCanvas): MergePlan | Refusal {
   const belowNode = position > 0 ? siblings[position - 1] : undefined;
   if (!belowNode) return "There is no layer below to merge into";
   if (belowNode.kind === "group") return "The layer below is a group: merge the group first";
-  if (isAdjustmentLayer(objects[belowNode.index])) return "The layer below is an adjustment layer, with no pixels to merge into";
+  if (isDocumentLayer(objects[belowNode.index])) return "The layer below is an adjustment or fill layer, with no pixels to merge into";
   return checkMergeable(canvas, [objects[belowNode.index]!, layer]);
 }
 
@@ -218,7 +226,7 @@ export async function runMerge(canvas: FabricCanvas, plan: MergePlan): Promise<L
     base.setCoords();
     // Merging into the photo keeps the photo's frame; anything outside it is
     // cut off, as with Photoshop's background layer.
-    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, withPixels(plan.layers), multiplier);
+    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, sizedBy(canvas, plan.layers), multiplier);
 
     // The bottom layer's opacity and blend mode stay settings of the result
     // instead of being baked into its pixels, as Photoshop merges. A merged

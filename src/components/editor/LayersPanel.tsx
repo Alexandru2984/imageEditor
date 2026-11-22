@@ -81,11 +81,14 @@ const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: "group", label: "Group" },
 ];
 
-/** The footer's adjustment layer button, as Layer › New Adjustment Layer. */
-const ADJUSTMENT_MENU: readonly MenuEntry[] =
+/** A submenu of the Layer menu, by its label. */
+const layerSubmenu = (label: string): readonly MenuEntry[] =>
   (EDITOR_MENUS.find((menu) => menu.label === "Layer")?.items.find(
-    (entry): entry is Exclude<MenuEntry, string> => typeof entry !== "string" && entry.label === "New adjustment layer"
+    (entry): entry is Exclude<MenuEntry, string> => typeof entry !== "string" && entry.label === label
   )?.items ?? []) as readonly MenuEntry[];
+
+/** The footer's fill or adjustment layer button: New Fill Layer, then New Adjustment Layer, as in Photoshop. */
+const ADJUSTMENT_MENU: readonly MenuEntry[] = [...layerSubmenu("New fill layer"), "-", ...layerSubmenu("New adjustment layer")];
 
 /** The commands of the panel's right-click menu and its ⋯ button. */
 const layerMenu = (clipped: boolean): readonly MenuEntry[] => [
@@ -155,7 +158,7 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
     const cache = thumbnailCacheRef.current;
     let drawn = 0;
     for (const row of rows) {
-      if (row.kind === "group" || row.adjustment) continue;
+      if (row.kind === "group" || row.adjustment || row.fill) continue;
       if (drawn >= MAX_LAYER_THUMBNAILS) break;
       drawn += 1;
       if (cache.has(row.fabricObject)) {
@@ -795,8 +798,11 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
                 key={layer.id}
                 layer={layer}
                 selected={selectedIds.has(layer.id)}
-                // A picked adjustment layer has only its mask to paint.
-                paintingMask={maskTargetLayer === layer.fabricObject || (!!layer.adjustment && !!layer.mask && selectedIds.has(layer.id))}
+                // A picked adjustment or fill layer has only its mask to paint.
+                paintingMask={
+                  maskTargetLayer === layer.fabricObject ||
+                  (!!(layer.adjustment || layer.fill) && !!layer.mask && selectedIds.has(layer.id))
+                }
                 renaming={renamingId === layer.id}
                 renameValue={renameValue}
                 effectsOpen={openEffects.has(layer.id)}
@@ -819,8 +825,8 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              aria-label="Add an adjustment layer"
-              title="Add an adjustment layer"
+              aria-label="Add a fill or adjustment layer"
+              title="Add a fill or adjustment layer"
               className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <Contrast className="h-4 w-4" />

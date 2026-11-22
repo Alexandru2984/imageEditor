@@ -36,6 +36,15 @@ describe("describeChange", () => {
     );
   });
 
+  it("names fill layers by what they fill with", () => {
+    const fill = { type: "FillLayer", __layerId: "f", fillContent: { kind: "solid", color: "#ff0000" } };
+    expect(describeChange(base, snapshot([photo, layer, fill], base.srcs))).toEqual({ name: "New Color Fill layer", kind: "added" });
+    const changed = { ...fill, fillContent: { kind: "solid", color: "#00ff00" } };
+    expect(describeChange(snapshot([photo, layer, fill], base.srcs), snapshot([photo, layer, changed], base.srcs)).name).toBe(
+      "Modify Color Fill layer"
+    );
+  });
+
   it("tells pixel edits from moves and other changes, by the source behind each placeholder", () => {
     // Same placeholder, another image behind it.
     expect(describeChange(base, snapshot([photo, layer], ["data:photo", "data:painted"]))).toEqual({ name: "Edit pixels", kind: "pixels" });

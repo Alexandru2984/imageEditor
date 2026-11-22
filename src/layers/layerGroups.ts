@@ -2,6 +2,7 @@ import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from 
 import { hiddenByGroups, treeOf } from "@/compositing/compositor";
 import { ensureLayerId, isEditorChrome, isLayerObject, isObjectLocked, type EditorFabricObject } from "@/utils/editorObjects";
 import { isAdjustmentLayer, type AdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer, type DocumentLayer } from "@/adjustments/documentLayer";
 import { entriesOf, isGroupHeader, isGroupMarker, LayerGroup, LayerGroupEnd } from "./groupMarkers";
 import {
   arrangeNodes,
@@ -87,11 +88,11 @@ export function pickedGroups(canvas: FabricCanvas): LayerGroup[] {
 }
 
 /**
- * The adjustment layers picked in the Layers panel: they take no room on the
- * canvas, so they are selected here rather than there.
+ * The adjustment and fill layers picked in the Layers panel: they take no
+ * room on the canvas, so they are selected here rather than there.
  */
-export function pickedAdjustments(canvas: FabricCanvas): AdjustmentLayer[] {
-  return picked(canvas, isAdjustmentLayer);
+export function pickedDocumentLayers(canvas: FabricCanvas): DocumentLayer[] {
+  return picked(canvas, isDocumentLayer);
 }
 
 function picked<T extends FabricObject>(canvas: FabricCanvas, test: (object: unknown) => object is T): T[] {
@@ -102,13 +103,19 @@ function picked<T extends FabricObject>(canvas: FabricCanvas, test: (object: unk
 }
 
 /** Whether groups or adjustment layers are picked in the panel. */
-export const hasPicks = (canvas: FabricCanvas): boolean => pickedGroups(canvas).length + pickedAdjustments(canvas).length > 0;
+export const hasPicks = (canvas: FabricCanvas): boolean => pickedGroups(canvas).length + pickedDocumentLayers(canvas).length > 0;
+
+/** The one adjustment or fill layer picked, when it is all that is selected. */
+export function selectedDocumentLayer(canvas: FabricCanvas): DocumentLayer | null {
+  const layers = pickedDocumentLayers(canvas);
+  if (layers.length !== 1 || pickedGroups(canvas).length > 0 || canvas.getActiveObjects().length > 0) return null;
+  return layers[0]!;
+}
 
 /** The one adjustment layer picked, when it is all that is selected. */
 export function selectedAdjustment(canvas: FabricCanvas): AdjustmentLayer | null {
-  const adjustments = pickedAdjustments(canvas);
-  if (adjustments.length !== 1 || pickedGroups(canvas).length > 0 || canvas.getActiveObjects().length > 0) return null;
-  return adjustments[0]!;
+  const layer = selectedDocumentLayer(canvas);
+  return isAdjustmentLayer(layer) ? layer : null;
 }
 
 /** Layers inside any of the given groups. */
@@ -124,7 +131,7 @@ function membersOf(canvas: FabricCanvas, groups: readonly LayerGroup[]): Set<Fab
  */
 export function selectedGroup(canvas: FabricCanvas): LayerGroup | null {
   const groups = pickedGroups(canvas);
-  if (groups.length !== 1 || pickedAdjustments(canvas).length > 0) return null;
+  if (groups.length !== 1 || pickedDocumentLayers(canvas).length > 0) return null;
   const inside = membersOf(canvas, groups);
   return canvas.getActiveObjects().every((object) => inside.has(object)) ? groups[0]! : null;
 }
@@ -174,7 +181,7 @@ export function selectGroup(canvas: FabricCanvas, group: LayerGroup): void {
 /**
  * Pick layers and groups in the Layers panel (by id): the layers, and the
  * groups' shown layers, are selected on the canvas so they move together.
- * Adjustment layers, which have no place on the canvas, are only picked.
+ * Adjustment and fill layers, which have no place on the canvas, are only picked.
  */
 export function selectLayers(canvas: FabricCanvas, ids: readonly string[]): void {
   const { objects } = stackOf(canvas);
@@ -182,10 +189,10 @@ export function selectLayers(canvas: FabricCanvas, ids: readonly string[]): void
   const groups = objects.filter((object): object is LayerGroup => isGroupHeader(object) && chosen.has(idOf(object)));
   const hidden = hiddenByGroups(canvas.getObjects());
   const inside = membersOf(canvas, groups);
-  const adjustments = objects.filter((object) => isAdjustmentLayer(object) && chosen.has(idOf(object)) && !inside.has(object));
+  const adjustments = objects.filter((object) => isDocumentLayer(object) && chosen.has(idOf(object)) && !inside.has(object));
   const targets = new Set<FabricObject>();
   for (const object of objects) {
-    if (!isLayerObject(object) || isAdjustmentLayer(object)) continue;
+    if (!isLayerObject(object) || isDocumentLayer(object)) continue;
     if (chosen.has(idOf(object)) && !inside.has(object)) targets.add(object);
     else if (inside.has(object) && object.visible && !hidden.has(object)) targets.add(object);
   }
@@ -208,7 +215,7 @@ function selectedIds(canvas: FabricCanvas): string[] {
 export function selectedLayerObjects(canvas: FabricCanvas): FabricObject[] {
   const inside = membersOf(canvas, pickedGroups(canvas));
   return [
-    ...pickedAdjustments(canvas).filter((object) => !inside.has(object)),
+    ...pickedDocumentLayers(canvas).filter((object) => !inside.has(object)),
     ...canvas.getActiveObjects().filter((object) => isLayerObject(object) && !inside.has(object)),
   ];
 }

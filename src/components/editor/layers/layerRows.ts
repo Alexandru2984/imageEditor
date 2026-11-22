@@ -6,6 +6,7 @@ import { hasLayerMask, layerMaskThumbnail } from "@/raster/layerMask";
 import { EFFECTS, type EffectName, type LayerStyle } from "@/raster/layerStyleData";
 import { isBackgroundObject, isObjectLocked, type EditorFabricObject } from "@/utils/editorObjects";
 import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { fillSwatch, isFillLayer } from "@/adjustments/fillLayer";
 import type { AdjustmentLayerKind } from "@/adjustments/adjustmentData";
 
 export type EditorObject = EditorFabricObject;
@@ -42,6 +43,8 @@ export interface LayerItem {
   effects: EffectItem[];
   /** What an adjustment layer does; null for other layers. */
   adjustment: AdjustmentLayerKind | null;
+  /** A fill layer's colour or gradient, as CSS; null for other layers. */
+  fill: string | null;
   fabricObject: EditorObject;
 }
 
@@ -65,7 +68,8 @@ const TEXT_TYPES = new Set(["itext", "text", "textbox", "fabrictext"]);
 
 function kindOf(object: FabricObject): KindFilter {
   if (isGroupHeader(object)) return "group";
-  if (isAdjustmentLayer(object)) return "adjustment";
+  // As in Photoshop, fill layers are found with the adjustment layers.
+  if (isAdjustmentLayer(object) || isFillLayer(object)) return "adjustment";
   const type = typeOf(object);
   if (type === "image") return "pixel";
   if (TEXT_TYPES.has(type)) return "text";
@@ -86,6 +90,7 @@ const DEFAULT_NAMES: Record<string, string> = {
   triangle: "Triangle",
   polygon: "Polygon",
   adjustmentlayer: "Adjustment",
+  filllayer: "Fill",
 };
 
 const defaultName = (object: FabricObject, index: number) => `${DEFAULT_NAMES[typeOf(object)] ?? "Object"} ${index}`;
@@ -155,6 +160,7 @@ export function layerRows(objects: readonly FabricObject[], filter: RowFilter = 
           mask: null,
           effects: [],
           adjustment: null,
+          fill: null,
           fabricObject: object,
         });
         shown = true;
@@ -180,6 +186,7 @@ export function layerRows(objects: readonly FabricObject[], filter: RowFilter = 
         mask: hasLayerMask(object) ? { thumbnail: layerMaskThumbnail(object), enabled: object.layerMask.enabled } : null,
         effects: effectsOf(object),
         adjustment: isAdjustmentLayer(object) ? object.adjustment.kind : null,
+        fill: isFillLayer(object) ? fillSwatch(object.fillContent) : null,
         fabricObject: object,
       });
       shown = true;

@@ -359,6 +359,28 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts a fill layer, and rejects one with content the editor never makes", async () => {
+    const solid = { type: "FillLayer", fillContent: { kind: "solid", color: "#336699" } };
+    const gradient = {
+      type: "FillLayer",
+      fillContent: { kind: "gradient", from: "#000000", to: "#ffffff", style: "radial", angle: -45, scale: 120, reverse: true },
+    };
+    const ok = { json: JSON.stringify({ objects: [solid, gradient] }), srcs: [] };
+    await expect(readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: ok })))).resolves.toEqual(ok);
+    for (const bad of [
+      { kind: "solid", color: "red" },
+      { kind: "solid", color: "url(https://evil.example/x)" },
+      { kind: "gradient", from: "#000000", to: "#ffffff", style: "diamond", angle: 0, scale: 100, reverse: false },
+      { kind: "gradient", from: "#000000", to: "#ffffff", style: "linear", angle: 400, scale: 100, reverse: false },
+      { kind: "gradient", from: "#000000", to: "#ffffff", style: "linear", angle: 0, scale: 1000, reverse: false },
+      { kind: "pattern" },
+      null,
+    ]) {
+      const snapshot = { json: JSON.stringify({ objects: [{ type: "FillLayer", fillContent: bad }] }), srcs: [] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot }))), JSON.stringify(bad)).rejects.toThrow();
+    }
+  });
+
   it("accepts an adjustment layer's mask and the place it lies, and rejects a malformed one", async () => {
     const layer = {
       type: "AdjustmentLayer",

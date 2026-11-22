@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { isDocumentLayer } from "@/adjustments/documentLayer";
 import {
   ActiveSelection,
   type Canvas as FabricCanvas,
@@ -36,7 +36,7 @@ function referenceBoxes(canvas: FabricCanvas, target: FabricObject): Box[] {
   const photo = findBackgroundImage(canvas);
   if (photo) boxes.push(toBox(photo));
   for (const object of canvas.getObjects()) {
-    if (object === photo || moving.has(object) || !object.visible || !isLayerObject(object) || isAdjustmentLayer(object)) {
+    if (object === photo || moving.has(object) || !object.visible || !isLayerObject(object) || isDocumentLayer(object)) {
       continue;
     }
     boxes.push(toBox(object));

@@ -4,6 +4,8 @@ import { installLayerStyles } from "@/raster/layerStyle";
 import { installCompositor } from "@/compositing/compositor";
 import { registerGroupClasses } from "@/layers/groupMarkers";
 import { registerAdjustmentClasses } from "@/adjustments/adjustmentLayer";
+import { FillLayer } from "@/adjustments/fillLayer";
+import { paintFillLayer } from "@/compositing/fillPaint";
 
 /**
  * Fabric 7 changed the default object origin from left/top to center. Every
@@ -30,6 +32,8 @@ export function applyFabricDefaults(): void {
   // through their masks.
   registerAdjustmentClasses();
   installCompositor(adjustmentMaskOver);
+  // Fill layers draw their colour or gradient over the document.
+  FillLayer.painter = paintFillLayer;
 }
 
 applyFabricDefaults();
