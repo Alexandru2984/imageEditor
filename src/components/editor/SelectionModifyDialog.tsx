@@ -122,7 +122,7 @@ export function SelectionModifyDialog({ canvas, modification, strokeColor, onClo
           ? mask.expanded(amount)
           : mask.contracted(amount);
     if (changed.isEmpty()) toast.warning("Nothing is left selected");
-    store.set(changed, grid);
+    store.set(changed, grid, modification === "feather" ? "Feather" : modification === "expand" ? "Expand" : "Contract");
     setRemembered((current) => ({ ...current, [modification]: amount }));
     onClose();
   };

@@ -58,6 +58,6 @@ export function selectLayerPixels(canvas: FabricCanvas, object: FabricObject, mo
   const store = selectionOf(canvas);
   const current = store.current();
   const mask = mode !== "replace" && current && sameGrid(current.grid, grid) ? current.mask.combine(pixels, mode) : pixels;
-  store.set(mask.isEmpty() ? null : mask, grid);
+  store.set(mask.isEmpty() ? null : mask, grid, "Load Selection");
   return !mask.isEmpty();
 }

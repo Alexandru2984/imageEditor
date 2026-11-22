@@ -1334,7 +1334,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.selectAll,
         run: () => {
           const grid = canvas ? documentGrid(canvas) : null;
-          if (canvas && grid) selectionOf(canvas).set(Mask.full(grid.width, grid.height), grid);
+          if (canvas && grid) selectionOf(canvas).set(Mask.full(grid.width, grid.height), grid, "Select All");
         },
         isEnabled: () => !!canvas && documentGrid(canvas) !== null,
         keywords: "select everything pixels",
@@ -1367,7 +1367,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         shortcuts: KEYMAP.selectInverse,
         run: () => {
           const current = pixelSelection();
-          if (canvas && current) selectionOf(canvas).set(current.mask.inverted(), current.grid);
+          if (canvas && current) selectionOf(canvas).set(current.mask.inverted(), current.grid, "Inverse");
         },
         isEnabled: () => !!pixelSelection(),
         keywords: "invert selection",

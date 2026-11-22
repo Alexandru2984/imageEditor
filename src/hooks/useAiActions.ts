@@ -140,7 +140,7 @@ export function useAiActions(canvas: FabricCanvas | null): AiActions {
       // The document changed while the model looked at it.
       if (!found) return null;
       if (found.mask.isEmpty()) throw new Error("No subject was found");
-      selectionOf(canvas).set(found.mask, found.grid);
+      selectionOf(canvas).set(found.mask, found.grid, "Select Subject");
       return "Subject selected";
     });
   }, [canvas, run]);

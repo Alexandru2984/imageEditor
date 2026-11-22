@@ -130,7 +130,7 @@ export function SelectionTaskBar({
   const invert = () => {
     const chosen = current();
     if (!canvas || !chosen) return;
-    selectionOf(canvas).set(chosen.mask.inverted(), chosen.grid);
+    selectionOf(canvas).set(chosen.mask.inverted(), chosen.grid, "Inverse");
   };
 
   const deselect = () => {

@@ -93,8 +93,9 @@ export const gridBoxToScene = (grid: DocumentGrid, box: PixelBounds) => ({
 
 /**
  * One canvas's pixel selection, plus the last one dropped (Reselect) and the
- * shape being drawn. The selection is not part of the undo history; it is
- * dropped once it no longer fits the document (after a crop, say).
+ * shape being drawn. Each change of the selection is a step in the undo
+ * history, named by what made it (useUndoRedo.ts keeps it); it is dropped
+ * once it no longer fits the document (after a crop, say).
  */
 export class SelectionStore {
   private selection: PixelSelection | null = null;
@@ -102,7 +103,9 @@ export class SelectionStore {
   private shownPreview: SelectionPreview | null = null;
   private currentDraft: SelectionDraft | null = null;
   private revision = 0;
+  private lastLabel = "Deselect";
   private readonly listeners = new Set<() => void>();
+  private readonly changeListeners = new Set<() => void>();
 
   constructor(private readonly canvas: FabricCanvas) {}
 
@@ -110,6 +113,17 @@ export class SelectionStore {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
+
+  /** Called when the selection itself changes, not the shape being drawn. */
+  onChange = (listener: () => void): (() => void) => {
+    this.changeListeners.add(listener);
+    return () => this.changeListeners.delete(listener);
+  };
+
+  /** What made the last change, as the History panel names it ("Lasso", "Deselect"). */
+  get label(): string {
+    return this.lastLabel;
+  }
 
   /** Changes whenever the selection or the preview does. */
   get version(): number {
@@ -132,12 +146,16 @@ export class SelectionStore {
     if (sameGrid(grid, selection.grid)) return selection;
     this.selection = null;
     this.last = null;
-    this.notify();
+    this.lastLabel = "Deselect";
+    this.notify(true);
     return null;
   }
 
-  /** Replace the selection; an empty mask deselects. */
-  set(mask: Mask | null, grid?: DocumentGrid): void {
+  /**
+   * Replace the selection; an empty mask deselects. `label` names the
+   * history step (the tool or command that made it).
+   */
+  set(mask: Mask | null, grid?: DocumentGrid, label?: string): void {
     const previous = this.selection;
     const onGrid = grid ?? previous?.grid ?? documentGrid(this.canvas);
     if (mask && onGrid && !mask.isEmpty()) {
@@ -149,7 +167,8 @@ export class SelectionStore {
       this.selection = null;
     }
     if (previous && !this.selection) this.last = previous;
-    this.notify();
+    this.lastLabel = label ?? (this.selection ? "Selection" : "Deselect");
+    this.notify(true);
   }
 
   /** Bring back the selection last dropped (Select › Reselect). */
@@ -157,7 +176,7 @@ export class SelectionStore {
     const last = this.last;
     const grid = documentGrid(this.canvas);
     if (!last || !grid || !sameGrid(grid, last.grid)) return false;
-    this.set(last.mask, last.grid);
+    this.set(last.mask, last.grid, "Reselect");
     return true;
   }
 
@@ -185,9 +204,10 @@ export class SelectionStore {
     this.notify();
   }
 
-  private notify() {
+  private notify(changed = false) {
     this.revision += 1;
     for (const listener of this.listeners) listener();
+    if (changed) for (const listener of this.changeListeners) listener();
   }
 }
 

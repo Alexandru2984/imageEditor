@@ -67,17 +67,26 @@ const isTypingTarget = (target: EventTarget | null): boolean => {
   );
 };
 
-/** Join a new shape to the canvas's selection in the given mode. */
-export function addToSelection(canvas: FabricCanvas, shape: Mask, mode: SelectionMode, grid?: DocumentGrid): void {
+/** Join a new shape to the canvas's selection in the given mode; `label` names the history step. */
+export function addToSelection(canvas: FabricCanvas, shape: Mask, mode: SelectionMode, grid?: DocumentGrid, label?: string): void {
   const store = selectionOf(canvas);
   const current = store.current();
   if (mode === "replace" || !current) {
     // Taking away from or overlapping nothing leaves nothing.
-    store.set(mode === "replace" || mode === "add" ? shape : null, grid);
+    store.set(mode === "replace" || mode === "add" ? shape : null, grid, label);
     return;
   }
-  store.set(current.mask.combine(shape, mode), current.grid);
+  store.set(current.mask.combine(shape, mode), current.grid, label);
 }
+
+/** Photoshop's names for the selection tools, as its History panel shows them. */
+const TOOL_STEPS: Record<string, string> = {
+  marquee: "Rectangular Marquee",
+  ellipseMarquee: "Elliptical Marquee",
+  lasso: "Lasso",
+  polygonLasso: "Polygonal Lasso",
+  magicWand: "Magic Wand",
+};
 
 /**
  * The selection tools: Rectangle and Ellipse select, Lasso, Polygonal lasso
@@ -101,6 +110,7 @@ export function useSelectionTool({
     if (!canvas || !isSelectionTool(activeTool)) return;
     const store = selectionOf(canvas);
     const tool = activeTool;
+    const step = TOOL_STEPS[tool] ?? "Selection";
 
     const previous = {
       selection: canvas.selection,
@@ -166,7 +176,7 @@ export function useSelectionTool({
       cancelPolygon();
       if (!current || current.points.length < 3) return;
       const shape = outlineMask(current.points);
-      if (shape) addToSelection(canvas, shape.mask, current.mode, shape.grid);
+      if (shape) addToSelection(canvas, shape.mask, current.mode, shape.grid, step);
     };
     const draft = { finish: finishPolygon, cancel: cancelPolygon };
     const polygonPoint = (point: Point, event: { shiftKey: boolean }) => {
@@ -210,7 +220,7 @@ export function useSelectionTool({
         if (chosen === "replace") store.set(null);
         return;
       }
-      addToSelection(canvas, shape, chosen, grid);
+      addToSelection(canvas, shape, chosen, grid, step);
     };
 
     const cancelDrag = () => {
@@ -297,7 +307,7 @@ export function useSelectionTool({
         const { mask, grid } = current.selection;
         // A click in the selection deselects, like anywhere else.
         if (current.dx === 0 && current.dy === 0) store.set(null);
-        else store.set(mask.translated(current.dx, current.dy), grid);
+        else store.set(mask.translated(current.dx, current.dy), grid, "Move Selection");
         return;
       }
       if (current.kind === "lasso") {
@@ -306,7 +316,7 @@ export function useSelectionTool({
           return;
         }
         const shape = outlineMask(current.points);
-        if (shape) addToSelection(canvas, shape.mask, current.mode, shape.grid);
+        if (shape) addToSelection(canvas, shape.mask, current.mode, shape.grid, step);
         return;
       }
       const box = shapeBox(current);
@@ -322,7 +332,7 @@ export function useSelectionTool({
         tool === "ellipseMarquee"
           ? ellipseMask(grid.width, grid.height, from.x, from.y, to.x, to.y)
           : Mask.rect(grid.width, grid.height, from.x, from.y, to.x, to.y);
-      addToSelection(canvas, shape, current.mode, grid);
+      addToSelection(canvas, shape, current.mode, grid, step);
     };
 
     const onDoubleClick = () => {
