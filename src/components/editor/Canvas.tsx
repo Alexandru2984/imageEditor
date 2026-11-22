@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
 import { flattenRegion, nativeMultiplier, planRasterization } from "@/utils/flatten";
+import { cropGuides, type Guide } from "@/utils/guideData";
+import { guidesOf } from "@/utils/guides";
 import { styleBrush, type BrushKind } from "@/utils/brushes";
 import { CROP_RATIOS, fitRatio, resolveRatio, type CropRatioId } from "@/utils/cropFrame";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
@@ -785,6 +787,8 @@ export const Canvas = ({
       }
 
       removeCropOverlay(canvas);
+      // The guides go with the photo they live on; they are put back on the cropped one.
+      const guides = guidesOf(canvas);
       canvas.discardActiveObject();
       canvas.remove(...canvas.getObjects());
 
@@ -799,6 +803,13 @@ export const Canvas = ({
         left: canvasW / 2 - (img.width! * scale) / 2,
         top: canvasH / 2 - (img.height! * scale) / 2,
       });
+      const kept = cropGuides(guides, region, {
+        left: img.left!,
+        top: img.top!,
+        width: img.width! * scale,
+        height: img.height! * scale,
+      });
+      if (kept.length) (img as FabricImage & { guides?: Guide[] }).guides = kept;
       markBackgroundObject(img);
       canvas.add(img);
       canvas.sendObjectToBack(img);

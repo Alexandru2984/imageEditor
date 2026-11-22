@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isGridSettings, isGuideList, mapGuides, nearestLines, rulerStep, type Guide } from "./guideData";
+import { cropGuides, isGridSettings, isGuideList, mapGuides, nearestLines, rulerStep, type Guide } from "./guideData";
 
 describe("guide data", () => {
   it("accepts only guides the editor writes", () => {
@@ -57,5 +57,25 @@ describe("guide data", () => {
     expect(nearestLines([37, 50], 10, 25)).toEqual([35, 60, 35, 60]);
     expect(nearestLines([5], 10, 25)).toEqual([-15, 10]);
     expect(nearestLines([5], 0, 0)).toEqual([]);
+  });
+});
+
+describe("cropGuides", () => {
+  it("keeps the guides inside the crop, placed where the cropped image shows, and drops the rest", () => {
+    const guides: Guide[] = [
+      { axis: "x", position: 150 },
+      { axis: "x", position: 50 },
+      { axis: "y", position: 100 },
+      { axis: "y", position: 300 },
+      { axis: "x", position: 100 },
+    ];
+    // Cropped to 100..300 × 100..200, shown at twice the size from (10, 20).
+    const kept = cropGuides(guides, { left: 100, top: 100, width: 200, height: 100 }, { left: 10, top: 20, width: 400, height: 200 });
+    expect(kept).toEqual([
+      { axis: "x", position: 110 },
+      { axis: "y", position: 20 },
+      { axis: "x", position: 10 },
+    ]);
+    expect(cropGuides(guides, { left: 0, top: 0, width: 0, height: 10 }, { left: 0, top: 0, width: 10, height: 10 })).toEqual([]);
   });
 });

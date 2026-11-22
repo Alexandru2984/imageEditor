@@ -153,3 +153,42 @@ test("the grid shows over the document, and its spacing can be set", async ({ pa
   await page.keyboard.press("Control+'");
   await expect.poll(() => marked(page, at(150, 75).x, at(175, 75).y)).toBe(false);
 });
+
+test("cropping keeps the guides inside the crop, in place on the cropped photo", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#808080", []);
+  await settle(page);
+  const addGuide = async (axis: "Vertical" | "Horizontal", position: number) => {
+    await chooseMenu(page, "View", "New guide…");
+    await page.getByRole("radio", { name: axis }).click();
+    await page.getByLabel("Position").fill(String(position));
+    await page.getByRole("button", { name: "OK" }).click();
+  };
+  await addGuide("Vertical", 100);
+  await addGuide("Vertical", 20);
+  await addGuide("Horizontal", 120);
+  await expect.poll(async () => (await savedGuides(page)).length).toBe(3);
+
+  // A square from the middle: 50..350 across, all of it down.
+  await page.getByRole("button", { name: "Crop (C)" }).click();
+  await page.getByRole("radio", { name: "1:1" }).click();
+  await expect(page.getByTestId("crop-size")).toHaveText("300 × 300 px");
+  await page.getByRole("button", { name: "Apply crop" }).click();
+  await expect(page.getByRole("button", { name: "Apply crop" })).toHaveCount(0);
+
+  const inPixels = async () => {
+    const photo = edges((await autosavedObjects(page)).find((object) => object.__isBackground)!);
+    const perPixel = photo.width / 300;
+    return (await savedGuides(page)).map((guide) => ({
+      axis: guide.axis,
+      position: Math.round((guide.position - (guide.axis === "x" ? photo.left : photo.top)) / perPixel),
+    }));
+  };
+  // The guide left of the crop is gone.
+  await expect.poll(inPixels).toEqual([
+    { axis: "x", position: 50 },
+    { axis: "y", position: 120 },
+  ]);
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await savedGuides(page)).length).toBe(3);
+});

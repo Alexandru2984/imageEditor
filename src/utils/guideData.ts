@@ -34,6 +34,27 @@ export function isGuideList(value: unknown): value is Guide[] {
 /** An affine map of the scene: [a, b, c, d, e, f] takes (x, y) to (a x + c y + e, b x + d y + f). */
 export type SceneMatrix = readonly [number, number, number, number, number, number];
 
+type Area = { left: number; top: number; width: number; height: number };
+
+/**
+ * The guides inside a cropped area, placed where that area now shows (the
+ * cropped image at `into`). Those outside it go, as the canvas no longer
+ * reaches them.
+ */
+export function cropGuides(guides: readonly Guide[], area: Area, into: Area): Guide[] {
+  if (area.width <= 0 || area.height <= 0) return [];
+  const scaleX = into.width / area.width;
+  const scaleY = into.height / area.height;
+  const epsilon = 1e-6;
+  return guides.flatMap((guide): Guide[] => {
+    const [start, size, target, targetStart] =
+      guide.axis === "x" ? [area.left, area.width, scaleX, into.left] : [area.top, area.height, scaleY, into.top];
+    const offset = guide.position - start;
+    if (offset < -epsilon || offset > size + epsilon) return [];
+    return [{ axis: guide.axis, position: targetStart + Math.min(size, Math.max(0, offset)) * target }];
+  });
+}
+
 /**
  * Guides carried through a change of the whole scene (a quarter turn, a
  * flip, a stretch). A guide the change would tilt stays where it was.
