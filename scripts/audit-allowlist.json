@@ -1,8 +1,1 @@
-[
-  {
-    "id": "GHSA-fc5q-39xc-vjpf",
-    "package": "picomatch",
-    "reason": "ReDoS that needs an attacker-controlled glob pattern. picomatch is only used by the build and test tooling (vite, vitest, tailwindcss, typescript-eslint) on patterns from this repository's own config files, and is never shipped to browsers. No fixed release exists yet (4.0.7 is the latest and is affected).",
-    "expires": "2026-12-31"
-  }
-]
+[]
