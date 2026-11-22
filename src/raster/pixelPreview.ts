@@ -7,7 +7,7 @@ import { sceneToLayerMatrix } from "./fill";
 import { histogramOf, type Histogram } from "./adjustments";
 import { jobReach, type PixelJob } from "./pixelJobs";
 import { runPixelJob } from "./pixelJobClient";
-import { currentMaskPixels, maskTargetOf } from "./layerMask";
+import { currentMaskPixels, editedMaskLayer, type MaskableLayer } from "./layerMask";
 import {
   abandonPixelEdit,
   beginPixelEdit,
@@ -26,7 +26,7 @@ import {
 
 export interface AdjustTarget {
   /** The layer the document holds. */
-  layer: FabricImage;
+  layer: MaskableLayer;
   /** The pixels that change: the layer's own, or its mask's. */
   pixels: FabricImage;
   mask: boolean;
@@ -34,7 +34,8 @@ export interface AdjustTarget {
 
 /** What Image › Adjustments and the Filter menu act on. */
 export function adjustTarget(canvas: FabricCanvas): AdjustTarget | Refusal {
-  const masked = maskTargetOf(canvas).layer();
+  // An adjustment layer picked alone: its mask (a white one to make, without).
+  const masked = editedMaskLayer(canvas);
   if (masked) {
     if (isObjectLocked(masked)) return "Unlock the layer first";
     const pixels = currentMaskPixels(masked);

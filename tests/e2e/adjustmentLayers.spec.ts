@@ -304,3 +304,122 @@ test("an adjustment layer is picked, duplicated, merged down and deleted from th
   const left = await autosavedLayerPixels(page, "Left", [[20, 30]]);
   expect(left!.pixels[0]!.slice(0, 3)).toEqual(STRIPES[0]!.map((value) => 255 - value));
 });
+
+/** The document's box on screen, from the pixels the canvas shows. */
+async function documentBox(page: Page) {
+  return page.evaluate(() => {
+    const lower = document.querySelector("canvas.lower-canvas") as HTMLCanvasElement;
+    const { data, width, height } = lower.getContext("2d")!.getImageData(0, 0, lower.width, lower.height);
+    let left = width;
+    let right = -1;
+    let top = height;
+    let bottom = -1;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        if (data[(y * width + x) * 4 + 3]! === 0) continue;
+        left = Math.min(left, x);
+        right = Math.max(right, x);
+        top = Math.min(top, y);
+        bottom = Math.max(bottom, y);
+      }
+    }
+    const box = lower.getBoundingClientRect();
+    const ratio = lower.width / box.width;
+    return { left: box.left + left / ratio, top: box.top + top / ratio, width: (right - left) / ratio, height: (bottom - top) / ratio };
+  });
+}
+
+type Box = Awaited<ReturnType<typeof documentBox>>;
+const at = (box: Box, x: number, y: number) => ({ x: box.left + box.width * x, y: box.top + box.height * y });
+
+/** A rectangle selection from one fraction of the document to another. */
+async function selectPart(page: Page, box: Box, from: [number, number], to: [number, number]) {
+  await page.keyboard.press("m");
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Rectangle select");
+  const start = at(box, ...from);
+  const end = at(box, ...to);
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await page.mouse.move(end.x, end.y, { steps: 6 });
+  await page.mouse.up();
+}
+
+const inverted = STRIPES.map((colour) => colour.map((value) => 255 - value));
+const leftKept = [...original.slice(0, 3), ...inverted.slice(3)];
+const maskOf = async (page: Page) =>
+  (await autosavedObjects(page)).find((object) => object.type === "AdjustmentLayer")?.layerMask as
+    | { src: string; enabled: boolean }
+    | undefined;
+
+test("the paint tools paint a picked adjustment layer's mask, which hides it where black", async ({ page }) => {
+  await openProject(page, () => [adjustment("Invert 1", { kind: "invert", settings: {} })]);
+  await expect.poll(() => stripes(page)).toEqual(inverted);
+  const box = await documentBox(page);
+  await page.getByRole("tab", { name: "Layers" }).click();
+  const row = page.getByRole("group", { name: "Invert 1 layer" });
+  await row.click();
+  await expect(row).toHaveAttribute("aria-current", "true");
+
+  // Black (the default foreground) into the left half of its mask.
+  await page.keyboard.press("d");
+  await selectPart(page, box, [0.002, -0.3], [0.5, 1.3]);
+  await page.keyboard.press("g");
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText("Paint bucket");
+  const inside = at(box, 0.25, 0.5);
+  await page.mouse.click(inside.x, inside.y);
+  await expect.poll(async () => near(await stripes(page), leftKept)).toBeUndefined();
+  // Its mask, shown in the Layers panel; no layer was added and the photo is as it was.
+  await expect.poll(async () => (await maskOf(page))?.enabled).toBe(true);
+  await expect(row.getByRole("button", { name: "Invert 1 layer mask" })).toBeVisible();
+  expect((await autosavedObjects(page)).map((object) => object.type)).toEqual(["Image", "AdjustmentLayer"]);
+  const photo = await autosavedLayerPixels(page, "Background", [[20, 30]]);
+  expect(photo!.pixels[0]!.slice(0, 3)).toEqual(STRIPES[0]);
+
+  // Shift+click on the mask turns it off, and back on.
+  await row.getByRole("button", { name: "Invert 1 layer mask" }).click({ modifiers: ["Shift"] });
+  await expect.poll(() => stripes(page)).toEqual(inverted);
+  await row.getByRole("button", { name: "Invert 1 layer mask" }).click({ modifiers: ["Shift"] });
+  await expect.poll(async () => near(await stripes(page), leftKept)).toBeUndefined();
+
+  // Undone step by step, the layer has no mask again; redone, it is back.
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await maskOf(page))?.enabled).toBe(false);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await maskOf(page))?.enabled).toBe(true);
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => maskOf(page)).toBeUndefined();
+  await expect.poll(() => stripes(page)).toEqual(inverted);
+  await page.keyboard.press("Control+Shift+z");
+  await expect.poll(async () => (await maskOf(page))?.enabled).toBe(true);
+  await expect.poll(async () => near(await stripes(page), leftKept)).toBeUndefined();
+
+  // It stays after a reload, and Flatten keeps the inversion to the right half.
+  await expect.poll(async () => (await maskOf(page))?.src).toBeTruthy();
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await expect.poll(async () => near(await stripes(page), leftKept)).toBeUndefined();
+  await chooseMenu(page, "Layer", "Flatten image");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.type)).toEqual(["Image"]);
+  const flat = await autosavedLayerPixels(page, "Background", [
+    [20, 30],
+    [220, 30],
+  ]);
+  expect(flat!.pixels[0]!.slice(0, 3)).toEqual(STRIPES[0]);
+  expect(flat!.pixels[1]!.slice(0, 3)).toEqual(inverted[5]);
+});
+
+test("a selection becomes the mask of a new adjustment layer", async ({ page }) => {
+  await openProject(page, () => []);
+  const box = await documentBox(page);
+  await selectPart(page, box, [0.5, -0.3], [1.1, 1.3]);
+  await chooseSubmenu(page, "Layer", "New adjustment layer", "Invert");
+  // Only the selected right half is inverted, and the selection is gone.
+  await expect.poll(async () => near(await stripes(page), leftKept)).toBeUndefined();
+  await expect.poll(async () => (await maskOf(page))?.enabled).toBe(true);
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.name)).toEqual(["Background", "Invert 1"]);
+  // One step made it: undone, nothing is left of it.
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => stripes(page)).toEqual(original);
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.name)).toEqual(["Background"]);
+});

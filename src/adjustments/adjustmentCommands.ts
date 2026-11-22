@@ -5,6 +5,8 @@ import { renderObjectsRegion, nativeMultiplier } from "@/utils/flatten";
 import { releaseSurface } from "@/raster/pixelLayer";
 import { hiddenByGroups } from "@/compositing/compositor";
 import { pickedGroups, selectedLayerObjects, selectLayers } from "@/layers/layerGroups";
+import { maskNewAdjustmentLayer } from "@/raster/layerMask";
+import { selectionOf } from "@/selection/state";
 import { ADJUSTMENT_TITLES, type AdjustmentData } from "./adjustmentData";
 import { AdjustmentLayer } from "./adjustmentLayer";
 
@@ -40,11 +42,25 @@ function insertionIndex(canvas: FabricCanvas): number {
   return top;
 }
 
-/** A new adjustment layer above the selection, picked in the Layers panel. */
-export function addAdjustmentLayer(canvas: FabricCanvas, adjustment: AdjustmentData): AdjustmentLayer {
-  const layer = new AdjustmentLayer({ adjustment, name: nextName(canvas, ADJUSTMENT_TITLES[adjustment.kind]) });
+/**
+ * A new adjustment layer above the selection, picked in the Layers panel. As
+ * in Photoshop, a pixel selection becomes its mask (and is dropped), so the
+ * adjustment applies only there. Resolves null when the document changed
+ * meanwhile.
+ */
+export async function addAdjustmentLayer(canvas: FabricCanvas, adjustment: AdjustmentData): Promise<AdjustmentLayer | null> {
+  const layer = new AdjustmentLayer({ adjustment });
+  const store = selectionOf(canvas);
+  const selection = store.current();
+  const photo = findBackgroundImage(canvas);
+  if (selection) {
+    await maskNewAdjustmentLayer(canvas, layer, { selection });
+    if (findBackgroundImage(canvas) !== photo || store.current() !== selection) return null;
+  }
+  layer.name = nextName(canvas, ADJUSTMENT_TITLES[adjustment.kind]);
   ensureLayerId(layer, new Set(canvas.getObjects().map((object) => (object as Named).__layerId ?? "")));
   canvas.insertAt(insertionIndex(canvas), layer);
+  if (selection) store.set(null);
   selectLayers(canvas, [(layer as Named).__layerId!]);
   canvas.requestRenderAll();
   return layer;
@@ -55,7 +71,7 @@ export function duplicateAdjustmentLayer(canvas: FabricCanvas, layer: Adjustment
   const index = canvas.getObjects().indexOf(layer);
   if (index < 0) return null;
   const copy = new AdjustmentLayer({
-    ...layer.toObject(["__clipped", "__fill"]),
+    ...layer.toObject(["__clipped", "__fill", "layerMask"]),
     adjustment: structuredClone(layer.adjustment),
     name: `${layer.name ?? ADJUSTMENT_TITLES[layer.adjustment.kind]} copy`.slice(0, 256),
   });

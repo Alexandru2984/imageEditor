@@ -137,7 +137,7 @@ import {
   maskTargetOf,
   setLayerMaskEnabled,
   type MaskContent,
-  type MaskedImage,
+  type MaskedLayer,
 } from "@/raster/layerMask";
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
@@ -145,6 +145,7 @@ import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
 import { invertLut, uniformLuts } from "@/raster/adjustments";
 import type { PixelJob } from "@/raster/pixelJobs";
 import { addAdjustmentLayer, duplicateAdjustmentLayer } from "@/adjustments/adjustmentCommands";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
 import { ADJUSTMENT_TITLES, initialAdjustment, type AdjustmentLayerKind } from "@/adjustments/adjustmentData";
 import { ADJUSTMENT_ICONS } from "@/components/editor/layers/adjustmentIcons";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
@@ -501,15 +502,16 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         : null;
     };
 
-    /** The layer mask commands' layer, when they can act on it. */
-    const maskedLayer = (): MaskedImage | null => {
-      if (!canvas || pickRefusal()) return null;
+    /** The layer mask commands' layer (an adjustment layer's too), when they can act on it. */
+    const groupRefusal = () => (canvas && pickedGroups(canvas).length ? GROUP_REFUSAL : null);
+    const maskedLayer = (): MaskedLayer | null => {
+      if (!canvas || groupRefusal()) return null;
       const layer = maskLayer(canvas);
       return typeof layer === "string" ? null : layer;
     };
-    const withMaskLayer = (run: (canvas: FabricCanvas, layer: MaskedImage) => unknown) => () => {
+    const withMaskLayer = (run: (canvas: FabricCanvas, layer: MaskedLayer) => unknown) => () => {
       if (!canvas) return;
-      const layer = pickRefusal() ?? maskLayer(canvas);
+      const layer = groupRefusal() ?? maskLayer(canvas);
       if (typeof layer === "string") {
         toast.error(layer);
         return;
@@ -526,7 +528,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         if (!(await addLayerMask(canvas, layer, chosen))) return;
         // The selection became the mask.
         if (typeof chosen !== "string") selectionOf(canvas).set(null);
-        maskTargetOf(canvas).set(layer);
+        // An adjustment layer's mask is what the tools paint anyway.
+        if (!isAdjustmentLayer(layer)) maskTargetOf(canvas).set(layer);
       });
     const canAddMask = () => {
       const layer = maskedLayer();
@@ -1053,7 +1056,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           const target = maskTargetOf(canvas);
           target.set(target.isTarget(layer) ? null : layer);
         },
-        isEnabled: () => !!withMask(),
+        // An adjustment layer has only its mask to paint.
+        isEnabled: () => !!withMask() && !isAdjustmentLayer(withMask()),
         keywords: "paint on mask target",
       },
       {
@@ -1078,7 +1082,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         id: "layer.mask.apply",
         label: "Apply layer mask",
         run: withMaskLayer((canvas, layer) => applyLayerMask(canvas, layer)),
-        isEnabled: () => !!withMask(),
+        isEnabled: () => !!withMask() && !isAdjustmentLayer(withMask()),
         keywords: "bake erase hidden pixels",
       },
       {
@@ -1166,9 +1170,12 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           icon: ADJUSTMENT_ICONS[kind],
           run: () => {
             if (!canvas) return;
-            addAdjustmentLayer(canvas, initialAdjustment(kind, colors));
-            // Its settings show in the Properties panel, as in Photoshop.
-            if (kind !== "invert") openPanel("properties");
+            void addAdjustmentLayer(canvas, initialAdjustment(kind, colors))
+              .then((layer) => {
+                // Its settings show in the Properties panel, as in Photoshop.
+                if (layer && kind !== "invert") openPanel("properties");
+              })
+              .catch(reportFailure);
           },
           isEnabled: () => !!canvas && documentGrid(canvas) !== null,
           keywords: `adjustment layer non-destructive ${keywords}`,

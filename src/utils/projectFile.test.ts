@@ -359,6 +359,24 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts an adjustment layer's mask and the place it lies, and rejects a malformed one", async () => {
+    const layer = {
+      type: "AdjustmentLayer",
+      adjustment: { kind: "invert", settings: {} },
+      left: 12.5,
+      top: -4,
+      scaleX: 0.5,
+      scaleY: 0.5,
+      layerMask: { src: "__snapshot_src_0", enabled: true },
+    };
+    const ok = { json: JSON.stringify({ objects: [layer] }), srcs: [PNG_DATA_URL] };
+    await expect(readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: ok })))).resolves.toEqual(ok);
+    for (const bad of [{ src: "https://evil.example/mask.png", enabled: true }, { src: "__snapshot_src_0" }, { src: "__snapshot_src_0", enabled: true, extra: 1 }]) {
+      const snapshot = { json: JSON.stringify({ objects: [{ ...layer, layerMask: bad }] }), srcs: [PNG_DATA_URL] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot }))), JSON.stringify(bad)).rejects.toThrow();
+    }
+  });
+
   it("accepts the layer locks and Fill, and rejects malformed ones", async () => {
     const layer = { type: "rect", __lockTransparency: true, __lockPixels: true, __lockPosition: true, __fill: 0.25 };
     const ok = { json: JSON.stringify({ objects: [layer] }), srcs: [] };

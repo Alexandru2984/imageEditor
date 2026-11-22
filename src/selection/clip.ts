@@ -55,9 +55,19 @@ export function selectionClip(
   width: number,
   height: number
 ): HTMLCanvasElement {
+  return selectionClipFrom(sceneToLayerMatrix(layer), selection, width, height);
+}
+
+/** {@link selectionClip} into pixels that `sceneToPixels` maps the scene onto. */
+export function selectionClipFrom(
+  sceneToPixels: TMat2D,
+  selection: PixelSelection,
+  width: number,
+  height: number
+): HTMLCanvasElement {
   const { grid, mask } = selection;
   const gridToScene: TMat2D = [1 / grid.scale, 0, 0, 1 / grid.scale, grid.left, grid.top];
-  const matrix = util.multiplyTransformMatrices(sceneToLayerMatrix(layer), gridToScene);
+  const matrix = util.multiplyTransformMatrices(sceneToPixels, gridToScene);
   const key = [...matrix.map((value) => value.toFixed(6)), width, height].join(",");
   if (cached && cached.mask === mask && cached.key === key) return cached.clip;
 

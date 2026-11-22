@@ -1,5 +1,5 @@
 import { FabricImage, FabricObject } from "fabric";
-import { installLayerMasks } from "@/raster/layerMask";
+import { adjustmentMaskOver, installLayerMasks } from "@/raster/layerMask";
 import { installLayerStyles } from "@/raster/layerStyle";
 import { installCompositor } from "@/compositing/compositor";
 import { registerGroupClasses } from "@/layers/groupMarkers";
@@ -26,9 +26,10 @@ export function applyFabricDefaults(): void {
   // Layer groups and clipping masks: the markers load from files, and every
   // canvas composes the stack through them.
   registerGroupClasses();
-  // Adjustment layers load from files too; the compositor applies them.
+  // Adjustment layers load from files too; the compositor applies them,
+  // through their masks.
   registerAdjustmentClasses();
-  installCompositor();
+  installCompositor(adjustmentMaskOver);
 }
 
 applyFabricDefaults();

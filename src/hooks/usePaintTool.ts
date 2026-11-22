@@ -14,12 +14,14 @@ import {
 } from "@/raster/pixelLayer";
 import { StrokePainter } from "@/raster/painter";
 import { bucketFill, bucketFillPixels, type BucketOptions } from "@/raster/fill";
-import { currentMaskPixels, maskTargetOf } from "@/raster/layerMask";
+import { currentMaskPixels, editedMaskLayer, maskTargetOf, type MaskableLayer } from "@/raster/layerMask";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { onSelectedGroupChange } from "@/layers/layerGroups";
 import { greyOf } from "@/raster/maskPixels";
 import { constrainAngle, drawGradient, type GradientOptions } from "@/raster/gradient";
 import type { PaintOptions } from "@/raster/paintSettings";
 import type { StrokePoint } from "@/raster/stroke";
-import { ensureLayerId, type EditorFabricObject, isTransparencyLocked } from "@/utils/editorObjects";
+import { ensureLayerId, type EditorFabricObject, isObjectLocked, isTransparencyLocked } from "@/utils/editorObjects";
 import { nativeMultiplier } from "@/utils/flatten";
 import { releaseCanvas, restrictToClip, selectionClip, snapshotSurface } from "@/selection/clip";
 import { sceneToGrid, selectionOf } from "@/selection/state";
@@ -96,12 +98,13 @@ export function usePaintTool({
     const blending = activeTool === "gradient";
 
     // A layer's mask is painted instead of its pixels once picked (Layers
-    // panel or Ctrl+\); any image layer has one to paint, even the photo.
+    // panel or Ctrl+\); any image layer has one to paint, even the photo. An
+    // adjustment layer has only its mask.
     const maskTarget = maskTargetOf(canvas);
-    const currentTarget = (): FabricImage | null => {
+    const currentTarget = (): MaskableLayer | null => {
       // Picking another layer drops the mask target, so it is either the
       // selected layer or nothing is selected.
-      const masked = maskTarget.layer();
+      const masked = editedMaskLayer(canvas);
       if (masked) return masked;
       const layer = findLayer(canvas, targetIdRef.current);
       return isPaintableLayer(layer) ? layer : null;
@@ -134,7 +137,8 @@ export function usePaintTool({
     };
     const selectTarget = () => {
       const target = currentTarget();
-      if (target && canvas.getActiveObject() !== target) canvas.setActiveObject(target);
+      // An adjustment layer stays picked in the Layers panel only.
+      if (target && !isAdjustmentLayer(target) && canvas.getActiveObject() !== target) canvas.setActiveObject(target);
       syncEraserMode();
       canvas.requestRenderAll();
     };
@@ -144,6 +148,9 @@ export function usePaintTool({
       if (stroke) return;
       adopt(canvas.getActiveObject() ?? findLayer(canvas, targetIdRef.current));
       syncEraserMode();
+    });
+    const unsubscribePicks = onSelectedGroupChange(canvas, () => {
+      if (!stroke) syncEraserMode();
     });
 
     let stroke: ActiveStroke | null = null;
@@ -183,13 +190,17 @@ export function usePaintTool({
      * The layer to work on, made on the spot when there is none, and the
      * pixels to change: the layer's own, or its mask's.
      */
-    const resolveTarget = (): { layer: FabricImage; pixels: FabricImage; mask: boolean; created: boolean } | null => {
+    const resolveTarget = (): { layer: MaskableLayer; pixels: FabricImage; mask: boolean; created: boolean } | null => {
       const layer = currentTarget();
       if (layer && !layer.visible) {
         toast.error("Show the layer before painting on it");
         return null;
       }
-      if (layer && maskTarget.isTarget(layer)) {
+      if (layer && isAdjustmentLayer(layer) && isObjectLocked(layer)) {
+        toast.error("Unlock the layer first");
+        return null;
+      }
+      if (layer && (isAdjustmentLayer(layer) || maskTarget.isTarget(layer))) {
         const pixels = currentMaskPixels(layer);
         if (!pixels) {
           toast.error("The layer mask is still loading");
@@ -197,7 +208,7 @@ export function usePaintTool({
         }
         return { layer, pixels, mask: true, created: false };
       }
-      if (layer) return { layer, pixels: layer, mask: false, created: isPendingLayer(layer) };
+      if (layer && !isAdjustmentLayer(layer)) return { layer, pixels: layer, mask: false, created: isPendingLayer(layer) };
       if (erasing) return null;
       const created = createPendingLayer(canvas);
       if (!created) {
@@ -263,14 +274,14 @@ export function usePaintTool({
         filled = withinSelection(target.pixels, () =>
           target.mask
             ? bucketFillPixels(target.pixels, point, paintColor(fillColor, true), options)
-            : bucketFill(canvas, target.layer, point, fillColor, options)
+            : bucketFill(canvas, target.pixels, point, fillColor, options)
         );
       } catch (error) {
         console.error("Paint bucket failed:", error);
         toast.error(error instanceof Error ? error.message : "Could not fill there");
       }
       if (!filled) {
-        if (target.created) discardPendingLayer(canvas, target.layer);
+        if (target.created) discardPendingLayer(canvas, target.pixels);
         return;
       }
       refreshPixelLayer(target.pixels, canvas);
@@ -339,7 +350,7 @@ export function usePaintTool({
       } catch (error) {
         console.error("Gradient failed:", error);
         toast.error("Could not draw the gradient");
-        if (target.created) discardPendingLayer(canvas, target.layer);
+        if (target.created) discardPendingLayer(canvas, target.pixels);
         return;
       }
       refreshPixelLayer(target.pixels, canvas);
@@ -477,6 +488,7 @@ export function usePaintTool({
       canvas.off("selection:created", onSelection);
       canvas.off("selection:updated", onSelection);
       unsubscribeMask();
+      unsubscribePicks();
       window.removeEventListener("touchstart", onTouchStart);
       outline = null;
       if (!canvas.disposed && !canvas.isDrawingMode) canvas.clearContext(canvas.contextTop);

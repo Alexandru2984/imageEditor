@@ -795,7 +795,8 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
                 key={layer.id}
                 layer={layer}
                 selected={selectedIds.has(layer.id)}
-                paintingMask={maskTargetLayer === layer.fabricObject}
+                // A picked adjustment layer has only its mask to paint.
+                paintingMask={maskTargetLayer === layer.fabricObject || (!!layer.adjustment && !!layer.mask && selectedIds.has(layer.id))}
                 renaming={renamingId === layer.id}
                 renameValue={renameValue}
                 effectsOpen={openEffects.has(layer.id)}

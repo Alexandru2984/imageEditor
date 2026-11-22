@@ -309,7 +309,8 @@ export interface PixelRect {
 /**
  * The pixels of `source` inside `rect`, adjusted (premultiplied, the size of
  * `rect`), on a canvas to draw back in place; null when the GPU cannot do it.
- * `mask` (optional) is one byte a pixel over `rect`.
+ * `mask` (optional) is a canvas the size of `rect` whose red says how much
+ * applies at each pixel.
  */
 export function adjustOnGpu(
   source: HTMLCanvasElement,
@@ -317,7 +318,7 @@ export function adjustOnGpu(
   job: PixelJob,
   strength: number,
   blend: string,
-  mask?: Uint8Array | null
+  mask?: HTMLCanvasElement | null
 ): HTMLCanvasElement | null {
   const op = OPS[job.op];
   if (op === undefined) return null;
@@ -360,13 +361,11 @@ export function adjustOnGpu(
 
   gl.activeTexture(gl.TEXTURE2);
   gl.bindTexture(gl.TEXTURE_2D, state.mask);
-  if (mask) {
+  if (mask && mask.width === rect.width && mask.height === rect.height) {
     // Rows from the bottom, as the backdrop's.
-    const flipped = new Uint8Array(mask.length);
-    for (let row = 0; row < rect.height; row += 1) {
-      flipped.set(mask.subarray(row * rect.width, (row + 1) * rect.width), (rect.height - 1 - row) * rect.width);
-    }
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, rect.width, rect.height, 0, gl.RED, gl.UNSIGNED_BYTE, flipped);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, mask);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   } else {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, 1, 1, 0, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array([255]));
   }

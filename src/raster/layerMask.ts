@@ -1,4 +1,4 @@
-import { ActiveSelection, FabricImage, type Canvas as FabricCanvas, type FabricObject } from "fabric";
+import { ActiveSelection, FabricImage, util, type Canvas as FabricCanvas, type FabricObject, type TMat2D } from "fabric";
 import {
   ensureLayerId,
   findBackgroundImage,
@@ -6,12 +6,15 @@ import {
   isObjectLocked,
   type EditorFabricObject,
 } from "@/utils/editorObjects";
-import { selectionClip } from "@/selection/clip";
-import type { PixelSelection } from "@/selection/state";
+import { AdjustmentLayer, isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { pickedAdjustments, pickedGroups } from "@/layers/layerGroups";
+import { selectionClip, selectionClipFrom } from "@/selection/clip";
+import { documentGrid, type PixelSelection } from "@/selection/state";
 import { greyToAlpha } from "./maskPixels";
 import {
   beginPixelEdit,
   commitPixelEdit,
+  editSession,
   linkPixelOwner,
   refreshPixelLayer,
   releaseSurface,
@@ -30,6 +33,11 @@ import {
  * drawn at (screen or export), so it stays as sharp as an unmasked layer;
  * Fabric's own clipPath would go through an object cache capped at a few
  * megapixels.
+ *
+ * An adjustment layer's mask says where it applies. It is laid over the
+ * document by the layer's own position, and counts as white wherever it does
+ * not reach. A new adjustment layer has none: the first stroke on it makes
+ * one, white, on the document's pixels, as Photoshop's white mask would be.
  */
 
 export interface LayerMaskData {
@@ -40,16 +48,26 @@ export interface LayerMaskData {
 
 export type MaskedImage = FabricImage & { layerMask?: LayerMaskData };
 
+/** The layers a mask can go on. */
+export type MaskableLayer = FabricImage | AdjustmentLayer;
+export type MaskedLayer = MaskableLayer & { layerMask?: LayerMaskData };
+
 /** Why a mask command cannot run, worded for the user. */
 export type Refusal = string;
 
-export const hasLayerMask = (object: unknown): object is MaskedImage & { layerMask: LayerMaskData } =>
-  object instanceof FabricImage && typeof (object as MaskedImage).layerMask?.src === "string";
+export const isMaskable = (object: unknown): object is MaskableLayer =>
+  object instanceof FabricImage || isAdjustmentLayer(object);
+
+export const hasLayerMask = (object: unknown): object is MaskedLayer & { layerMask: LayerMaskData } =>
+  isMaskable(object) && typeof (object as MaskedLayer).layerMask?.src === "string";
 
 type ImageInternals = FabricImage & {
   _renderFill(ctx: CanvasRenderingContext2D): void;
   _originalElement?: HTMLImageElement | HTMLCanvasElement;
 };
+
+const sourceOf = (image: FabricImage): CanvasImageSource =>
+  ((image as ImageInternals)._originalElement ?? image.getElement()) as CanvasImageSource;
 
 const sizeOf = (image: FabricImage) => {
   const element = (image as ImageInternals)._originalElement ?? image.getElement();
@@ -63,9 +81,15 @@ const sizeOf = (image: FabricImage) => {
 // ---------- The mask while the editor runs ----------
 
 interface MaskRuntime {
-  src: string;
+  /** The mask image the pixels came from; null for a mask not made yet. */
+  src: string | null;
   /** The grey pixels, laid over the layer, for the paint tools. */
   pixels: FabricImage;
+  /**
+   * Where an adjustment layer's mask not made yet lies (mask pixels to
+   * scene); its layer takes it once the mask is. Otherwise the layer places it.
+   */
+  placement: TMat2D | null;
   /** The mask as alpha, for drawing; made from the grey pixels. */
   alpha: HTMLCanvasElement | null;
   /** The grey image `alpha` was made from. */
@@ -74,8 +98,8 @@ interface MaskRuntime {
   stale: PixelRect | "all" | null;
 }
 
-const runtimes = new WeakMap<FabricImage, MaskRuntime>();
-const loading = new WeakMap<FabricImage, Promise<void>>();
+const runtimes = new WeakMap<FabricObject, MaskRuntime>();
+const loading = new WeakMap<FabricObject, Promise<void>>();
 
 const union = (a: PixelRect | "all" | null, b: PixelRect | undefined): PixelRect | "all" => {
   if (!b || a === "all") return "all";
@@ -88,9 +112,9 @@ const union = (a: PixelRect | "all" | null, b: PixelRect | undefined): PixelRect
   };
 };
 
-function createRuntime(layer: MaskedImage, element: HTMLImageElement): MaskRuntime {
+function createRuntime(layer: MaskedLayer, element: HTMLImageElement): MaskRuntime {
   const pixels = new FabricImage(element, { originX: "left", originY: "top" });
-  const runtime: MaskRuntime = { src: element.src, pixels, alpha: null, alphaFrom: null, stale: "all" };
+  const runtime: MaskRuntime = { src: element.src, pixels, placement: null, alpha: null, alphaFrom: null, stale: "all" };
   linkPixelOwner(pixels, {
     owner: layer,
     // The working copy shows the same mask, so the alpha stays valid.
@@ -118,14 +142,14 @@ async function decodeImage(src: string): Promise<HTMLImageElement> {
 }
 
 /** Load a layer's mask for drawing and editing (once per mask image). */
-export function hydrateLayerMask(layer: FabricImage): Promise<void> {
-  const data = (layer as MaskedImage).layerMask;
-  if (!data?.src || runtimes.get(layer)?.src === data.src) return Promise.resolve();
+export function hydrateLayerMask(layer: FabricObject): Promise<void> {
+  const data = (layer as MaskedLayer).layerMask;
+  if (!isMaskable(layer) || !data?.src || runtimes.get(layer)?.src === data.src) return Promise.resolve();
   const pending = loading.get(layer);
   if (pending) return pending;
   const promise = decodeImage(data.src)
     .then((element) => {
-      if ((layer as MaskedImage).layerMask?.src !== data.src) return;
+      if ((layer as MaskedLayer).layerMask?.src !== data.src) return;
       createRuntime(layer, element);
       layer.dirty = true;
       layer.canvas?.requestRenderAll();
@@ -307,19 +331,179 @@ export function installLayerMasks(): void {
 
   // Documents, undo steps and copies all come back through fromObject: the
   // mask is loaded before the layer joins the canvas.
-  const images = FabricImage as unknown as { fromObject: (...args: unknown[]) => Promise<FabricImage> };
-  const fromObject = images.fromObject;
-  images.fromObject = async function (this: unknown, ...args: unknown[]) {
-    const image = await fromObject.apply(this, args);
-    await hydrateLayerMask(image);
-    return image;
+  for (const kind of [FabricImage, AdjustmentLayer]) {
+    const klass = kind as unknown as { fromObject: (...args: unknown[]) => Promise<FabricObject> };
+    const fromObject = klass.fromObject;
+    klass.fromObject = async function (this: unknown, ...args: unknown[]) {
+      const layer = await fromObject.apply(this, args);
+      await hydrateLayerMask(layer);
+      return layer;
+    };
+  }
+}
+
+// ---------- Adjustment layers ----------
+
+/** Mask pixels to scene for an adjustment layer's mask. */
+const placementOf = (layer: AdjustmentLayer, runtime: MaskRuntime): TMat2D =>
+  runtime.placement ?? layer.calcTransformMatrix();
+
+/** The document's own pixels, where a new adjustment layer mask goes. */
+function documentPlacement(canvas: FabricCanvas): { placement: TMat2D; width: number; height: number } | null {
+  const grid = documentGrid(canvas);
+  if (!grid || grid.width <= 0 || grid.height <= 0) return null;
+  return {
+    placement: [1 / grid.scale, 0, 0, 1 / grid.scale, grid.left, grid.top],
+    width: grid.width,
+    height: grid.height,
   };
+}
+
+const samePlacement = (a: TMat2D, b: TMat2D) => a.every((value, index) => Math.abs(value - b[index]!) < 1e-9);
+
+/**
+ * A white mask on the document's pixels for an adjustment layer without one,
+ * to paint on: the first stroke committed makes it the layer's mask (one
+ * history step), and a stroke given up leaves the layer as it was.
+ */
+function blankRuntime(canvas: FabricCanvas, layer: AdjustmentLayer): MaskRuntime | null {
+  const existing = runtimes.get(layer);
+  // A stroke on it is under way.
+  if (existing?.src === null && editSession(existing.pixels)) return existing;
+  const spot = documentPlacement(canvas);
+  if (!spot) return null;
+  if (
+    existing?.src === null &&
+    existing.placement &&
+    samePlacement(existing.placement, spot.placement) &&
+    sizeOf(existing.pixels).width === spot.width &&
+    sizeOf(existing.pixels).height === spot.height
+  ) {
+    return existing;
+  }
+  const { element, context } = newCanvas(spot.width, spot.height);
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, spot.width, spot.height);
+  const pixels = new FabricImage(element, { originX: "left", originY: "top" });
+  const runtime: MaskRuntime = { src: null, pixels, placement: spot.placement, alpha: null, alphaFrom: null, stale: null };
+  linkPixelOwner(pixels, {
+    owner: layer,
+    began: () => {},
+    changed: () => {},
+    committed: (committed) => {
+      if (runtime.placement) util.applyTransformToObject(layer, runtime.placement);
+      layer.setCoords();
+      runtime.placement = null;
+      runtime.src = committed.src;
+      layer.layerMask = { src: committed.src, enabled: layer.layerMask?.enabled ?? true };
+    },
+  });
+  runtimes.set(layer, runtime);
+  return runtime;
+}
+
+/** Lay a mask's pixels over the scene where `placement` puts them. */
+function layOut(pixels: FabricImage, placement: TMat2D): FabricImage {
+  const { width, height } = sizeOf(pixels);
+  pixels.set({ width, height, cropX: 0, cropY: 0 });
+  // Pixel (x, y) is at the image's local (x - width / 2, y - height / 2).
+  util.applyTransformToObject(pixels, util.multiplyTransformMatrices(placement, [1, 0, 0, 1, width / 2, height / 2]));
+  pixels.setCoords();
+  return pixels;
+}
+
+/** The pixels to paint an adjustment layer's mask on: its mask's, or a white one to make it. */
+function adjustmentMaskPixels(canvas: FabricCanvas, layer: AdjustmentLayer): FabricImage | null {
+  let runtime: MaskRuntime | null | undefined;
+  if (hasLayerMask(layer)) {
+    runtime = runtimes.get(layer);
+    if (!runtime || runtime.src !== layer.layerMask.src) {
+      void hydrateLayerMask(layer);
+      return null;
+    }
+  } else {
+    runtime = blankRuntime(canvas, layer);
+  }
+  return runtime ? layOut(runtime.pixels, placementOf(layer, runtime)) : null;
+}
+
+let adjustmentScratch: HTMLCanvasElement | null = null;
+
+/**
+ * An adjustment layer's mask over `rect` of a canvas drawn through
+ * `transform` (scene to its pixels), in red: how much of the adjustment
+ * applies at each pixel. "none" when it applies everywhere, "loading" while
+ * the mask is not ready (it is then not applied at all).
+ */
+export function adjustmentMaskOver(
+  layer: AdjustmentLayer,
+  transform: DOMMatrix,
+  rect: { x: number; y: number; width: number; height: number }
+): HTMLCanvasElement | "none" | "loading" {
+  const data = layer.layerMask;
+  const runtime = runtimes.get(layer);
+  if (data?.src) {
+    if (!data.enabled) return "none";
+    if (!runtime || runtime.src !== data.src) {
+      void hydrateLayerMask(layer);
+      return "loading";
+    }
+  } else if (!runtime || runtime.src !== null || !editSession(runtime.pixels)) {
+    // No mask (the white one being made shows once a stroke is under way).
+    return "none";
+  }
+  adjustmentScratch ??= document.createElement("canvas");
+  const scratch = adjustmentScratch;
+  if (scratch.width !== rect.width || scratch.height !== rect.height) {
+    scratch.width = rect.width;
+    scratch.height = rect.height;
+  }
+  const context = scratch.getContext("2d");
+  if (!context) return "none";
+  const m = transform.multiply(new DOMMatrix(placementOf(layer, runtime)));
+  context.save();
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.globalCompositeOperation = "source-over";
+  context.clearRect(0, 0, rect.width, rect.height);
+  context.setTransform(m.a, m.b, m.c, m.d, m.e - rect.x, m.f - rect.y);
+  context.imageSmoothingEnabled = true;
+  context.drawImage(sourceOf(runtime.pixels), 0, 0);
+  // Erased mask pixels, and all the mask does not reach, count as white.
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.globalCompositeOperation = "destination-over";
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, rect.width, rect.height);
+  context.restore();
+  return scratch;
+}
+
+/**
+ * The layer whose mask the paint tools and filters change: a lone adjustment
+ * layer picked in the Layers panel (it has nothing else to paint), else the
+ * layer whose mask was picked.
+ */
+export function editedMaskLayer(canvas: FabricCanvas): MaskableLayer | null {
+  const adjustments = pickedAdjustments(canvas);
+  if (adjustments.length === 1 && pickedGroups(canvas).length === 0 && canvas.getActiveObjects().length === 0) {
+    return adjustments[0]!;
+  }
+  return maskTargetOf(canvas).layer();
 }
 
 // ---------- Commands ----------
 
-/** The layer mask commands act on: the selected image layer, else the photo. */
-export function maskLayer(canvas: FabricCanvas): MaskedImage | Refusal {
+/**
+ * The layer mask commands act on: the adjustment layer picked in the Layers
+ * panel, else the selected image layer, else the photo.
+ */
+export function maskLayer(canvas: FabricCanvas): MaskedLayer | Refusal {
+  const adjustments = pickedAdjustments(canvas);
+  if (adjustments.length > 0) {
+    if (adjustments.length > 1 || pickedGroups(canvas).length > 0 || canvas.getActiveObjects().length > 0) {
+      return "Select a single layer first";
+    }
+    return isObjectLocked(adjustments[0]!) ? "Unlock the layer first" : adjustments[0]!;
+  }
   const active = canvas.getActiveObject();
   const layer = active && !isEditorChrome(active) ? active : findBackgroundImage(canvas);
   if (!layer) return "Open a photo first";
@@ -331,19 +515,26 @@ export function maskLayer(canvas: FabricCanvas): MaskedImage | Refusal {
 
 export type MaskContent = "reveal" | "hide" | { selection: PixelSelection; hide?: boolean };
 
-/** Give a layer a new mask: all white, all black, or from a selection. */
-export async function addLayerMask(canvas: FabricCanvas, layer: MaskedImage, content: MaskContent): Promise<boolean> {
-  const { width, height } = sizeOf(layer);
+/** The mask image for a layer, and where an adjustment layer's goes. */
+async function makeMask(
+  canvas: FabricCanvas,
+  layer: MaskedLayer,
+  content: MaskContent
+): Promise<{ element: HTMLImageElement; placement: TMat2D | null }> {
+  const spot = isAdjustmentLayer(layer) ? documentPlacement(canvas) : null;
+  if (isAdjustmentLayer(layer) && !spot) throw new Error("Open a photo first");
+  const { width, height } = spot ?? sizeOf(layer as FabricImage);
   if (width <= 0 || height <= 0) throw new Error("This layer has no pixels to mask");
   const { element: surface, context } = newCanvas(width, height);
-  let element: HTMLImageElement;
   try {
     if (typeof content === "string") {
       context.fillStyle = content === "reveal" ? "#ffffff" : "#000000";
       context.fillRect(0, 0, width, height);
     } else {
       // The selection, drawn into the layer's pixels, as white with alpha.
-      const clip = selectionClip(layer, content.selection, width, height);
+      const clip = spot
+        ? selectionClipFrom(util.invertTransform(spot.placement), content.selection, width, height)
+        : selectionClip(layer as FabricImage, content.selection, width, height);
       context.fillStyle = content.hide ? "#ffffff" : "#000000";
       context.fillRect(0, 0, width, height);
       if (content.hide) {
@@ -356,21 +547,45 @@ export async function addLayerMask(canvas: FabricCanvas, layer: MaskedImage, con
         context.drawImage(clip, 0, 0);
       }
     }
-    element = await surfaceToImage(surface);
+    return { element: await surfaceToImage(surface), placement: spot?.placement ?? null };
   } finally {
     releaseSurface(surface);
   }
-  if (!canvas.getObjects().includes(layer)) return false;
+}
+
+function setMask(layer: MaskedLayer, element: HTMLImageElement, placement: TMat2D | null) {
+  if (placement && isAdjustmentLayer(layer)) {
+    util.applyTransformToObject(layer, placement);
+    layer.setCoords();
+  }
+  const old = runtimes.get(layer);
+  if (old?.alpha) releaseSurface(old.alpha);
   layer.layerMask = { src: element.src, enabled: true };
   createRuntime(layer, element);
   layer.dirty = true;
+}
+
+/**
+ * Give a layer a new mask: all white, all black, or from a selection. An
+ * adjustment layer's goes on the document's pixels.
+ */
+export async function addLayerMask(canvas: FabricCanvas, layer: MaskedLayer, content: MaskContent): Promise<boolean> {
+  const { element, placement } = await makeMask(canvas, layer, content);
+  if (!canvas.getObjects().includes(layer)) return false;
+  setMask(layer, element, placement);
   canvas.requestRenderAll();
   canvas.fire("object:modified", { target: layer });
   return true;
 }
 
+/** A mask for an adjustment layer not on the canvas yet, which records it when added. */
+export async function maskNewAdjustmentLayer(canvas: FabricCanvas, layer: AdjustmentLayer, content: MaskContent): Promise<void> {
+  const { element, placement } = await makeMask(canvas, layer, content);
+  setMask(layer, element, placement);
+}
+
 /** Turn a layer's mask off (the layer shows whole) or back on. */
-export function setLayerMaskEnabled(canvas: FabricCanvas, layer: MaskedImage, enabled: boolean): void {
+export function setLayerMaskEnabled(canvas: FabricCanvas, layer: MaskedLayer, enabled: boolean): void {
   if (!layer.layerMask || layer.layerMask.enabled === enabled) return;
   layer.layerMask = { ...layer.layerMask, enabled };
   layer.dirty = true;
@@ -378,7 +593,7 @@ export function setLayerMaskEnabled(canvas: FabricCanvas, layer: MaskedImage, en
   canvas.fire("object:modified", { target: layer });
 }
 
-function forgetMask(canvas: FabricCanvas, layer: MaskedImage) {
+function forgetMask(canvas: FabricCanvas, layer: MaskedLayer) {
   const runtime = runtimes.get(layer);
   if (runtime?.alpha) releaseSurface(runtime.alpha);
   runtimes.delete(layer);
@@ -387,7 +602,7 @@ function forgetMask(canvas: FabricCanvas, layer: MaskedImage) {
 }
 
 /** Throw a layer's mask away; the layer shows whole again. */
-export function deleteLayerMask(canvas: FabricCanvas, layer: MaskedImage): void {
+export function deleteLayerMask(canvas: FabricCanvas, layer: MaskedLayer): void {
   if (!layer.layerMask) return;
   forgetMask(canvas, layer);
   layer.dirty = true;
@@ -395,9 +610,12 @@ export function deleteLayerMask(canvas: FabricCanvas, layer: MaskedImage): void 
   canvas.fire("object:modified", { target: layer });
 }
 
-/** Make the mask permanent: hidden pixels are erased and the mask goes. */
-export async function applyLayerMask(canvas: FabricCanvas, layer: MaskedImage): Promise<boolean> {
-  if (!hasLayerMask(layer)) return false;
+/**
+ * Make the mask permanent: hidden pixels are erased and the mask goes. An
+ * adjustment layer has no pixels of its own to apply it to.
+ */
+export async function applyLayerMask(canvas: FabricCanvas, layer: MaskedLayer): Promise<boolean> {
+  if (!hasLayerMask(layer) || !(layer instanceof FabricImage)) return false;
   await hydrateLayerMask(layer);
   const runtime = runtimes.get(layer);
   if (!runtime) throw new Error("The layer mask could not be loaded");
@@ -423,7 +641,7 @@ export async function applyLayerMask(canvas: FabricCanvas, layer: MaskedImage): 
 }
 
 /** Swap what a mask shows and hides. */
-export async function invertLayerMask(canvas: FabricCanvas, layer: MaskedImage): Promise<boolean> {
+export async function invertLayerMask(canvas: FabricCanvas, layer: MaskedLayer): Promise<boolean> {
   const pixels = await layerMaskPixels(layer);
   if (!pixels) return false;
   const { surface, context } = beginPixelEdit(pixels);
@@ -443,14 +661,18 @@ export async function invertLayerMask(canvas: FabricCanvas, layer: MaskedImage):
  * The mask's grey pixels laid exactly over the layer, for the paint tools:
  * scene points map to mask pixels as they map to the layer's.
  */
-export async function layerMaskPixels(layer: FabricImage): Promise<FabricImage | null> {
+export async function layerMaskPixels(layer: MaskableLayer): Promise<FabricImage | null> {
   if (!hasLayerMask(layer)) return null;
   await hydrateLayerMask(layer);
   return currentMaskPixels(layer);
 }
 
-/** {@link layerMaskPixels} for a mask that is already loaded. */
-export function currentMaskPixels(layer: FabricImage): FabricImage | null {
+/**
+ * {@link layerMaskPixels} for a mask that is already loaded. An adjustment
+ * layer without a mask gets a white one to paint on.
+ */
+export function currentMaskPixels(layer: MaskableLayer): FabricImage | null {
+  if (isAdjustmentLayer(layer)) return layer.canvas ? adjustmentMaskPixels(layer.canvas as FabricCanvas, layer) : null;
   if (!hasLayerMask(layer)) return null;
   const runtime = runtimes.get(layer);
   if (!runtime || runtime.src !== layer.layerMask.src) {
@@ -486,11 +708,41 @@ export function currentMaskPixels(layer: FabricImage): FabricImage | null {
 const thumbnails = new Map<string, string>();
 const MAX_THUMBNAILS = 64;
 
+/** An adjustment layer's mask over the document, on white where it does not reach. */
+function adjustmentThumbnail(layer: AdjustmentLayer, runtime: MaskRuntime, size: number): string {
+  const grid = layer.canvas ? documentGrid(layer.canvas as FabricCanvas) : null;
+  if (!grid) return "";
+  const placement = placementOf(layer, runtime);
+  const key = [runtime.src, ...placement, grid.left, grid.top, grid.scale, grid.width, grid.height, size]
+    .map((value) => (typeof value === "number" ? value.toFixed(4) : value))
+    .join("|");
+  const cached = thumbnails.get(key);
+  if (cached !== undefined) return cached;
+  const scale = Math.min(1, size / Math.max(grid.width, grid.height, 1));
+  const width = Math.max(1, Math.round(grid.width * scale));
+  const height = Math.max(1, Math.round(grid.height * scale));
+  const { element, context } = newCanvas(width, height);
+  try {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    const k = grid.scale * scale;
+    context.setTransform(...util.multiplyTransformMatrices([k, 0, 0, k, -grid.left * k, -grid.top * k], placement));
+    context.drawImage(sourceOf(runtime.pixels), 0, 0);
+    const url = element.toDataURL("image/png");
+    thumbnails.set(key, url);
+    if (thumbnails.size > MAX_THUMBNAILS) thumbnails.delete(thumbnails.keys().next().value!);
+    return url;
+  } finally {
+    releaseSurface(element);
+  }
+}
+
 /** A small picture of a layer's mask, black and white, for the Layers panel. */
-export function layerMaskThumbnail(layer: FabricImage, size = 40): string {
+export function layerMaskThumbnail(layer: MaskableLayer, size = 40): string {
   if (!hasLayerMask(layer)) return "";
   const runtime = runtimes.get(layer);
   if (!runtime || runtime.src !== layer.layerMask.src) return "";
+  if (isAdjustmentLayer(layer)) return adjustmentThumbnail(layer, runtime, size);
   const cached = thumbnails.get(runtime.src);
   if (cached !== undefined) return cached;
   const alpha = alphaOf(runtime);
@@ -537,7 +789,7 @@ export class MaskTarget {
   };
 
   /** The layer whose mask is being painted, if it still has one. */
-  layer(): MaskedImage | null {
+  layer(): MaskedLayer | null {
     if (!this.layerId) return null;
     const layer = this.canvas
       .getObjects()

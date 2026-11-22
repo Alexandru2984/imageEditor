@@ -84,6 +84,9 @@ export function AdjustmentLayerProperties({ canvas, layer, colors }: AdjustmentL
           {spec ? spec.description : "Reverses every colour."}{" "}
           {layer.__clipped ? "Applies to the layer it is clipped to" : "Applies to the layers below"}, leaving their pixels as they are.
         </p>
+        <p className="text-xs text-muted-foreground">
+          Paint black on the document to hide it there, white to show it again.
+        </p>
         {Controls && (
           <Controls
             settings={adjustment.settings}

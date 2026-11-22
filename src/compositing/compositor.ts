@@ -128,6 +128,29 @@ type Photo = FabricObject & { __isBackground?: boolean };
  * coordinates; the whole canvas without one): on the GPU when it can, on the
  * CPU otherwise.
  */
+/**
+ * Where an adjustment layer applies over `rect` of a canvas drawn through
+ * `transform`: a canvas the size of `rect` whose red says how much, "none"
+ * for everywhere, "loading" for nowhere yet. layerMask.ts provides it.
+ */
+export type AdjustmentMasks = (
+  layer: AdjustmentLayer,
+  transform: DOMMatrix,
+  rect: PixelRect
+) => HTMLCanvasElement | "none" | "loading";
+
+let adjustmentMask: AdjustmentMasks = () => "none";
+
+/** The red channel of a mask canvas, one byte a pixel. */
+function redOf(mask: HTMLCanvasElement): Uint8Array | null {
+  const context = mask.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  const { data } = context.getImageData(0, 0, mask.width, mask.height);
+  const red = new Uint8Array(mask.width * mask.height);
+  for (let pixel = 0; pixel < red.length; pixel += 1) red[pixel] = data[pixel * 4]!;
+  return red;
+}
+
 function applyAdjustment(ctx: CanvasRenderingContext2D, layer: AdjustmentLayer, area: { left: number; top: number; width: number; height: number } | null): void {
   const strength = strengthOf(layer);
   if (!layer.visible || strength <= 0) return;
@@ -144,9 +167,12 @@ function applyAdjustment(ctx: CanvasRenderingContext2D, layer: AdjustmentLayer, 
     rect = { x: left, y: top, width: right - left, height: bottom - top };
   }
   if (!(rect.width > 0 && rect.height > 0)) return;
+  const mask = adjustmentMask(layer, ctx.getTransform(), rect);
+  if (mask === "loading") return;
   const job = jobOf(layer.adjustment);
   const blend = blendOf(layer);
-  const adjusted = adjustOnGpu(ctx.canvas as HTMLCanvasElement, rect, job, strength, blend);
+  const masked = mask === "none" ? null : mask;
+  const adjusted = adjustOnGpu(ctx.canvas as HTMLCanvasElement, rect, job, strength, blend, masked);
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (adjusted) {
@@ -156,7 +182,7 @@ function applyAdjustment(ctx: CanvasRenderingContext2D, layer: AdjustmentLayer, 
     ctx.drawImage(adjusted, 0, 0, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
   } else {
     const image = ctx.getImageData(rect.x, rect.y, rect.width, rect.height);
-    adjustPixels(image.data, rect.width, rect.height, job, strength, blend);
+    adjustPixels(image.data, rect.width, rect.height, job, strength, blend, masked ? redOf(masked) : null);
     ctx.putImageData(image, rect.x, rect.y);
   }
   ctx.restore();
@@ -308,7 +334,8 @@ export function hiddenByGroups(objects: readonly FabricObject[]): Set<FabricObje
 let installed = false;
 
 /** Teach every Fabric canvas to draw groups and clipping masks. */
-export function installCompositor(): void {
+export function installCompositor(masks?: AdjustmentMasks): void {
+  if (masks) adjustmentMask = masks;
   if (installed) return;
   installed = true;
   const prototype = StaticCanvas.prototype as unknown as RenderInternals;

@@ -7,11 +7,13 @@ import { readAdjustment, type AdjustmentData } from "./adjustmentData";
  * isolated, or only its base when clipped). The compositor applies it; on
  * its own it draws nothing and takes no room, so it is picked in the Layers
  * panel rather than on the canvas.
+ *
+ * Its position (left, top, scale, angle) places its layer mask, when it has
+ * one: mask pixel (x, y) lies at calcTransformMatrix() × (x, y) in the scene.
  */
 
-const DEFAULTS: Partial<TClassProperties<FabricObject>> = {
-  left: 0,
-  top: 0,
+/** What every adjustment layer is, whatever a file says. */
+const FIXED: Partial<TClassProperties<FabricObject>> = {
   width: 0,
   height: 0,
   strokeWidth: 0,
@@ -22,6 +24,8 @@ const DEFAULTS: Partial<TClassProperties<FabricObject>> = {
   objectCaching: false,
 };
 
+const DEFAULTS: Partial<TClassProperties<FabricObject>> = { left: 0, top: 0, ...FIXED };
+
 const FALLBACK: AdjustmentData = { kind: "invert", settings: {} };
 
 export class AdjustmentLayer extends FabricObject {
@@ -31,11 +35,13 @@ export class AdjustmentLayer extends FabricObject {
   declare name?: string;
   /** Applies only to the layer below it (Layer › Create Clipping Mask). */
   declare __clipped?: boolean;
+  /** Where it applies: white fully, black not at all (see layerMask.ts). */
+  declare layerMask?: { src: string; enabled: boolean };
 
   constructor(options?: Record<string, unknown>) {
     super({ ...DEFAULTS, ...options });
     // Whatever a file says, it stays weightless, with settings the editor makes.
-    this.set({ ...DEFAULTS, erasable: false } as Record<string, unknown>);
+    this.set({ ...FIXED, erasable: false } as Record<string, unknown>);
     this.adjustment = readAdjustment(this.adjustment) ?? FALLBACK;
   }
 
