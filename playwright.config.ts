@@ -25,6 +25,20 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"], launchOptions: { executablePath } },
     },
     {
+      // The pictures again through the WebGL2 shaders, which the editor
+      // leaves for the CPU path where WebGL is only software, as here.
+      name: "gpu",
+      testMatch: /adjustmentLayers\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: { executablePath },
+        storageState: {
+          cookies: [],
+          origins: [{ origin: "http://127.0.0.1:5199", localStorage: [{ name: "imageEditor.gpu", value: "always" }] }],
+        },
+      },
+    },
+    {
       // A touch phone: small viewport, touch events, mobile user agent.
       name: "mobile",
       testMatch: /mobile\.spec\.ts/,

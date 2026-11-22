@@ -506,7 +506,9 @@ export function hueSaturation(source: Uint8ClampedArray, target: Uint8ClampedArr
   const lighten = settings.lightness / 100;
   for (let offset = 0; offset < source.length; offset += 4) {
     toHsl(source[offset]!, source[offset + 1]!, source[offset + 2]!, hsl);
-    let [hue, saturation, lightness] = [hsl[0]!, hsl[1]!, hsl[2]!];
+    let hue = hsl[0]!;
+    let saturation = hsl[1]!;
+    let lightness = hsl[2]!;
     if (settings.colorize) {
       hue = shift - Math.floor(shift);
       saturation = Math.max(0, Math.min(1, saturate));

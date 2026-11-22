@@ -310,6 +310,27 @@ let engine: Engine | null = null;
 /** Set once WebGL2 is known not to work here. */
 let unavailable = false;
 
+/**
+ * "always" in local storage uses WebGL2 even where the browser only has it
+ * in software, slower than the CPU path (the end-to-end tests set it, so the
+ * shaders are tested as well as the fallback).
+ */
+const GPU_SETTING = "imageEditor.gpu";
+
+/** WebGL drawn by the processor (Chrome's SwiftShader, Mesa's llvmpipe, Windows' basic driver). */
+const SOFTWARE_RENDERER = /swiftshader|llvmpipe|softpipe|software|basic render/i;
+function rendersInSoftware(gl: WebGL2RenderingContext): boolean {
+  const info = gl.getExtension("WEBGL_debug_renderer_info");
+  return SOFTWARE_RENDERER.test(String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER)));
+}
+function softwareAllowed(): boolean {
+  try {
+    return window.localStorage.getItem(GPU_SETTING) === "always";
+  } catch {
+    return false;
+  }
+}
+
 function compile(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type)!;
   gl.shaderSource(shader, source);
@@ -336,8 +357,16 @@ function start(): Engine | null {
   engine = null;
   try {
     const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, alpha: true, antialias: false, depth: false, stencil: false });
-    if (!gl) {
+    const gl = canvas.getContext("webgl2", {
+      premultipliedAlpha: true,
+      alpha: true,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      // No GPU (WebGL drawn by the processor): the CPU path is faster.
+      failIfMajorPerformanceCaveat: !softwareAllowed(),
+    });
+    if (!gl || (!softwareAllowed() && rendersInSoftware(gl))) {
       unavailable = true;
       return null;
     }

@@ -157,6 +157,26 @@ export function blendColors(id: number, backdrop: Rgb, source: Rgb): Rgb {
 
 const toByte = (value: number) => (value <= 0 ? 0 : value >= 1 ? 255 : Math.round(value * 255));
 
+const tables = new Map<number, Uint8Array>();
+
+/**
+ * A separable blend mode (one channel at a time) for every pair of bytes,
+ * at [backdrop << 8 | source]: worked out once, so blending a frame on the
+ * CPU is a look-up a channel. Null for the modes that need the whole colour.
+ */
+function separableTable(id: number): Uint8Array | null {
+  if (!((id >= 1 && id <= 11) || (id >= 16 && id <= 23))) return null;
+  let table = tables.get(id);
+  if (!table) {
+    table = new Uint8Array(65536);
+    for (let below = 0; below < 256; below += 1) {
+      for (let layer = 0; layer < 256; layer += 1) table[(below << 8) | layer] = toByte(separable(id, below / 255, layer / 255));
+    }
+    tables.set(id, table);
+  }
+  return table;
+}
+
 /**
  * Dissolve's noise: a number from 0 to 1 for each pixel, the same on the
  * GPU (adjustGpu.ts hashes the same way) and for every render of a size.
@@ -182,30 +202,40 @@ export function composePixels(
   opacity: number
 ): void {
   const id = blendId(blend);
+  const table = separableTable(id);
+  const generic = id !== 0 && id !== DISSOLVE && !table;
+  const cb: Rgb = [0, 0, 0];
+  const cs: Rgb = [0, 0, 0];
   for (let pixel = 0, offset = 0; offset < backdrop.length; pixel += 1, offset += 4) {
     let as = (source[offset + 3]! / 255) * opacity;
     if (id === DISSOLVE) as = dissolveNoise(pixel % width, Math.floor(pixel / width)) < as ? 1 : 0;
     if (as <= 0) continue;
     const ab = backdrop[offset + 3]! / 255;
-    const cb: Rgb = [backdrop[offset]! / 255, backdrop[offset + 1]! / 255, backdrop[offset + 2]! / 255];
-    const cs: Rgb = [source[offset]! / 255, source[offset + 1]! / 255, source[offset + 2]! / 255];
-    const blended = id === 0 || id === DISSOLVE ? cs : blendColors(id, cb, cs);
     const ao = as + ab * (1 - as);
-    for (let channel = 0; channel < 3; channel += 1) {
-      const mixed = (1 - ab) * cs[channel]! + ab * blended[channel]!;
-      const co = as * mixed + (1 - as) * ab * cb[channel]!;
-      backdrop[offset + channel] = toByte(co / ao);
+    if (generic) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        cb[channel] = backdrop[offset + channel]! / 255;
+        cs[channel] = source[offset + channel]! / 255;
+      }
+      const blended = blendColors(id, cb, cs);
+      for (let channel = 0; channel < 3; channel += 1) {
+        const mixed = (1 - ab) * cs[channel]! + ab * blended[channel]!;
+        backdrop[offset + channel] = toByte((as * mixed + (1 - as) * ab * cb[channel]!) / ao);
+      }
+    } else {
+      // In bytes; the array rounds and clamps.
+      for (let channel = 0; channel < 3; channel += 1) {
+        const below = backdrop[offset + channel]!;
+        const layer = source[offset + channel]!;
+        const blended = table ? table[(below << 8) | layer]! : layer;
+        const mixed = (1 - ab) * layer + ab * blended;
+        backdrop[offset + channel] = (as * mixed + (1 - as) * ab * below) / ao;
+      }
     }
     backdrop[offset + 3] = toByte(ao);
   }
 }
 
-/**
- * An adjustment layer on pixels (RGBA, not premultiplied), in place: each
- * pixel's colour moves towards the adjusted one, blended in `blend`, by
- * `strength` (the layer's opacity) times `mask` (0–255 a pixel, when given).
- * Alpha is left as it is: an adjustment changes colours, not coverage.
- */
 export function adjustPixels(
   data: Uint8ClampedArray,
   width: number,
@@ -217,16 +247,32 @@ export function adjustPixels(
 ): void {
   const adjusted = runJob(job, { data, width, height, x: 0, y: 0 }, width, height, { x: 0, y: 0 });
   const id = blendId(blend);
+  const table = separableTable(id);
+  const generic = id !== 0 && id !== DISSOLVE && !table;
+  const backdrop: Rgb = [0, 0, 0];
+  const source: Rgb = [0, 0, 0];
   for (let pixel = 0, offset = 0; offset < data.length; pixel += 1, offset += 4) {
     if (data[offset + 3] === 0) continue;
     let amount = mask ? (strength * mask[pixel]!) / 255 : strength;
     if (id === DISSOLVE) amount = dissolveNoise(pixel % width, Math.floor(pixel / width)) < amount ? 1 : 0;
     if (amount <= 0) continue;
-    const backdrop: Rgb = [data[offset]! / 255, data[offset + 1]! / 255, data[offset + 2]! / 255];
-    const source: Rgb = [adjusted[offset]! / 255, adjusted[offset + 1]! / 255, adjusted[offset + 2]! / 255];
-    const blended = id === 0 ? source : blendColors(id, backdrop, source);
+    if (generic) {
+      for (let channel = 0; channel < 3; channel += 1) {
+        backdrop[channel] = data[offset + channel]! / 255;
+        source[channel] = adjusted[offset + channel]! / 255;
+      }
+      const blended = blendColors(id, backdrop, source);
+      for (let channel = 0; channel < 3; channel += 1) {
+        data[offset + channel] = toByte(backdrop[channel]! + (blended[channel]! - backdrop[channel]!) * amount);
+      }
+      continue;
+    }
+    // In bytes; the array rounds and clamps.
     for (let channel = 0; channel < 3; channel += 1) {
-      data[offset + channel] = toByte(backdrop[channel]! + (blended[channel]! - backdrop[channel]!) * amount);
+      const below = data[offset + channel]!;
+      const result = adjusted[offset + channel]!;
+      const blended = table ? table[(below << 8) | result]! : result;
+      data[offset + channel] = amount >= 1 ? blended : below + (blended - below) * amount;
     }
   }
 }
