@@ -12,7 +12,8 @@ import {
 import { hiddenByGroups, treeOf } from "@/compositing/compositor";
 import { isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
 import { findNode } from "@/layers/layerTree";
-import { groupObjects, selectedGroup } from "@/layers/layerGroups";
+import { groupObjects, selectedGroup, selectedLayerObjects } from "@/layers/layerGroups";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
 import { nativeMultiplier, renderObjectsRegion } from "@/utils/flatten";
 import {
   documentPixelSize,
@@ -66,17 +67,20 @@ const shownTest = (canvas: FabricCanvas) => {
 /** The markers of every group: merging everything dissolves them. */
 const groupMarkers = (canvas: FabricCanvas): FabricObject[] => canvas.getObjects().filter(isGroupMarker);
 
-/** The selected layers, bottom to top. */
+/** The selected layers (adjustment layers picked in the panel too), bottom to top. */
 function selectedLayers(canvas: FabricCanvas): FabricObject[] {
-  const active = canvas.getActiveObject();
-  if (!active || isEditorChrome(active)) return [];
-  const chosen = new Set(active instanceof ActiveSelection ? active.getObjects() : [active]);
+  const chosen = new Set(selectedLayerObjects(canvas).filter((object) => !isEditorChrome(object)));
   return documentLayers(canvas).filter((object) => chosen.has(object));
 }
+
+/** Layers with pixels of their own (not adjustment layers): what a merge's size comes from. */
+const withPixels = (layers: readonly FabricObject[]) => layers.filter((object) => isLayerObject(object) && !isAdjustmentLayer(object));
 
 function checkMergeable(canvas: FabricCanvas, layers: FabricObject[]): MergePlan | Refusal {
   const isShown = shownTest(canvas);
   if (layers.some((layer) => !isShown(layer))) return "Show the layers before merging them";
+  // An adjustment merges into the pixels below it, never the other way round.
+  if (isAdjustmentLayer(layers[0])) return "The bottom layer is an adjustment layer, with no pixels to merge into";
   if (layers.some((layer) => !isBackgroundObject(layer) && isPixelsLocked(layer))) {
     return "Unlock the layers before merging them";
   }
@@ -100,6 +104,7 @@ export function planMergeDown(canvas: FabricCanvas): MergePlan | Refusal {
   const belowNode = position > 0 ? siblings[position - 1] : undefined;
   if (!belowNode) return "There is no layer below to merge into";
   if (belowNode.kind === "group") return "The layer below is a group: merge the group first";
+  if (isAdjustmentLayer(objects[belowNode.index])) return "The layer below is an adjustment layer, with no pixels to merge into";
   return checkMergeable(canvas, [objects[belowNode.index]!, layer]);
 }
 
@@ -111,7 +116,7 @@ export function planMergeGroup(canvas: FabricCanvas): MergePlan | Refusal {
   const inside = groupObjects(canvas, group);
   const isShown = shownTest(canvas);
   const layers = inside.filter((object) => isLayerObject(object) && isShown(object));
-  if (layers.length === 0) return "The group has no visible layers to merge";
+  if (withPixels(layers).length === 0) return "The group has no visible layers to merge";
   if (layers.some((layer) => isPixelsLocked(layer))) return "Unlock the layers before merging them";
   return {
     layers,
@@ -127,7 +132,7 @@ export function planMergeGroup(canvas: FabricCanvas): MergePlan | Refusal {
 export function planMergeVisible(canvas: FabricCanvas): MergePlan | Refusal {
   const isShown = shownTest(canvas);
   const visible = documentLayers(canvas).filter(isShown);
-  if (visible.length < 2) return "Show at least two layers to merge them";
+  if (visible.length < 2 || withPixels(visible).length === 0) return "Show at least two layers to merge them";
   const plan = checkMergeable(canvas, visible);
   if (typeof plan === "string") return plan;
   // The groups' settings go into the pixels, and the groups go.
@@ -213,7 +218,7 @@ export async function runMerge(canvas: FabricCanvas, plan: MergePlan): Promise<L
     base.setCoords();
     // Merging into the photo keeps the photo's frame; anything outside it is
     // cut off, as with Photoshop's background layer.
-    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, plan.layers.filter(isLayerObject), multiplier);
+    const region = intoPhoto ? base.getBoundingRect() : documentPixelRegion(canvas, withPixels(plan.layers), multiplier);
 
     // The bottom layer's opacity and blend mode stay settings of the result
     // instead of being baked into its pixels, as Photoshop merges. A merged

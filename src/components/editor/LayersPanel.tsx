@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from "react";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
-import { Brush, CircleDot, FolderPlus, Grid2x2, Layers, Lock, MoreHorizontal, Move, Pencil, Search, SquareDashed, SquarePlus, Trash2 } from "lucide-react";
+import { Brush, CircleDot, Contrast, FolderPlus, Grid2x2, Layers, Lock, MoreHorizontal, Move, Pencil, Search, SquareDashed, SquarePlus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import type { CommandMap, MenuEntry } from "@/commands/types";
+import { EDITOR_MENUS } from "@/commands/menus";
 import { useMaskTarget } from "@/hooks/useMaskTarget";
 import { isGroupHeader, isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
 import {
@@ -74,10 +75,17 @@ const LOCKS: { lock: LayerLock; label: string; icon: typeof Lock }[] = [
 const KIND_FILTERS: { value: KindFilter; label: string }[] = [
   { value: "all", label: "All kinds" },
   { value: "pixel", label: "Pixel" },
+  { value: "adjustment", label: "Adjustment" },
   { value: "text", label: "Text" },
   { value: "shape", label: "Shape" },
   { value: "group", label: "Group" },
 ];
+
+/** The footer's adjustment layer button, as Layer › New Adjustment Layer. */
+const ADJUSTMENT_MENU: readonly MenuEntry[] =
+  (EDITOR_MENUS.find((menu) => menu.label === "Layer")?.items.find(
+    (entry): entry is Exclude<MenuEntry, string> => typeof entry !== "string" && entry.label === "New adjustment layer"
+  )?.items ?? []) as readonly MenuEntry[];
 
 /** The commands of the panel's right-click menu and its ⋯ button. */
 const layerMenu = (clipped: boolean): readonly MenuEntry[] => [
@@ -147,7 +155,7 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
     const cache = thumbnailCacheRef.current;
     let drawn = 0;
     for (const row of rows) {
-      if (row.kind === "group") continue;
+      if (row.kind === "group" || row.adjustment) continue;
       if (drawn >= MAX_LAYER_THUMBNAILS) break;
       drawn += 1;
       if (cache.has(row.fabricObject)) {
@@ -333,12 +341,8 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
 
   const pick = (ids: readonly string[]) => {
     if (!fabricCanvas) return;
-    if (ids.length === 0) {
-      fabricCanvas.discardActiveObject();
-      fabricCanvas.requestRenderAll();
-    } else {
-      selectLayers(fabricCanvas, ids);
-    }
+    // None clears the canvas selection and what is picked in the panel.
+    selectLayers(fabricCanvas, ids);
     syncSelection();
   };
 
@@ -594,6 +598,11 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
       fabricCanvas.requestRenderAll();
       fabricCanvas.fire("object:modified", { target: object });
     },
+    onEditAdjustment(layer) {
+      anchorRef.current = layer.id;
+      pick([layer.id]);
+      commands["layer.adjustmentProperties"]?.run();
+    },
     onEditEffects(layer) {
       anchorRef.current = layer.id;
       pick([layer.id]);
@@ -805,6 +814,26 @@ export const LayersPanel = ({ fabricCanvas, commands }: LayersPanelProps) => {
         </span>
         {commandButton("layer.style", "Add a layer style", <span className="text-[11px] font-semibold italic">fx</span>)}
         {commandButton("layer.mask.add", "Add a mask", <CircleDot className="h-4 w-4" />)}
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              aria-label="Add an adjustment layer"
+              title="Add an adjustment layer"
+              className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Contrast className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            side="top"
+            collisionPadding={8}
+            className="max-h-[var(--radix-dropdown-menu-content-available-height)] w-60 overflow-y-auto"
+          >
+            <CommandDropdownItems entries={ADJUSTMENT_MENU} commands={commands} />
+          </DropdownMenuContent>
+        </DropdownMenu>
         {commandButton("layer.newGroup", "Create a new group", <FolderPlus className="h-4 w-4" />)}
         {commandButton("layer.new", "Create a new layer", <SquarePlus className="h-4 w-4" />)}
         <button

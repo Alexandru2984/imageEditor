@@ -92,7 +92,10 @@ import {
   canUngroup,
   clippingAction,
   deleteSelectedLayers,
+  hasPicks,
+  pickedAdjustments,
   pickedGroups,
+  selectedAdjustment,
   selectedLayerObjects,
   duplicateGroup,
   groupSelected,
@@ -141,6 +144,9 @@ import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
 import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
 import { invertLut, uniformLuts } from "@/raster/adjustments";
 import type { PixelJob } from "@/raster/pixelJobs";
+import { addAdjustmentLayer, duplicateAdjustmentLayer } from "@/adjustments/adjustmentCommands";
+import { ADJUSTMENT_TITLES, initialAdjustment, type AdjustmentLayerKind } from "@/adjustments/adjustmentData";
+import { ADJUSTMENT_ICONS } from "@/components/editor/layers/adjustmentIcons";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
 import type { PanelTab, Tool, ViewOptions } from "@/types/editor";
 import {
@@ -335,8 +341,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
   const { isProcessing: aiBusy, removeBackground, extractSubject, selectSubject } = ai;
 
   return useMemo(() => {
-    // A layer on the canvas, or a group picked in the Layers panel.
-    const selected = () => hasSelection(canvas) || (!!canvas && !!selectedGroup(canvas));
+    // A layer on the canvas, or a group or adjustment layer picked in the Layers panel.
+    const selected = () => hasSelection(canvas) || (!!canvas && hasPicks(canvas));
     const pixelSelection = () => (canvas ? selectionOf(canvas).current() : null);
 
     /** Delete with a selection: clear its pixels on the layer (or the photo). */
@@ -474,9 +480,13 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     /** The layer a layer style goes on: the selected one, else the photo. */
     // Groups take no mask or style yet: not their layers, nor the photo instead.
     const GROUP_REFUSAL = "Select a layer, not a group";
+    const ADJUSTMENT_REFUSAL = "Select a pixel layer, not an adjustment layer";
+    const pickRefusal = (): string | null =>
+      !canvas ? null : pickedGroups(canvas).length ? GROUP_REFUSAL : pickedAdjustments(canvas).length ? ADJUSTMENT_REFUSAL : null;
     const styleLayer = (): FabricObject | string => {
       if (!canvas) return "Open a photo first";
-      if (pickedGroups(canvas).length) return GROUP_REFUSAL;
+      const refusal = pickRefusal();
+      if (refusal) return refusal;
       const active = canvas.getActiveObject();
       const layer = active && !isEditorChrome(active) ? active : findBackgroundImage(canvas);
       if (!layer) return "Open a photo first";
@@ -493,13 +503,13 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
 
     /** The layer mask commands' layer, when they can act on it. */
     const maskedLayer = (): MaskedImage | null => {
-      if (!canvas || pickedGroups(canvas).length) return null;
+      if (!canvas || pickRefusal()) return null;
       const layer = maskLayer(canvas);
       return typeof layer === "string" ? null : layer;
     };
     const withMaskLayer = (run: (canvas: FabricCanvas, layer: MaskedImage) => unknown) => () => {
       if (!canvas) return;
-      const layer = pickedGroups(canvas).length ? GROUP_REFUSAL : maskLayer(canvas);
+      const layer = pickRefusal() ?? maskLayer(canvas);
       if (typeof layer === "string") {
         toast.error(layer);
         return;
@@ -727,7 +737,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: () => {
           const selection = pixelSelection();
           if (selection) clearPixels(selection);
-          else if (canvas && pickedGroups(canvas).length) {
+          else if (canvas && hasPicks(canvas)) {
             // Groups picked in the Layers panel go with everything in them.
             const result = deleteSelectedLayers(canvas);
             if (typeof result === "string") toast.error(result);
@@ -965,8 +975,10 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         // With a pixel selection, Ctrl+J is New layer via copy.
         run: () => {
           const group = canvas ? selectedGroup(canvas) : null;
+          const adjustment = canvas ? selectedAdjustment(canvas) : null;
           if (pixelSelection()) layerViaSelection(false);
           else if (canvas && group) duplicateGroup(canvas, group).catch(reportFailure);
+          else if (canvas && adjustment) duplicateAdjustmentLayer(canvas, adjustment);
           else duplicate();
         },
         isEnabled: () => selected() || !!pixelSelection(),
@@ -1132,6 +1144,43 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         },
         isEnabled: () => !!canvas && documentGrid(canvas) !== null,
         keywords: "folder layers",
+      },
+      ...(
+        [
+          ["brightnessContrast", "lighter darker"],
+          ["levels", "black point white point gamma midtones histogram"],
+          ["curves", "tone curve contrast"],
+          ["exposure", "stops light gamma offset"],
+          ["hueSaturation", "colour colorize tint lightness"],
+          ["colorBalance", "colour cast shadows midtones highlights"],
+          ["blackWhite", "grayscale greyscale monochrome"],
+          ["gradientMap", "duotone tones"],
+          ["posterize", "levels flat"],
+          ["threshold", "black white"],
+          ["invert", "negative"],
+        ] as const satisfies readonly (readonly [AdjustmentLayerKind, string])[]
+      ).map(
+        ([kind, keywords]): Command => ({
+          id: `layer.newAdjustment.${kind}`,
+          label: `${ADJUSTMENT_TITLES[kind]}${kind === "invert" ? "" : "…"}`,
+          icon: ADJUSTMENT_ICONS[kind],
+          run: () => {
+            if (!canvas) return;
+            addAdjustmentLayer(canvas, initialAdjustment(kind, colors));
+            // Its settings show in the Properties panel, as in Photoshop.
+            if (kind !== "invert") openPanel("properties");
+          },
+          isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+          keywords: `adjustment layer non-destructive ${keywords}`,
+        })
+      ),
+      {
+        id: "layer.adjustmentProperties",
+        label: "Adjustment settings…",
+        icon: SlidersHorizontal,
+        run: () => openPanel("properties"),
+        isEnabled: () => !!canvas && !!selectedAdjustment(canvas),
+        keywords: "properties adjustment layer content options",
       },
       {
         id: "layer.group",

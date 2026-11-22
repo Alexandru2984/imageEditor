@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { EffectName } from "@/raster/layerStyleData";
 import type { LayerItem } from "./layerRows";
+import { ADJUSTMENT_ICONS } from "./adjustmentIcons";
 
 const TYPE_ICONS: Record<string, typeof Square> = {
   rect: Square,
@@ -63,6 +64,8 @@ export interface LayerRowHandlers {
   onToggleEffects(layer: LayerItem, event: MouseEvent): void;
   onToggleEffect(layer: LayerItem, effect: EffectName): void;
   onEditEffects(layer: LayerItem): void;
+  /** Double-click on an adjustment layer's icon: its settings. */
+  onEditAdjustment(layer: LayerItem): void;
 }
 
 interface LayerRowProps {
@@ -157,6 +160,24 @@ export function LayerRow({
             <div className="flex h-7 w-7 shrink-0 items-center justify-center text-muted-foreground">
               {layer.collapsed ? <Folder className="h-4 w-4" /> : <FolderOpen className="h-4 w-4" />}
             </div>
+          ) : layer.adjustment ? (
+            <button
+              type="button"
+              data-thumbnail=""
+              aria-label={`Settings of ${layer.name}`}
+              title="Double-click for the adjustment's settings"
+              onClick={(event) => event.detail === 0 && handlers.onEditAdjustment(layer)}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                handlers.onEditAdjustment(layer);
+              }}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border bg-muted text-muted-foreground"
+            >
+              {(() => {
+                const Icon = ADJUSTMENT_ICONS[layer.adjustment];
+                return <Icon className="h-4 w-4" />;
+              })()}
+            </button>
           ) : (
             <div
               data-thumbnail=""

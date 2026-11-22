@@ -419,3 +419,18 @@ test("a finger drags a layer by its handle, and the layer options fit the screen
   await expect.poll(names).toEqual(["Background", "Layer 2", undefined, "Layer 1", "Group 1"]);
   await expectNoSidewaysScroll(page);
 });
+
+test("an adjustment layer is added from the Layers panel and set in Properties on the phone", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Toggle properties" }).tap();
+  await page.getByRole("tab", { name: "Layers" }).tap();
+  await page.getByRole("button", { name: "Add an adjustment layer" }).tap();
+  const menu = page.getByRole("menu", { name: "Add an adjustment layer" });
+  await expectOnScreen(page, menu);
+  await menu.getByRole("menuitem", { name: /^Levels/ }).tap();
+  const settings = page.getByRole("region", { name: "Adjustment settings" });
+  await expect(settings).toBeVisible();
+  await expect(settings).toContainText("Levels");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.type)).toEqual(["Image", "AdjustmentLayer"]);
+  await expectNoSidewaysScroll(page);
+});

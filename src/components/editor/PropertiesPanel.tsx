@@ -20,6 +20,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { applyColor } from "@/utils/shapes";
 import { isSticker } from "@/utils/stickers";
 import { TextControls, type ApplyMode, type TextObject } from "./TextControls";
+import { AdjustmentLayerProperties } from "./adjustments/AdjustmentLayerProperties";
+import type { AdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { onSelectedGroupChange, selectedAdjustment } from "@/layers/layerGroups";
 import {
   AlignStartVertical,
   AlignCenterVertical,
@@ -33,6 +36,8 @@ interface PropertiesPanelProps {
   activeColor: string;
   onColorChange: (color: string) => void;
   fabricCanvas: FabricCanvas | null;
+  /** The colour wells, for an adjustment layer's reset. */
+  colors?: { foreground: string; background: string };
 }
 
 const COLOR_SWATCHES = [
@@ -113,7 +118,24 @@ export const PropertiesPanel = ({
   activeColor,
   onColorChange,
   fabricCanvas,
+  colors,
 }: PropertiesPanelProps) => {
+  // An adjustment layer picked in the Layers panel shows its settings here.
+  const [adjustmentLayer, setAdjustmentLayer] = useState<AdjustmentLayer | null>(null);
+  useEffect(() => {
+    if (!fabricCanvas) return;
+    const read = () => setAdjustmentLayer(selectedAdjustment(fabricCanvas));
+    read();
+    const events = ["selection:created", "selection:updated", "selection:cleared", "object:removed", "object:added"] as const;
+    events.forEach((event) => fabricCanvas.on(event, read));
+    onCanvasEvent(fabricCanvas, HISTORY_RESTORED, read);
+    const stopPicks = onSelectedGroupChange(fabricCanvas, read);
+    return () => {
+      events.forEach((event) => fabricCanvas.off(event, read));
+      offCanvasEvent(fabricCanvas, HISTORY_RESTORED, read);
+      stopPicks();
+    };
+  }, [fabricCanvas]);
   const [selectedProps, setSelectedProps] =
     useState<SelectedObjectProps | null>(null);
   const [objectOpacity, setObjectOpacity] = useState(100);
@@ -384,6 +406,16 @@ export const PropertiesPanel = ({
     !isSticker({ fontFamily: selectedProps?.fontFamily });
   // Pixels have no fill or stroke of their own.
   const isImageObject = selectedProps?.type === "image";
+
+  if (fabricCanvas && adjustmentLayer) {
+    return (
+      <AdjustmentLayerProperties
+        canvas={fabricCanvas}
+        layer={adjustmentLayer}
+        colors={colors ?? { foreground: activeColor, background: "#ffffff" }}
+      />
+    );
+  }
 
   return (
     <ScrollArea className="h-full w-full">

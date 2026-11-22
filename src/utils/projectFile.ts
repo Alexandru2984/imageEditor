@@ -7,6 +7,7 @@ import {
 import { downloadBlob } from "./download";
 import { throwIfAborted } from "./abort";
 import { isValidLayerStyle } from "@/raster/layerStyleData";
+import { readAdjustment } from "@/adjustments/adjustmentData";
 import { isGuideList } from "./guideData";
 
 const FILE_VERSION = 1;
@@ -56,6 +57,8 @@ const ALLOWED_SERIALIZED_TYPES = new Set([
   // Layer groups: the header above a group's layers and the marker below them.
   "layergroup",
   "layergroupend",
+  // Adjustment layers: their settings are checked one by one (adjustmentData.ts).
+  "adjustmentlayer",
 ]);
 
 type FilterParameterRule = (value: unknown) => boolean;
@@ -429,6 +432,10 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
       }
       if (key === "layerStyle") {
         if (!isValidLayerStyle(child)) throw new Error("Project contains an invalid layer style");
+        continue;
+      }
+      if (key === "adjustment") {
+        if (!readAdjustment(child)) throw new Error("Project contains an invalid adjustment layer");
         continue;
       }
       if (key === "src") {

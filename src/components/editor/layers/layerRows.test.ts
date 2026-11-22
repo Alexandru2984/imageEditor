@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Rect, type FabricObject } from "fabric";
 import { LayerGroup, LayerGroupEnd } from "@/layers/groupMarkers";
 import { layerRows, rowRange } from "./layerRows";
+import { AdjustmentLayer } from "@/adjustments/adjustmentLayer";
 
 /** Text without measuring it (no document here): what matters is its type. */
 class FakeText extends Rect {
@@ -57,6 +58,15 @@ describe("layerRows", () => {
     expect(layerRows(objects, { kind: "all", query: "rect" }).map((row) => row.id)).toEqual(["group", "clipped", "rect"]);
     expect(layerRows(objects, { kind: "group", query: "" }).map((row) => row.id)).toEqual(["group"]);
     expect(layerRows(objects, { kind: "pixel", query: "" })).toEqual([]);
+  });
+
+  it("shows adjustment layers with what they do, and filters them as a kind", () => {
+    // Settings it cannot read (no curves here) fall back to Invert.
+    const objects = [...stack(), named(new AdjustmentLayer({ adjustment: { kind: "curves", settings: {} } }), "adj", "Curves 1")];
+    const rows = layerRows(objects);
+    expect(rows[0]).toMatchObject({ id: "adj", name: "Curves 1", adjustment: "invert", kind: "layer" });
+    expect(rows.slice(1).every((row) => row.adjustment === null)).toBe(true);
+    expect(layerRows(objects, { kind: "adjustment", query: "" }).map((row) => row.id)).toEqual(["adj"]);
   });
 
   it("knows which layers a hidden group hides", () => {

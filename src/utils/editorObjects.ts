@@ -1,6 +1,7 @@
 import { ActiveSelection, FabricImage } from "fabric";
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
 import { entriesOf, isGroupMarker } from "@/layers/groupMarkers";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
 import { repaired } from "@/layers/layerTree";
 
 export type EditorFabricObject = FabricObject & {
@@ -167,6 +168,12 @@ function applyLockFlags(object: FabricObject): void {
   const all = layer.__locked === true;
   const fixed = all || layer.__lockPosition === true;
   layer.erasable = !(all || layer.__lockPixels === true);
+  if (isAdjustmentLayer(object)) {
+    // Picked in the Layers panel only, with nothing on the canvas to erase or drag.
+    layer.erasable = false;
+    object.set({ lockMovementX: fixed, lockMovementY: fixed, selectable: false, evented: false, hasControls: false });
+    return;
+  }
   object.set({
     lockMovementX: fixed,
     lockMovementY: fixed,
@@ -216,6 +223,10 @@ export function normalizeEditorObjects(
     if (isEditorChrome(object)) continue;
     ensureLayerId(object, usedIds);
     if (isGroupMarker(object)) continue;
+    if (isAdjustmentLayer(object)) {
+      applyLockFlags(object);
+      continue;
+    }
     if (object === background) {
       markBackgroundObject(background);
     } else if (isObjectLocked(object)) {

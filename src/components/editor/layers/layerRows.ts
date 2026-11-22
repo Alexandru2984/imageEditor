@@ -5,6 +5,8 @@ import type { TreeNode } from "@/layers/layerTree";
 import { hasLayerMask, layerMaskThumbnail } from "@/raster/layerMask";
 import { EFFECTS, type EffectName, type LayerStyle } from "@/raster/layerStyleData";
 import { isBackgroundObject, isObjectLocked, type EditorFabricObject } from "@/utils/editorObjects";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import type { AdjustmentLayerKind } from "@/adjustments/adjustmentData";
 
 export type EditorObject = EditorFabricObject;
 
@@ -38,11 +40,13 @@ export interface LayerItem {
   mask: { thumbnail: string; enabled: boolean } | null;
   /** The layer style's effects, on or off. */
   effects: EffectItem[];
+  /** What an adjustment layer does; null for other layers. */
+  adjustment: AdjustmentLayerKind | null;
   fabricObject: EditorObject;
 }
 
 /** Photoshop's Kind filter. */
-export type KindFilter = "all" | "pixel" | "text" | "shape" | "group";
+export type KindFilter = "all" | "pixel" | "adjustment" | "text" | "shape" | "group";
 
 export interface RowFilter {
   kind: KindFilter;
@@ -61,6 +65,7 @@ const TEXT_TYPES = new Set(["itext", "text", "textbox", "fabrictext"]);
 
 function kindOf(object: FabricObject): KindFilter {
   if (isGroupHeader(object)) return "group";
+  if (isAdjustmentLayer(object)) return "adjustment";
   const type = typeOf(object);
   if (type === "image") return "pixel";
   if (TEXT_TYPES.has(type)) return "text";
@@ -80,6 +85,7 @@ const DEFAULT_NAMES: Record<string, string> = {
   image: "Image",
   triangle: "Triangle",
   polygon: "Polygon",
+  adjustmentlayer: "Adjustment",
 };
 
 const defaultName = (object: FabricObject, index: number) => `${DEFAULT_NAMES[typeOf(object)] ?? "Object"} ${index}`;
@@ -148,6 +154,7 @@ export function layerRows(objects: readonly FabricObject[], filter: RowFilter = 
           thumbnail: "",
           mask: null,
           effects: [],
+          adjustment: null,
           fabricObject: object,
         });
         shown = true;
@@ -172,6 +179,7 @@ export function layerRows(objects: readonly FabricObject[], filter: RowFilter = 
         thumbnail: "",
         mask: hasLayerMask(object) ? { thumbnail: layerMaskThumbnail(object), enabled: object.layerMask.enabled } : null,
         effects: effectsOf(object),
+        adjustment: isAdjustmentLayer(object) ? object.adjustment.kind : null,
         fabricObject: object,
       });
       shown = true;

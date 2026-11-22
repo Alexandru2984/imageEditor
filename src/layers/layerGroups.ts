@@ -1,6 +1,7 @@
 import { ActiveSelection, type Canvas as FabricCanvas, type FabricObject } from "fabric";
 import { hiddenByGroups, treeOf } from "@/compositing/compositor";
 import { ensureLayerId, isEditorChrome, isLayerObject, isObjectLocked, type EditorFabricObject } from "@/utils/editorObjects";
+import { isAdjustmentLayer, type AdjustmentLayer } from "@/adjustments/adjustmentLayer";
 import { entriesOf, isGroupHeader, isGroupMarker, LayerGroup, LayerGroupEnd } from "./groupMarkers";
 import {
   arrangeNodes,
@@ -82,10 +83,32 @@ function groupSelectionState(canvas: FabricCanvas) {
  * commands such as Ungroup.
  */
 export function pickedGroups(canvas: FabricCanvas): LayerGroup[] {
+  return picked(canvas, isGroupHeader);
+}
+
+/**
+ * The adjustment layers picked in the Layers panel: they take no room on the
+ * canvas, so they are selected here rather than there.
+ */
+export function pickedAdjustments(canvas: FabricCanvas): AdjustmentLayer[] {
+  return picked(canvas, isAdjustmentLayer);
+}
+
+function picked<T extends FabricObject>(canvas: FabricCanvas, test: (object: unknown) => object is T): T[] {
   const { ids } = groupSelectionState(canvas);
   if (ids.length === 0) return [];
-  const headers = new Map(canvas.getObjects().filter(isGroupHeader).map((header) => [idOf(header), header]));
-  return ids.map((id) => headers.get(id)).filter((header): header is LayerGroup => !!header);
+  const found = new Map(canvas.getObjects().filter(test).map((object) => [idOf(object), object]));
+  return ids.map((id) => found.get(id)).filter((object): object is T => !!object);
+}
+
+/** Whether groups or adjustment layers are picked in the panel. */
+export const hasPicks = (canvas: FabricCanvas): boolean => pickedGroups(canvas).length + pickedAdjustments(canvas).length > 0;
+
+/** The one adjustment layer picked, when it is all that is selected. */
+export function selectedAdjustment(canvas: FabricCanvas): AdjustmentLayer | null {
+  const adjustments = pickedAdjustments(canvas);
+  if (adjustments.length !== 1 || pickedGroups(canvas).length > 0 || canvas.getActiveObjects().length > 0) return null;
+  return adjustments[0]!;
 }
 
 /** Layers inside any of the given groups. */
@@ -101,18 +124,19 @@ function membersOf(canvas: FabricCanvas, groups: readonly LayerGroup[]): Set<Fab
  */
 export function selectedGroup(canvas: FabricCanvas): LayerGroup | null {
   const groups = pickedGroups(canvas);
-  if (groups.length !== 1) return null;
+  if (groups.length !== 1 || pickedAdjustments(canvas).length > 0) return null;
   const inside = membersOf(canvas, groups);
   return canvas.getActiveObjects().every((object) => inside.has(object)) ? groups[0]! : null;
 }
 
 export function setSelectedGroup(canvas: FabricCanvas, group: LayerGroup | null): void {
-  setPickedGroups(canvas, group ? [group] : []);
+  setPicks(canvas, group ? [group] : []);
 }
 
-function setPickedGroups(canvas: FabricCanvas, groups: readonly LayerGroup[]): void {
+/** Groups and adjustment layers, picked in the panel. */
+function setPicks(canvas: FabricCanvas, objects: readonly FabricObject[]): void {
   const state = groupSelectionState(canvas);
-  const ids = groups.map(idOf);
+  const ids = objects.map(idOf);
   if (state.ids.length === ids.length && state.ids.every((id, index) => id === ids[index])) return;
   state.ids = ids;
   for (const listener of state.listeners) listener();
@@ -150,6 +174,7 @@ export function selectGroup(canvas: FabricCanvas, group: LayerGroup): void {
 /**
  * Pick layers and groups in the Layers panel (by id): the layers, and the
  * groups' shown layers, are selected on the canvas so they move together.
+ * Adjustment layers, which have no place on the canvas, are only picked.
  */
 export function selectLayers(canvas: FabricCanvas, ids: readonly string[]): void {
   const { objects } = stackOf(canvas);
@@ -157,9 +182,10 @@ export function selectLayers(canvas: FabricCanvas, ids: readonly string[]): void
   const groups = objects.filter((object): object is LayerGroup => isGroupHeader(object) && chosen.has(idOf(object)));
   const hidden = hiddenByGroups(canvas.getObjects());
   const inside = membersOf(canvas, groups);
+  const adjustments = objects.filter((object) => isAdjustmentLayer(object) && chosen.has(idOf(object)) && !inside.has(object));
   const targets = new Set<FabricObject>();
   for (const object of objects) {
-    if (!isLayerObject(object)) continue;
+    if (!isLayerObject(object) || isAdjustmentLayer(object)) continue;
     if (chosen.has(idOf(object)) && !inside.has(object)) targets.add(object);
     else if (inside.has(object) && object.visible && !hidden.has(object)) targets.add(object);
   }
@@ -168,27 +194,23 @@ export function selectLayers(canvas: FabricCanvas, ids: readonly string[]): void
   canvas.discardActiveObject();
   if (list.length === 1) canvas.setActiveObject(list[0]!);
   else if (list.length > 1) canvas.setActiveObject(new ActiveSelection(list, { canvas }));
-  setPickedGroups(canvas, groups);
+  setPicks(canvas, [...groups, ...adjustments]);
   canvas.requestRenderAll();
 }
 
 /** The ids of what is selected: picked groups, and the layers selected outside them. */
 function selectedIds(canvas: FabricCanvas): string[] {
   const groups = pickedGroups(canvas);
-  const inside = membersOf(canvas, groups);
-  return [
-    ...groups.map(idOf),
-    ...canvas
-      .getActiveObjects()
-      .filter((object) => isLayerObject(object) && !inside.has(object))
-      .map(idOf),
-  ];
+  return [...groups.map(idOf), ...selectedLayerObjects(canvas).map(idOf)];
 }
 
-/** The selected layers themselves (not those of picked groups). */
+/** The selected layers themselves (not those of picked groups), adjustment layers included. */
 export function selectedLayerObjects(canvas: FabricCanvas): FabricObject[] {
   const inside = membersOf(canvas, pickedGroups(canvas));
-  return canvas.getActiveObjects().filter((object) => isLayerObject(object) && !inside.has(object));
+  return [
+    ...pickedAdjustments(canvas).filter((object) => !inside.has(object)),
+    ...canvas.getActiveObjects().filter((object) => isLayerObject(object) && !inside.has(object)),
+  ];
 }
 
 /** The group a layer (or group) is directly in, if any. */
@@ -283,9 +305,9 @@ export const canUngroup = (canvas: FabricCanvas): boolean => !!(selectedGroup(ca
 export const hasClippedSelection = (canvas: FabricCanvas): boolean =>
   selectedLayerObjects(canvas).some((object) => (object as StackObject).__clipped === true);
 
-/** Forget the picked group when the canvas selection changes some other way. */
+/** Forget the picked groups and adjustments when the canvas selection changes some other way. */
 export function watchGroupSelection(canvas: FabricCanvas): () => void {
-  const forget = () => setSelectedGroup(canvas, null);
+  const forget = () => setPicks(canvas, []);
   canvas.on("selection:created", forget);
   canvas.on("selection:updated", forget);
   canvas.on("selection:cleared", forget);
@@ -324,7 +346,7 @@ export function deleteSelectedLayers(canvas: FabricCanvas): number | Refusal {
     return "Unlock the layers first";
   }
   if (doomed.size === 0) return "Select the layers to delete";
-  setPickedGroups(canvas, []);
+  setPicks(canvas, []);
   canvas.discardActiveObject();
   canvas.remove(...objects.filter((object) => doomed.has(object)));
   canvas.requestRenderAll();

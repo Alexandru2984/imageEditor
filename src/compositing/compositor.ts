@@ -1,6 +1,11 @@
 import { Canvas, StaticCanvas, type FabricObject, type Point } from "fabric";
 import { buildTree, clippingRuns, type GroupNode, type LayerTree, type TreeNode } from "@/layers/layerTree";
 import { entriesOf, isClipped, isGroupHeader, isGroupMarker, type LayerGroup } from "@/layers/groupMarkers";
+import { isAdjustmentLayer, type AdjustmentLayer } from "@/adjustments/adjustmentLayer";
+import { adjustmentJob, type AdjustmentData } from "@/adjustments/adjustmentData";
+import type { PixelJob } from "@/raster/pixelJobs";
+import { adjustOnGpu, type PixelRect } from "./adjustGpu";
+import { adjustPixels } from "./blendMath";
 
 /**
  * Draws the layer stack as Photoshop composes it. Ordinary layers draw
@@ -12,7 +17,12 @@ import { entriesOf, isClipped, isGroupHeader, isGroupMarker, type LayerGroup } f
  *   group's opacity and blend mode;
  * - a clipping mask draws its base into a buffer, the clipped layers only
  *   where the base has pixels, then the whole onto what is below with the
- *   base's opacity and blend mode.
+ *   base's opacity and blend mode;
+ * - an adjustment layer changes the pixels drawn so far where it is drawn
+ *   (the whole stack below it, the group's when the group is isolated, the
+ *   base's when clipped), within the document. With any in the stack, the
+ *   stack is drawn into a buffer first, so the transparency checkerboard
+ *   under the document is never adjusted.
  *
  * Exports go through the same path (toCanvasElement → renderCanvas →
  * _renderObjects), so files look as the screen does.
@@ -94,13 +104,82 @@ const blendOf = (object: FabricObject): GlobalCompositeOperation => (object.glob
 /** The blend a group composes with: Pass Through acts as Normal once isolated. */
 const groupBlend = (header: LayerGroup): GlobalCompositeOperation => (header.passThrough === false ? blendOf(header) : "source-over");
 
+/** Each adjustment's pixel job, worked out once per change of its settings. */
+const jobs = new WeakMap<AdjustmentData, PixelJob>();
+const jobOf = (adjustment: AdjustmentData): PixelJob => {
+  let job = jobs.get(adjustment);
+  if (!job) {
+    job = adjustmentJob(adjustment);
+    jobs.set(adjustment, job);
+  }
+  return job;
+};
+
+/** How strongly an adjustment applies: its opacity, and Fill (the same thing for it, as in Photoshop). */
+const strengthOf = (layer: AdjustmentLayer): number => {
+  const fill = (layer as AdjustmentLayer & { __fill?: number }).__fill;
+  return (layer.opacity ?? 1) * (typeof fill === "number" && Number.isFinite(fill) ? Math.min(1, Math.max(0, fill)) : 1);
+};
+
+type Photo = FabricObject & { __isBackground?: boolean };
+
+/**
+ * Apply an adjustment layer to what `ctx` holds within `area` (scene
+ * coordinates; the whole canvas without one): on the GPU when it can, on the
+ * CPU otherwise.
+ */
+function applyAdjustment(ctx: CanvasRenderingContext2D, layer: AdjustmentLayer, area: { left: number; top: number; width: number; height: number } | null): void {
+  const strength = strengthOf(layer);
+  if (!layer.visible || strength <= 0) return;
+  const { width, height } = ctx.canvas;
+  let rect: PixelRect = { x: 0, y: 0, width, height };
+  if (area) {
+    const matrix = ctx.getTransform();
+    const xs = [area.left, area.left + area.width].flatMap((x) => [area.top, area.top + area.height].map((y) => matrix.a * x + matrix.c * y + matrix.e));
+    const ys = [area.left, area.left + area.width].flatMap((x) => [area.top, area.top + area.height].map((y) => matrix.b * x + matrix.d * y + matrix.f));
+    const left = Math.max(0, Math.floor(Math.min(...xs)));
+    const top = Math.max(0, Math.floor(Math.min(...ys)));
+    const right = Math.min(width, Math.ceil(Math.max(...xs)));
+    const bottom = Math.min(height, Math.ceil(Math.max(...ys)));
+    rect = { x: left, y: top, width: right - left, height: bottom - top };
+  }
+  if (!(rect.width > 0 && rect.height > 0)) return;
+  const job = jobOf(layer.adjustment);
+  const blend = blendOf(layer);
+  const adjusted = adjustOnGpu(ctx.canvas as HTMLCanvasElement, rect, job, strength, blend);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (adjusted) {
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.drawImage(adjusted, 0, 0, rect.width, rect.height, rect.x, rect.y, rect.width, rect.height);
+  } else {
+    const image = ctx.getImageData(rect.x, rect.y, rect.width, rect.height);
+    adjustPixels(image.data, rect.width, rect.height, job, strength, blend);
+    ctx.putImageData(image, rect.x, rect.y);
+  }
+  ctx.restore();
+}
+
 class Composition {
   private readonly drawn = new Map<TreeNode, boolean>();
+  /** Where adjustments apply: the document, in scene coordinates. */
+  private readonly area: { left: number; top: number; width: number; height: number } | null;
 
   constructor(
     private readonly all: readonly FabricObject[],
     private readonly included: ReadonlySet<FabricObject>
-  ) {}
+  ) {
+    const photo = all.find((object) => (object as Photo).__isBackground === true);
+    this.area = photo && all.some(isAdjustmentLayer) ? photo.getBoundingRect() : null;
+  }
+
+  /** Draw a layer, or apply it when it is an adjustment. */
+  private draw(ctx: CanvasRenderingContext2D, object: FabricObject): void {
+    if (isAdjustmentLayer(object)) applyAdjustment(ctx, object, this.area);
+    else object.render(ctx);
+  }
 
   /** Whether any layer the render asked for is in this node. */
   private draws(node: TreeNode): boolean {
@@ -115,14 +194,18 @@ class Composition {
   list(ctx: CanvasRenderingContext2D, nodes: readonly TreeNode[]): void {
     for (const { base, clipped } of clippingRuns(nodes)) {
       if (clipped.length === 0) this.node(ctx, base);
-      else this.clipping(ctx, base, clipped);
+      else if (isAdjustmentLayer(this.all[base.index])) {
+        // Nothing to clip to: an adjustment has no pixels of its own.
+        this.node(ctx, base);
+        for (const node of clipped) this.node(ctx, node);
+      } else this.clipping(ctx, base, clipped);
     }
   }
 
   private node(ctx: CanvasRenderingContext2D, node: TreeNode): void {
     if (node.kind === "layer") {
       const object = this.all[node.index]!;
-      if (this.included.has(object)) object.render(ctx);
+      if (this.included.has(object)) this.draw(ctx, object);
       return;
     }
     const header = this.all[node.index] as LayerGroup;
@@ -151,6 +234,11 @@ class Composition {
       for (const node of clipped) {
         const object = this.all[node.index]!;
         if (!object.visible || !this.included.has(object)) continue;
+        if (isAdjustmentLayer(object)) {
+          // Only the base (and what is clipped below), keeping its shape.
+          this.draw(buffer, object);
+          continue;
+        }
         const blend = blendOf(object);
         if (blend === "source-over") {
           // Normal: only where the base already has pixels, keeping its shape.
@@ -191,7 +279,7 @@ export function withoutCompositing<T>(render: () => T): T {
 }
 
 const needsCompositing = (all: readonly FabricObject[], objects: readonly FabricObject[]) =>
-  rawDepth === 0 && (all.some(isGroupMarker) || objects.some(isClipped));
+  rawDepth === 0 && (all.some(isGroupMarker) || objects.some(isClipped) || all.some(isAdjustmentLayer));
 
 /** The stack's structure, for the objects of a canvas. */
 export const treeOf = (objects: readonly FabricObject[]): LayerTree => buildTree(entriesOf(objects));
@@ -235,7 +323,17 @@ export function installCompositor(): void {
     // (an export without the helpers, say) still sees the groups around them.
     const included = new Set(objects);
     const composition = new Composition(all, included);
-    composition.list(ctx, treeOf(all).roots);
+    if (objects.some(isAdjustmentLayer)) {
+      // Adjustments change only the document's own pixels, not what is
+      // already on the context (the checkerboard under the document).
+      const stack = acquire(ctx);
+      try {
+        composition.list(stack, treeOf(all).roots);
+        drawBuffer(ctx, stack, 1, "source-over");
+      } finally {
+        release();
+      }
+    } else composition.list(ctx, treeOf(all).roots);
     // Anything drawn that is not in the stack (none today) still shows.
     for (const object of objects) if (!all.includes(object)) object.render(ctx);
     trimBuffers();

@@ -53,8 +53,9 @@ const MenubarSubTrigger = React.forwardRef<
 ));
 MenubarSubTrigger.displayName = MenubarPrimitive.SubTrigger.displayName;
 
+// Long menus scroll within the window rather than running off it.
 const contentClass =
-  "z-50 min-w-[14rem] overflow-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95";
+  "z-50 max-h-[var(--radix-menubar-content-available-height)] min-w-[14rem] overflow-y-auto overflow-x-hidden rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95";
 
 const MenubarSubContent = React.forwardRef<
   React.ElementRef<typeof MenubarPrimitive.SubContent>,

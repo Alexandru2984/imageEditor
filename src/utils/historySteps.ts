@@ -1,3 +1,4 @@
+import { ADJUSTMENT_TITLES, isAdjustmentLayerKind } from "@/adjustments/adjustmentData";
 import type { Canvas as FabricCanvas } from "fabric";
 import type { Tool } from "@/types/editor";
 import type { CanvasSnapshot } from "./canvasSnapshot";
@@ -94,9 +95,16 @@ const same = (a: unknown, b: unknown): boolean =>
 const TEXT_TYPES = new Set(["textbox", "i-text", "itext", "text"]);
 const SHAPE_TYPES = new Set(["rect", "ellipse", "circle", "triangle", "polygon", "path", "line", "group", "polyline"]);
 
+/** "Levels" for an adjustment layer's saved settings, when they name one. */
+function adjustmentTitle(object: SavedObject): string | null {
+  const kind = (object.adjustment as { kind?: unknown } | undefined)?.kind;
+  return isAdjustmentLayerKind(kind) ? ADJUSTMENT_TITLES[kind] : null;
+}
+
 function addedName(object: SavedObject): string {
   const type = String(object.type ?? "").toLowerCase();
   if (type === "layergroup" || type === "layergroupend") return "New group";
+  if (type === "adjustmentlayer") return `New ${adjustmentTitle(object) ?? "adjustment"} layer`;
   if (TEXT_TYPES.has(type)) return "Text";
   if (SHAPE_TYPES.has(type)) return "Shape";
   return "New layer";
@@ -158,15 +166,18 @@ export function describeChange(before: CanvasSnapshot | undefined, after: Canvas
 
   const changed = new Set<string>();
   let photoPixels = false;
+  let adjusted: string | null = null;
   next.forEach((object, index) => {
     const old = previous[index]!;
     for (const key of new Set([...Object.keys(old), ...Object.keys(object)])) {
       if (!same(valueOf(old, key, before), valueOf(object, key, after))) {
         changed.add(key);
         if (key === "src" && object.__isBackground) photoPixels = true;
+        if (key === "adjustment") adjusted ??= adjustmentTitle(object);
       }
     }
   });
+  if (changed.has("adjustment")) return { name: `Modify ${adjusted ?? "adjustment"} layer`, kind: "other" };
   for (const [keys, name, kind] of PROPERTY_STEPS) {
     if (keys.some((key) => changed.has(key))) return { name: name === "Edit pixels" && photoPixels ? "Edit image" : name, kind };
   }

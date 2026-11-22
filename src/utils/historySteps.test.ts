@@ -27,6 +27,15 @@ describe("describeChange", () => {
     });
   });
 
+  it("names adjustment layers by what they do", () => {
+    const levels = { type: "AdjustmentLayer", __layerId: "j", adjustment: { kind: "levels", settings: {} } };
+    expect(describeChange(base, snapshot([photo, layer, levels], base.srcs))).toEqual({ name: "New Levels layer", kind: "added" });
+    const changed = { ...levels, adjustment: { kind: "levels", settings: { rgb: 1 } } };
+    expect(describeChange(snapshot([photo, layer, levels], base.srcs), snapshot([photo, layer, changed], base.srcs)).name).toBe(
+      "Modify Levels layer"
+    );
+  });
+
   it("tells pixel edits from moves and other changes, by the source behind each placeholder", () => {
     // Same placeholder, another image behind it.
     expect(describeChange(base, snapshot([photo, layer], ["data:photo", "data:painted"]))).toEqual({ name: "Edit pixels", kind: "pixels" });

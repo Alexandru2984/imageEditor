@@ -1,0 +1,306 @@
+import { test, expect, type Page } from "@playwright/test";
+import { autosavedLayerPixels, autosavedObjects, chooseMenu, chooseSubmenu, settle } from "./helpers";
+import {
+  applyLuts,
+  blackWhite,
+  brightnessContrastLut,
+  colorBalance,
+  curvesLuts,
+  defaultColorBalance,
+  defaultCurves,
+  defaultLevels,
+  exposureLut,
+  gradientMap,
+  gradientMapLuts,
+  hueSaturation,
+  invertLut,
+  levelsLuts,
+  posterizeLut,
+  threshold,
+  uniformLuts,
+} from "../../src/raster/adjustments";
+
+test.beforeEach(async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name === "mobile", "Desktop adjustment tests");
+  await page.goto("/");
+});
+
+/** Six stripes across the photo, each its own colour. */
+const STRIPES: [number, number, number][] = [
+  [200, 100, 50],
+  [50, 150, 200],
+  [224, 192, 64],
+  [30, 30, 30],
+  [240, 240, 240],
+  [128, 128, 128],
+];
+const WIDTH = 240;
+const HEIGHT = 60;
+
+async function stripedPng(page: Page, columns = STRIPES.length): Promise<string> {
+  return page.evaluate(
+    ({ stripes, width, height, columns }) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = (width / stripes.length) * columns;
+      canvas.height = height;
+      const context = canvas.getContext("2d")!;
+      stripes.slice(0, columns).forEach(([r, g, b], index) => {
+        context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        context.fillRect((index * width) / stripes.length, 0, width / stripes.length, height);
+      });
+      return canvas.toDataURL("image/png");
+    },
+    { stripes: STRIPES, width: WIDTH, height: HEIGHT, columns }
+  );
+}
+
+const image = (src: string, width: number, extra: Record<string, unknown> = {}) => ({
+  type: "Image",
+  version: "7.0.0",
+  originX: "left",
+  originY: "top",
+  left: 0,
+  top: 0,
+  width,
+  height: HEIGHT,
+  scaleX: 1,
+  scaleY: 1,
+  src,
+  ...extra,
+});
+
+/** Open a project of the striped photo with more objects above it. */
+async function openProject(page: Page, objects: (srcs: string[]) => Record<string, unknown>[]) {
+  const srcs = [await stripedPng(page), await stripedPng(page, 3)];
+  const photo = image("__snapshot_src_0", WIDTH, { __isBackground: true, name: "Background", selectable: false, evented: false, __layerId: "photo" });
+  const snapshot = { json: JSON.stringify({ version: "7.0.0", objects: [photo, ...objects(srcs)] }), srcs };
+  await page.getByTestId("project-input").setInputFiles({
+    name: "adjusted.imgedit.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify({ version: 1, snapshot })),
+  });
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await expect.poll(async () => (await autosavedObjects(page)).length).toBeGreaterThan(0);
+  await settle(page);
+}
+
+const adjustment = (id: string, value: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+  type: "AdjustmentLayer",
+  version: "7.0.0",
+  __layerId: id,
+  name: id,
+  adjustment: value,
+  ...extra,
+});
+
+/** What the screen shows at the middle of each stripe. */
+async function stripes(page: Page): Promise<number[][]> {
+  return page.evaluate((count) => {
+    const lower = document.querySelector("canvas.lower-canvas") as HTMLCanvasElement;
+    const { data, width, height } = lower.getContext("2d")!.getImageData(0, 0, lower.width, lower.height);
+    const row = Math.floor(height / 2);
+    const opaque = (x: number) => data[(row * width + x) * 4 + 3]! > 0;
+    let left = 0;
+    while (left < width && !opaque(left)) left += 1;
+    let right = width - 1;
+    while (right > left && !opaque(right)) right -= 1;
+    const span = right - left + 1;
+    return Array.from({ length: count }, (_, index) => {
+      const x = Math.round(left + ((index + 0.5) * span) / count);
+      return [...data.slice((row * width + x) * 4, (row * width + x) * 4 + 3)];
+    });
+  }, STRIPES.length);
+}
+
+/** Each stripe's colour through a pixel function from src/raster/adjustments.ts. */
+function expected(apply: (source: Uint8ClampedArray, target: Uint8ClampedArray) => void): number[][] {
+  return STRIPES.map((colour) => {
+    const source = new Uint8ClampedArray([...colour, 255]);
+    const target = new Uint8ClampedArray(4);
+    apply(source, target);
+    return [...target.slice(0, 3)];
+  });
+}
+
+const near = (actual: number[][], wanted: number[][], tolerance = 2) => {
+  for (let index = 0; index < wanted.length; index += 1) {
+    for (let channel = 0; channel < 3; channel += 1) {
+      expect(Math.abs(actual[index]![channel]! - wanted[index]![channel]!), `stripe ${index} channel ${channel}: ${actual[index]} vs ${wanted[index]}`).toBeLessThanOrEqual(
+        tolerance
+      );
+    }
+  }
+};
+
+const original = STRIPES.map((colour) => [...colour]);
+
+const levels = defaultLevels();
+levels.rgb = { inBlack: 20, inWhite: 220, gamma: 1.4, outBlack: 10, outWhite: 245 };
+levels.blue = { inBlack: 0, inWhite: 200, gamma: 0.8, outBlack: 0, outWhite: 255 };
+const curves = defaultCurves();
+curves.rgb = [
+  [0, 0],
+  [64, 40],
+  [190, 220],
+  [255, 255],
+];
+curves.red = [
+  [0, 30],
+  [255, 230],
+];
+const balance = { ...defaultColorBalance(), shadows: [20, -10, 5] as [number, number, number], midtones: [-30, 40, 10] as [number, number, number] };
+
+/** Each kind with settings, and the same change made by src/raster/adjustments.ts. */
+const CASES: [string, Record<string, unknown>, (source: Uint8ClampedArray, target: Uint8ClampedArray) => void][] = [
+  ["Invert", { kind: "invert", settings: {} }, (s, t) => applyLuts(s, t, uniformLuts(invertLut()))],
+  ["Levels", { kind: "levels", settings: levels }, (s, t) => applyLuts(s, t, levelsLuts(levels))],
+  ["Curves", { kind: "curves", settings: curves }, (s, t) => applyLuts(s, t, curvesLuts(curves))],
+  [
+    "Brightness/Contrast",
+    { kind: "brightnessContrast", settings: { brightness: 40, contrast: 30 } },
+    (s, t) => applyLuts(s, t, uniformLuts(brightnessContrastLut({ brightness: 40, contrast: 30 }))),
+  ],
+  [
+    "Exposure",
+    { kind: "exposure", settings: { exposure: 0.7, offset: 0.02, gamma: 1.2 } },
+    (s, t) => applyLuts(s, t, uniformLuts(exposureLut({ exposure: 0.7, offset: 0.02, gamma: 1.2 }))),
+  ],
+  ["Posterize", { kind: "posterize", settings: { levels: 3 } }, (s, t) => applyLuts(s, t, uniformLuts(posterizeLut(3)))],
+  ["Threshold", { kind: "threshold", settings: { level: 120 } }, (s, t) => threshold(s, t, 120)],
+  [
+    "Gradient Map",
+    { kind: "gradientMap", settings: { from: "#200040", to: "#ffd080", reverse: false } },
+    (s, t) => gradientMap(s, t, gradientMapLuts({ from: "#200040", to: "#ffd080", reverse: false })),
+  ],
+  [
+    "Black & White",
+    { kind: "blackWhite", settings: { reds: 70, yellows: 20, greens: -40, cyans: 110, blues: 30, magentas: 80 } },
+    (s, t) => blackWhite(s, t, { reds: 70, yellows: 20, greens: -40, cyans: 110, blues: 30, magentas: 80 }),
+  ],
+  [
+    "Hue/Saturation",
+    { kind: "hueSaturation", settings: { hue: 50, saturation: -30, lightness: 15, colorize: false } },
+    (s, t) => hueSaturation(s, t, { hue: 50, saturation: -30, lightness: 15, colorize: false }),
+  ],
+  [
+    "Hue/Saturation, colorized",
+    { kind: "hueSaturation", settings: { hue: 200, saturation: 60, lightness: -20, colorize: true } },
+    (s, t) => hueSaturation(s, t, { hue: 200, saturation: 60, lightness: -20, colorize: true }),
+  ],
+  ["Color Balance", { kind: "colorBalance", settings: balance }, (s, t) => colorBalance(s, t, balance)],
+  [
+    "Color Balance, without preserving luminosity",
+    { kind: "colorBalance", settings: { ...balance, preserveLuminosity: false } },
+    (s, t) => colorBalance(s, t, { ...balance, preserveLuminosity: false }),
+  ],
+];
+
+for (const [name, value, apply] of CASES) {
+  test(`a ${name} adjustment layer shows the photo as Image › Adjustments would change it`, async ({ page }) => {
+    await openProject(page, () => [adjustment("adjust", value)]);
+    await expect.poll(() => stripes(page)).not.toEqual(original);
+    near(await stripes(page), expected(apply));
+  });
+}
+
+test("opacity, blend mode, clipping and isolated groups limit what an adjustment layer changes", async ({ page }) => {
+  const inverted = STRIPES.map((colour) => colour.map((value) => 255 - value));
+  // Half strength, multiplied: each colour times its inverse, half way there.
+  await openProject(page, () => [adjustment("adjust", { kind: "invert", settings: {} }, { opacity: 0.5, globalCompositeOperation: "multiply" })]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(
+    await stripes(page),
+    STRIPES.map((colour) => colour.map((value) => Math.round(value + ((value * (255 - value)) / 255 - value) * 0.5)))
+  );
+
+  // Clipped to a layer over the left half: only that half changes.
+  await page.goto("/");
+  await openProject(page, () => [
+    image("__snapshot_src_1", WIDTH / 2, { __layerId: "left", name: "Left" }),
+    adjustment("adjust", { kind: "invert", settings: {} }, { __clipped: true }),
+  ]);
+  await expect.poll(() => stripes(page)).not.toEqual(original);
+  near(await stripes(page), [...inverted.slice(0, 3), ...original.slice(3)]);
+
+  // In an isolated group with that layer: the same; in a Pass Through one, all of it.
+  for (const passThrough of [false, true]) {
+    await page.goto("/");
+    await openProject(page, () => [
+      { type: "LayerGroupEnd", version: "7.0.0", __layerId: "end" },
+      image("__snapshot_src_1", WIDTH / 2, { __layerId: "left", name: "Left" }),
+      adjustment("adjust", { kind: "invert", settings: {} }),
+      { type: "LayerGroup", version: "7.0.0", __layerId: "group", name: "Group 1", passThrough },
+    ]);
+    await expect.poll(() => stripes(page)).not.toEqual(original);
+    near(await stripes(page), passThrough ? inverted : [...inverted.slice(0, 3), ...original.slice(3)]);
+  }
+});
+
+test("an adjustment layer is made from the Layer menu, set in Properties, and kept apart from the pixels", async ({ page }) => {
+  await openProject(page, () => []);
+  const photoSrc = (await autosavedObjects(page))[0]!.src;
+  await chooseSubmenu(page, "Layer", "New adjustment layer", "Hue/Saturation…");
+  // Its settings open in the Properties panel.
+  const settings = page.getByRole("region", { name: "Adjustment settings" });
+  await expect(settings).toBeVisible();
+  await expect(settings).toContainText("Hue/Saturation");
+  await settings.getByRole("slider", { name: "Saturation" }).focus();
+  await page.keyboard.press("Home");
+  // No saturation: every stripe its HSL lightness.
+  const grey = expected((s, t) => hueSaturation(s, t, { hue: 0, saturation: -100, lightness: 0, colorize: false }));
+  await expect.poll(async () => near(await stripes(page), grey)).toBeUndefined();
+  await expect.poll(async () => (await autosavedObjects(page)).at(-1)?.adjustment).toMatchObject({ settings: { saturation: -100 } });
+  // The photo's pixels are as they were.
+  expect((await autosavedObjects(page))[0]!.src).toBe(photoSrc);
+
+  // In the Layers panel: a row with its icon, hidden with its eye, back with undo.
+  await page.getByRole("tab", { name: "Layers" }).click();
+  const row = page.getByRole("group", { name: "Hue/Saturation 1 layer" });
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await expect(row.getByRole("button", { name: "Settings of Hue/Saturation 1" })).toBeVisible();
+  await row.getByRole("button", { name: "Hide Hue/Saturation 1" }).click();
+  await expect.poll(() => stripes(page)).toEqual(original);
+  await expect.poll(async () => (await autosavedObjects(page)).at(-1)?.visible).toBe(false);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => near(await stripes(page), grey)).toBeUndefined();
+
+  // Double-clicking its icon opens its settings again.
+  await row.getByRole("button", { name: "Settings of Hue/Saturation 1" }).dblclick();
+  await expect(settings).toBeVisible();
+
+  // It stays after a reload (once saved shown again).
+  await expect.poll(async () => (await autosavedObjects(page)).at(-1)?.visible).toBe(true);
+  await page.reload();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
+  await expect.poll(async () => near(await stripes(page), grey)).toBeUndefined();
+
+  // Flatten bakes it into the photo.
+  await chooseMenu(page, "Layer", "Flatten image");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.type)).toEqual(["Image"]);
+  const baked = await autosavedLayerPixels(page, "Background", [[20, 30]]);
+  near([baked!.pixels[0]!.slice(0, 3)], [grey[0]!]);
+});
+
+test("an adjustment layer is picked, duplicated, merged down and deleted from the Layers panel", async ({ page }) => {
+  await openProject(page, (srcs) => [image("__snapshot_src_1", WIDTH / 2, { __layerId: "left", name: "Left" }), adjustment("Invert 1", { kind: "invert", settings: {} })]);
+  void (await stripes(page));
+  await page.getByRole("tab", { name: "Layers" }).click();
+  const row = (name: string) => page.getByRole("group", { name: `${name} layer` });
+  await row("Invert 1").click();
+  await expect(row("Invert 1")).toHaveAttribute("aria-current", "true");
+  // Picked in the panel only: nothing is selected on the canvas.
+  await page.keyboard.press("Control+j");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.name)).toEqual(["Background", "Left", "Invert 1", "Invert 1 copy"]);
+  // Two inversions cancel out.
+  await expect.poll(() => stripes(page)).toEqual(original);
+  await page.keyboard.press("Delete");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.name)).toEqual(["Background", "Left", "Invert 1"]);
+
+  // Merge down applies it to the layer below's pixels.
+  await row("Invert 1").click();
+  await page.keyboard.press("Control+e");
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => `${object.type}:${object.name}`)).toEqual(["Image:Background", "Image:Left"]);
+  const left = await autosavedLayerPixels(page, "Left", [[20, 30]]);
+  expect(left!.pixels[0]!.slice(0, 3)).toEqual(STRIPES[0]!.map((value) => 255 - value));
+});

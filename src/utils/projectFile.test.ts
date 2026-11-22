@@ -349,6 +349,16 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts an adjustment layer, and rejects one with settings the editor never makes", async () => {
+    const adjustment = { kind: "threshold", settings: { level: 100 } };
+    const ok = { json: JSON.stringify({ objects: [{ type: "AdjustmentLayer", adjustment }] }), srcs: [] };
+    await expect(readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot: ok })))).resolves.toEqual(ok);
+    for (const bad of [{ kind: "threshold", settings: { level: 1000 } }, { kind: "eval", settings: {} }, "invert", null]) {
+      const snapshot = { json: JSON.stringify({ objects: [{ type: "AdjustmentLayer", adjustment: bad }] }), srcs: [] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot }))), JSON.stringify(bad)).rejects.toThrow();
+    }
+  });
+
   it("accepts the layer locks and Fill, and rejects malformed ones", async () => {
     const layer = { type: "rect", __lockTransparency: true, __lockPixels: true, __lockPosition: true, __fill: 0.25 };
     const ok = { json: JSON.stringify({ objects: [layer] }), srcs: [] };

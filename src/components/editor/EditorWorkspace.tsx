@@ -862,6 +862,7 @@ export const EditorWorkspace = ({
           activeColor={activeColor}
           onColorChange={setActiveColor}
           fabricCanvas={fabricCanvas}
+          colors={paintColors}
         />
       </TabsContent>
       <TabsContent value="adjust" className="mt-0 min-h-0 flex-1">

@@ -1,4 +1,5 @@
 import type { Canvas as FabricCanvas, FabricObject } from "fabric";
+import { isAdjustmentLayer } from "@/adjustments/adjustmentLayer";
 import { documentGrid } from "@/selection/state";
 import { findBackgroundImage, isLayerObject } from "@/utils/editorObjects";
 import { isGuideList, mapGuides, MAX_GUIDES, nearestLines, type GridSettings, type Guide, type SceneMatrix } from "./guideData";
@@ -52,7 +53,8 @@ export function setGuideDraft(canvas: FabricCanvas, draft: GuideDraft | null): v
 function layerStops(canvas: FabricCanvas, axis: "x" | "y"): number[] {
   const stops: number[] = [];
   for (const object of canvas.getObjects()) {
-    if (!object.visible || !isLayerObject(object)) continue;
+    // Adjustment layers take no room to line up with.
+    if (!object.visible || !isLayerObject(object) || isAdjustmentLayer(object)) continue;
     const { left, top, width, height } = object.getBoundingRect();
     if (axis === "x") stops.push(left, left + width / 2, left + width);
     else stops.push(top, top + height / 2, top + height);
