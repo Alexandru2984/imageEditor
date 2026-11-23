@@ -151,7 +151,8 @@ import {
 import type { SelectionModification } from "@/components/editor/SelectionModifyDialog";
 import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
 import { PixelPreview, adjustTarget } from "@/raster/pixelPreview";
-import { invertLut, uniformLuts } from "@/raster/adjustments";
+import { invertLut, isDefaultLevels, levelsLuts, uniformLuts, type LevelsSettings } from "@/raster/adjustments";
+import { autoColorLevels, autoContrastLevels, autoToneLevels } from "@/raster/autoAdjust";
 import type { PixelJob } from "@/raster/pixelJobs";
 import { addAdjustmentLayer, addFillLayer, duplicateDocumentLayer } from "@/adjustments/adjustmentCommands";
 import { FILL_TITLES, initialFill } from "@/adjustments/fillLayer";
@@ -438,7 +439,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       else openAdjustment(kind);
     };
     /** Adjustments with nothing to set (Invert, Desaturate) apply at once. */
-    const adjustNow = async (title: string, job: PixelJob) => {
+    /** Apply a job to the layer (or the selection on it) at once: `job` may be worked out from its pixels. */
+    const adjustNow = async (title: string, job: PixelJob | ((preview: PixelPreview) => PixelJob | string)) => {
       if (!canvas) return;
       const target = adjustTarget(canvas);
       const preview =
@@ -448,7 +450,13 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         return;
       }
       try {
-        preview.present(await preview.compute(job));
+        const work = typeof job === "function" ? job(preview) : job;
+        if (typeof work === "string") {
+          preview.cancel();
+          toast(work);
+          return;
+        }
+        preview.present(await preview.compute(work));
         await preview.commit();
       } catch (error) {
         console.error(`${title} failed:`, error);
@@ -1034,6 +1042,26 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         isEnabled: canAdjust,
         keywords: "grey gray remove colour",
       },
+      ...(
+        [
+          ["image.autoTone", "Auto Tone", KEYMAP.autoTone, "levels stretch channels fix", (preview: PixelPreview) => autoToneLevels(preview.histogram())],
+          ["image.autoContrast", "Auto Contrast", KEYMAP.autoContrast, "levels stretch fix", (preview: PixelPreview) => autoContrastLevels(preview.histogram())],
+          ["image.autoColor", "Auto Color", KEYMAP.autoColor, "colour cast white balance neutral fix", (preview: PixelPreview) => autoColorLevels(preview.original.data, preview.weights)],
+        ] as const
+      ).map(
+        ([id, label, shortcuts, keywords, levelsOf]): Command => ({
+          id,
+          label,
+          shortcuts,
+          run: () =>
+            void adjustNow(label, (preview) => {
+              const levels: LevelsSettings = levelsOf(preview);
+              return isDefaultLevels(levels) ? `${label}: the picture needs no change` : { op: "luts", luts: levelsLuts(levels) };
+            }),
+          isEnabled: canAdjust,
+          keywords,
+        })
+      ),
       {
         id: "ai.removeBackground",
         label: "Remove background",

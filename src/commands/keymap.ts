@@ -49,6 +49,9 @@ export const KEYMAP = {
   blackWhite: [{ key: "b", mod: true, alt: true, shift: true }],
   invert: [{ key: "i", mod: true }],
   desaturate: [{ key: "u", mod: true, shift: true }],
+  autoTone: [{ key: "l", mod: true, shift: true }],
+  autoContrast: [{ key: "l", mod: true, alt: true, shift: true }],
+  autoColor: [{ key: "b", mod: true, shift: true }],
 
   flipHorizontal: [{ key: "h", shift: true }],
   flipVertical: [{ key: "v", shift: true }],

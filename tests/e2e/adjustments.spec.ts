@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { autosavedLayerPixels, canvasCenter, chooseSubmenu, settle, uploadSolidImage } from "./helpers";
+import { autosavedLayerPixels, canvasCenter, chooseMenu, chooseSubmenu, settle, uploadSolidImage } from "./helpers";
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Desktop pointer tests");
@@ -260,4 +260,54 @@ test("the Histogram panel measures the image, follows its changes and counts onl
   // The menu item closes it again.
   await toggleHistogram(page);
   await expect(panel).toHaveCount(0);
+});
+
+test("Auto Tone, Auto Contrast and Auto Color fix a dull, warm photo", async ({ page }) => {
+  // Nine bands of grey from 40 to 200, warmed: red raised, blue lowered.
+  const bands = Array.from({ length: 9 }, (_, index) => {
+    const grey = 40 + index * 20;
+    const hex = (value: number) => Math.round(Math.min(255, value)).toString(16).padStart(2, "0");
+    return { x: index * 40, y: 0, width: 40, height: 300, color: `#${hex(grey * 1.1 + 12)}${hex(grey)}${hex(grey * 0.82)}` };
+  });
+  await uploadSolidImage(page, 360, 300, bands[0]!.color, bands);
+  const at = (band: number) => [band * 40 + 20, 150] as [number, number];
+  const read = async () => (await photoPixels(page, [at(0), at(4), at(8)])) ?? [];
+  await expect.poll(async () => (await read())[1]).toEqual([144, 120, 98]);
+  await settle(page);
+  const spread = (pixel: number[] | undefined) => Math.max(...pixel!) - Math.min(...pixel!);
+
+  // Auto Color: the darkest black, the lightest white, the midtones grey.
+  await chooseMenu(page, "Image", "Auto Color");
+  await expect.poll(async () => (await read())[0]?.every((channel) => channel <= 3)).toBe(true);
+  const [dark, middle, light] = await read();
+  expect(dark!.every((channel) => channel <= 3)).toBe(true);
+  expect(light!.every((channel) => channel >= 252)).toBe(true);
+  expect(spread(middle)).toBeLessThanOrEqual(6);
+
+  // Auto Contrast keeps the warmth; Auto Tone stretches each channel, so it shifts the colours.
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await read())[1]).toEqual([144, 120, 98]);
+  await page.keyboard.press("Control+Alt+Shift+l");
+  await expect.poll(async () => (await read())[0]?.[0]).not.toBe(56);
+  const contrasted = await read();
+  expect(contrasted[1]![0]! - contrasted[1]![2]!).toBeGreaterThan(34);
+  expect(Math.min(...contrasted[0]!)).toBeLessThanOrEqual(1);
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await read())[1]).toEqual([144, 120, 98]);
+  await page.keyboard.press("Control+Shift+l");
+  await expect.poll(async () => (await read())[0]?.every((channel) => channel <= 1)).toBe(true);
+  expect((await read())[2]!.every((channel) => channel >= 254)).toBe(true);
+  // Shift+Ctrl+B is Auto Color.
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await read())[1]).toEqual([144, 120, 98]);
+  await page.keyboard.press("Control+Shift+b");
+  await expect.poll(async () => spread((await read())[1])).toBeLessThanOrEqual(6);
+});
+
+test("Auto Color on a flat colour says there's nothing to change", async ({ page }) => {
+  await uploadSolidImage(page, 200, 150, "#808080");
+  await settle(page);
+  await chooseMenu(page, "Image", "Auto Color");
+  await expect(page.getByText("Auto Color: the picture needs no change")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeDisabled();
 });
