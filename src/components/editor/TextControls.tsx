@@ -16,6 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { FONT_OPTIONS, cssFontFamily, ensureFontLoaded, isBundledFont } from "@/utils/fonts";
 import { TEXT_STYLES, type TextStyleProps } from "@/utils/textStyles";
+import { ColorField } from "./ColorPicker";
 
 export type TextObject = FabricObject & {
   text?: string;
@@ -332,14 +333,13 @@ export const TextControls = ({ object, readOnly, activeColor, apply, commit }: T
           </button>
           {hasOutline && (
             <>
-              <input
-                type="color"
-                aria-label="Outline color"
+              <ColorField
+                label="Outline color"
                 disabled={readOnly}
                 value={asHex(object.stroke, "#000000")}
-                onChange={(event) => apply({ stroke: event.target.value }, "schedule")}
-                onBlur={commit}
-                className="h-8 w-8 shrink-0 cursor-pointer rounded border border-border bg-transparent"
+                onChange={(color) => apply({ stroke: color }, "schedule")}
+                onDone={commit}
+                className="h-8 w-8"
               />
               <Slider
                 aria-label="Outline width"
@@ -384,14 +384,13 @@ export const TextControls = ({ object, readOnly, activeColor, apply, commit }: T
           </button>
           {shadow && (
             <>
-              <input
-                type="color"
-                aria-label="Shadow color"
+              <ColorField
+                label="Shadow color"
                 disabled={readOnly}
                 value={asHex(shadow.color, "#000000")}
-                onChange={(event) => updateShadow({ color: event.target.value }, "schedule")}
-                onBlur={commit}
-                className="h-8 w-8 shrink-0 cursor-pointer rounded border border-border bg-transparent"
+                onChange={(color) => updateShadow({ color }, "schedule")}
+                onDone={commit}
+                className="h-8 w-8"
               />
               <Slider
                 aria-label="Shadow blur"
@@ -426,14 +425,13 @@ export const TextControls = ({ object, readOnly, activeColor, apply, commit }: T
             Highlight
           </button>
           {hasHighlight && (
-            <input
-              type="color"
-              aria-label="Highlight color"
+            <ColorField
+              label="Highlight color"
               disabled={readOnly}
               value={asHex(object.textBackgroundColor, "#fde047")}
-              onChange={(event) => apply({ textBackgroundColor: event.target.value }, "schedule")}
-              onBlur={commit}
-              className="h-8 w-8 shrink-0 cursor-pointer rounded border border-border bg-transparent"
+              onChange={(color) => apply({ textBackgroundColor: color }, "schedule")}
+              onDone={commit}
+              className="h-8 w-8"
             />
           )}
         </div>

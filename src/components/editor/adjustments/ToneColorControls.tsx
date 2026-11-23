@@ -12,6 +12,7 @@ import {
 } from "@/raster/adjustments";
 import { HistogramChart } from "./HistogramChart";
 import { CHANNEL_COLORS, Check, OptionRow, ValueSlider } from "./controls";
+import { ColorField } from "../ColorPicker";
 
 interface ControlsProps<Settings> {
   settings: Settings;
@@ -199,15 +200,10 @@ export function BlackWhiteControls({ settings, onChange }: ControlsProps<BlackWh
 export function GradientMapControls({ settings, onChange }: ControlsProps<GradientMapSettings>) {
   const [start, end] = settings.reverse ? [settings.to, settings.from] : [settings.from, settings.to];
   const colour = (label: string, key: "from" | "to") => (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      {label}
-      <input
-        type="color"
-        value={settings[key]}
-        onChange={(event) => onChange({ ...settings, [key]: event.target.value })}
-        className="h-7 w-12 cursor-pointer rounded border border-border bg-transparent p-0.5"
-      />
-    </label>
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <span aria-hidden="true">{label}</span>
+      <ColorField label={label} value={settings[key]} onChange={(color) => onChange({ ...settings, [key]: color })} />
+    </div>
   );
   return (
     <div className="grid gap-3">

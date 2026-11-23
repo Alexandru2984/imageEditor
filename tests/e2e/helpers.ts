@@ -193,3 +193,14 @@ export async function autosavedLayerPixels(
     { name, points }
   );
 }
+
+/** Choose a colour with the colour picker a swatch button opens: its hex, then OK. */
+export async function pickColor(page: Page, swatch: import("@playwright/test").Locator, hex: string) {
+  await swatch.click();
+  const picker = page.getByRole("dialog", { name: "Color picker" });
+  await expect(picker).toBeVisible();
+  await picker.getByLabel("Hex", { exact: true }).fill(hex.replace("#", ""));
+  await picker.getByRole("button", { name: "OK" }).click();
+  await expect(picker).toHaveCount(0);
+  await expect(swatch).toHaveAttribute("data-color", hex.toLowerCase());
+}

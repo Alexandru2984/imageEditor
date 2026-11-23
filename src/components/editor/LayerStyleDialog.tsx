@@ -23,6 +23,7 @@ import {
   type LayerStyle,
   type StrokePosition,
 } from "@/raster/layerStyleData";
+import { ColorField } from "./ColorPicker";
 
 type Styled = FabricObject & { layerStyle?: LayerStyle };
 type Effects = Required<LayerStyle>;
@@ -203,12 +204,10 @@ export function LayerStyleDialog({ canvas, layer, onClose }: LayerStyleDialogPro
   const colour = (name: EffectName, label: string, key: "color" | "endColor" | "shadowColor" = "color", title = "Colour") => (
     <div className="grid grid-cols-[5.5rem_1fr] items-center gap-2">
       <span className="text-xs text-muted-foreground">{title}</span>
-      <input
-        type="color"
-        aria-label={`${label} ${title.toLowerCase()}`}
-        value={(effects[name] as unknown as Record<string, string>)[key]}
-        onChange={(event) => update(name, { [key]: event.target.value } as Partial<Effects[typeof name]>)}
-        className="h-7 w-12 cursor-pointer rounded border border-border bg-transparent p-0.5"
+      <ColorField
+        label={`${label} ${title.toLowerCase()}`}
+        value={(effects[name] as unknown as Record<string, string>)[key]!}
+        onChange={(color) => update(name, { [key]: color } as Partial<Effects[typeof name]>)}
       />
     </div>
   );

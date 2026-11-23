@@ -18,6 +18,8 @@ import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { applyColor } from "@/utils/shapes";
+import { ColorField } from "./ColorPicker";
+import { Swatches } from "./Swatches";
 import { isSticker } from "@/utils/stickers";
 import { TextControls, type ApplyMode, type TextObject } from "./TextControls";
 import { AdjustmentLayerProperties } from "./adjustments/AdjustmentLayerProperties";
@@ -42,11 +44,6 @@ interface PropertiesPanelProps {
   /** The colour wells, for an adjustment layer's reset. */
   colors?: { foreground: string; background: string };
 }
-
-const COLOR_SWATCHES = [
-  "#000000", "#ffffff", "#ef4444", "#f97316", "#f59e0b", "#22c55e",
-  "#10b981", "#3b82f6", "#6366f1", "#a855f7", "#ec4899",
-];
 
 /** A compact "#rrggbb" field that only commits valid colours. */
 const HexInput = ({
@@ -424,7 +421,7 @@ export const PropertiesPanel = ({
   return (
     <ScrollArea className="h-full w-full">
       <div className="space-y-5 p-4">
-        {/* Color Swatches */}
+        {/* Swatches */}
         <div>
           <div className="mb-2 flex items-center justify-between">
             <Label className="text-xs font-medium text-muted-foreground">Color</Label>
@@ -433,43 +430,26 @@ export const PropertiesPanel = ({
               commitObjectChange();
             }} />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {COLOR_SWATCHES.map((color) => (
-              <button
-                key={color}
-                type="button"
-                aria-label={`Use color ${color}`}
-                aria-pressed={activeColor === color}
-                onClick={() => {
-                  handleColorChange(color);
-                  commitObjectChange();
-                }}
-                className={`h-7 w-7 rounded-full border border-black/10 shadow-sm transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:border-white/15 ${
-                  activeColor === color
-                    ? "ring-2 ring-primary ring-offset-2 ring-offset-editor-panel"
-                    : ""
-                }`}
-                style={{ backgroundColor: color }}
-              />
-            ))}
-            <label
-              className="relative h-7 w-7 cursor-pointer overflow-hidden rounded-full border border-black/10 shadow-sm transition-transform hover:scale-110 focus-within:ring-2 focus-within:ring-ring dark:border-white/15"
-              style={{
-                background:
-                  "conic-gradient(from 0deg, #ef4444, #f59e0b, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)",
-              }}
-              title="Custom color"
-            >
-              <input
-                type="color"
-                aria-label="Custom active color"
+          <Swatches
+            activeColor={activeColor}
+            onPick={(color) => {
+              handleColorChange(color);
+              commitObjectChange();
+            }}
+            custom={
+              <ColorField
+                label="Custom active color"
                 value={activeColor}
-                onChange={(e) => handleColorChange(e.target.value)}
-                onBlur={commitObjectChange}
-                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                onChange={handleColorChange}
+                onDone={commitObjectChange}
+                className="h-7 w-7 rounded-full border-black/10 shadow-sm transition-transform hover:scale-110 dark:border-white/15"
+                style={{
+                  background:
+                    "conic-gradient(from 0deg, #ef4444, #f59e0b, #22c55e, #06b6d4, #3b82f6, #a855f7, #ec4899, #ef4444)",
+                }}
               />
-            </label>
-          </div>
+            }
+          />
         </div>
 
         {/* Object Properties (when selected) */}
@@ -529,14 +509,13 @@ export const PropertiesPanel = ({
                   Fill
                 </Label>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    aria-label="Object fill color"
+                  <ColorField
+                    label="Object fill color"
                     disabled={selectedProps.readOnly}
                     value={selectedProps.fill || "#000000"}
-                    onChange={(e) => handleColorChange(e.target.value)}
-                    onBlur={commitObjectChange}
-                    className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border disabled:cursor-not-allowed disabled:opacity-50"
+                    onChange={handleColorChange}
+                    onDone={commitObjectChange}
+                    className="h-8 w-8"
                   />
                   <span className="text-xs text-muted-foreground font-mono">
                     {selectedProps.fill}
@@ -554,18 +533,17 @@ export const PropertiesPanel = ({
                   Stroke
                 </Label>
                 <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    aria-label="Object stroke color"
+                  <ColorField
+                    label="Object stroke color"
                     disabled={selectedProps.readOnly}
                     value={
                       selectedProps.stroke === "transparent"
                         ? "#000000"
                         : selectedProps.stroke
                     }
-                    onChange={(e) => handleObjectStrokeChange(e.target.value)}
-                    onBlur={commitObjectChange}
-                    className="w-8 h-8 rounded cursor-pointer bg-transparent border border-border disabled:cursor-not-allowed disabled:opacity-50"
+                    onChange={handleObjectStrokeChange}
+                    onDone={commitObjectChange}
+                    className="h-8 w-8"
                   />
                   <span className="text-xs text-muted-foreground font-mono">
                     {selectedProps.stroke}

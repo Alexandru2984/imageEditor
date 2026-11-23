@@ -13,6 +13,7 @@ import {
   type GradientStyle,
 } from "@/adjustments/fillLayer";
 import { Check, OptionRow, ValueSlider } from "./controls";
+import { ColorField } from "../ColorPicker";
 
 interface FillLayerPropertiesProps {
   canvas: FabricCanvas;
@@ -28,18 +29,12 @@ const STYLES: readonly { value: GradientStyle; label: string }[] = [
   { value: "reflected", label: "Reflected" },
 ];
 
-function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (color: string) => void }) {
+function LabeledColor({ label, value, onChange }: { label: string; value: string; onChange: (color: string) => void }) {
   return (
-    <label className="flex items-center gap-2 text-xs text-muted-foreground">
-      <input
-        type="color"
-        aria-label={label}
-        value={value}
-        onChange={(event) => onChange(event.target.value.toLowerCase())}
-        className="h-7 w-12 cursor-pointer rounded border border-border bg-transparent p-0.5"
-      />
-      {label}
-    </label>
+    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+      <ColorField label={label} value={value} onChange={onChange} />
+      <span aria-hidden="true">{label}</span>
+    </div>
   );
 }
 
@@ -85,12 +80,12 @@ export function FillLayerProperties({ canvas, layer }: FillLayerPropertiesProps)
         </div>
         <div aria-hidden="true" className="h-8 rounded-md border border-border" style={{ background: fillSwatch(content) }} />
         {content.kind === "solid" ? (
-          <ColorField label="Fill colour" value={content.color} onChange={(color) => change({ ...content, color })} />
+          <LabeledColor label="Fill colour" value={content.color} onChange={(color) => change({ ...content, color })} />
         ) : (
           <div className="grid gap-3">
             <div className="flex flex-wrap items-center gap-4">
-              <ColorField label="Start colour" value={content.from} onChange={(from) => change({ ...content, from })} />
-              <ColorField label="End colour" value={content.to} onChange={(to) => change({ ...content, to })} />
+              <LabeledColor label="Start colour" value={content.from} onChange={(from) => change({ ...content, from })} />
+              <LabeledColor label="End colour" value={content.to} onChange={(to) => change({ ...content, to })} />
             </div>
             <OptionRow label="Gradient style" value={content.style} options={STYLES} onChange={(style) => change({ ...content, style })} />
             <ValueSlider

@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
-import { autosavedObjects, canvasCenter, chooseMenu, uploadSolidImage } from "./helpers";
+import {
+  autosavedObjects,
+  canvasCenter,
+  chooseMenu,
+  uploadSolidImage,
+  pickColor,
+} from "./helpers";
 
 test.beforeEach(async ({ page }, testInfo) => {
   test.skip(testInfo.project.name === "mobile", "Desktop pointer tests");
@@ -71,7 +77,7 @@ test("a stroke outlines a shape, a drop shadow falls below it, and Cancel leaves
   const size = dialog.getByRole("slider", { name: "Size" });
   await size.focus();
   for (let step = 0; step < 7; step += 1) await page.keyboard.press("ArrowRight");
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   await expect.poll(async () => (await styleOf(page, rect))?.stroke?.enabled).toBe(true);
   // As wide on every side.
   const right = count(await line(page, 1, 0, 200), DARK);
@@ -92,7 +98,7 @@ test("a stroke outlines a shape, a drop shadow falls below it, and Cancel leaves
   const shadowSize = dialog.getByRole("slider", { name: "Size" });
   await shadowSize.focus();
   await page.keyboard.press("Home");
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   await expect.poll(async () => (await styleOf(page, rect))?.dropShadow?.enabled).toBe(true);
   const grey = (p: number[]) => p[0]! < 120 && Math.abs(p[0]! - p[2]!) < 10;
   expect(count(await line(page, 0, 1, 200), grey)).toBeGreaterThanOrEqual(5);
@@ -111,11 +117,11 @@ test("a stroke follows the painted pixels of an image layer", async ({ page }) =
 
   const dialog = await openStyle(page);
   await dialog.getByLabel("Stroke", { exact: true }).check();
-  await dialog.getByLabel("Stroke colour").fill("#ff0000");
+  await pickColor(page, dialog.getByLabel("Stroke colour"), "#ff0000");
   const size = dialog.getByRole("slider", { name: "Size" });
   await size.focus();
   for (let step = 0; step < 7; step += 1) await page.keyboard.press("ArrowRight");
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   const painted = (object: Record<string, unknown>) => object.name === "Layer 1";
   await expect.poll(async () => (await styleOf(page, painted))?.stroke?.enabled).toBe(true);
   // Above the painted line: a red outline, then white again.
@@ -148,7 +154,7 @@ test("inner shadow, gradient overlay and bevel shade the inside of a shape", asy
   // Inner shadow: dark inside the edges facing the light (upper left), not the others.
   let dialog = await openStyle(page);
   await dialog.getByLabel("Inner shadow", { exact: true }).check();
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   await expect.poll(async () => (await styleOf(page, rect))?.innerShadow?.enabled).toBe(true);
   let left = await inside(-1, 0);
   let right = await inside(1, 0);
@@ -160,7 +166,7 @@ test("inner shadow, gradient overlay and bevel shade the inside of a shape", asy
   dialog = await openStyle(page);
   await dialog.getByLabel("Inner shadow", { exact: true }).uncheck();
   await dialog.getByLabel("Gradient overlay", { exact: true }).check();
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   await expect.poll(async () => (await styleOf(page, rect))?.gradientOverlay?.enabled).toBe(true);
   const up = await inside(0, -1);
   const down = await inside(0, 1);
@@ -173,7 +179,7 @@ test("inner shadow, gradient overlay and bevel shade the inside of a shape", asy
   await dialog.getByLabel("Gradient overlay", { exact: true }).uncheck();
   await dialog.getByLabel("Bevel & emboss", { exact: true }).check();
   await expect(dialog.getByRole("radio", { name: "Inner bevel" })).toHaveAttribute("aria-checked", "true");
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   await expect.poll(async () => (await styleOf(page, rect))?.bevel?.enabled).toBe(true);
   const top = await inside(0, -1);
   const bottom = await inside(0, 1);

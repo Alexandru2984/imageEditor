@@ -176,7 +176,7 @@ test("the list filters by kind and name, and a layer's effects turn on and off f
   await chooseMenu(page, "Layer", "Layer style…");
   const dialog = page.getByRole("dialog", { name: "Layer style" });
   await dialog.getByLabel("Colour overlay").check();
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   await expect.poll(async () => (await shown(page, [-60, 0]))[0]).toBeGreaterThan(200);
   await page.getByRole("button", { name: "Show the effects of Layer 1" }).click();
   await page.getByRole("button", { name: "Hide the colour overlay of Layer 1" }).click();
@@ -210,7 +210,7 @@ test("Fill fades a layer's own pixels but not its effects", async ({ page }) => 
   await chooseMenu(page, "Layer", "Layer style…");
   const dialog = page.getByRole("dialog", { name: "Layer style" });
   await dialog.getByLabel("Stroke", { exact: true }).check();
-  await dialog.getByRole("button", { name: "OK" }).click();
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
   // The white square, and its black stroke just outside its left edge.
   await expect.poll(() => shown(page, [60, 0])).toEqual(WHITE);
   await expect.poll(async () => (await shown(page, [17, 0]))[0]).toBeLessThan(40);

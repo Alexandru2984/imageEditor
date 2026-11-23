@@ -7,6 +7,7 @@ import {
   getAutosaveJson,
   menuItem,
   uploadImage,
+  pickColor,
 } from "./helpers";
 
 const SHAPE_LABELS = new Set([
@@ -1017,17 +1018,17 @@ test("X swaps the foreground and background colours, D restores black and white"
   await uploadImage(page);
   const foreground = page.getByLabel("Foreground color");
   const background = page.getByLabel("Background color");
-  await expect(background).toHaveValue("#ffffff");
+  await expect(background).toHaveAttribute("data-color", "#ffffff");
   await page.keyboard.press("d");
-  await expect(foreground).toHaveValue("#000000");
+  await expect(foreground).toHaveAttribute("data-color", "#000000");
   await page.keyboard.press("x");
-  await expect(foreground).toHaveValue("#ffffff");
-  await expect(background).toHaveValue("#000000");
+  await expect(foreground).toHaveAttribute("data-color", "#ffffff");
+  await expect(background).toHaveAttribute("data-color", "#000000");
   await page.getByRole("button", { name: "Swap colors" }).click();
-  await expect(foreground).toHaveValue("#000000");
+  await expect(foreground).toHaveAttribute("data-color", "#000000");
 
   // The brush paints with the foreground colour.
-  await background.fill("#00ff00");
+  await pickColor(page, background, "#00ff00");
   await page.keyboard.press("x");
   await armMarker(page);
   const center = await canvasCenter(page);

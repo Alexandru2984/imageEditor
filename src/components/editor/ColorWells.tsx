@@ -1,5 +1,6 @@
 import { Repeat } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ColorField } from "./ColorPicker";
 
 interface ColorWellsProps {
   foreground: string;
@@ -13,11 +14,12 @@ interface ColorWellsProps {
 }
 
 const wellClass =
-  "absolute cursor-pointer rounded-[5px] border border-black/20 shadow-sm ring-1 ring-white/70 focus-within:ring-2 focus-within:ring-ring dark:border-white/25 dark:ring-black/40";
+  "absolute cursor-pointer rounded-[5px] border border-black/20 shadow-sm ring-1 ring-white/70 focus-visible:ring-2 focus-visible:ring-ring dark:border-white/25 dark:ring-black/40";
 
 /**
  * Photoshop's foreground and background colours: the front square paints,
- * the back one waits its turn. X swaps them and D restores black on white.
+ * the back one waits its turn. Each opens the colour picker; X swaps them
+ * and D restores black on white.
  */
 export function ColorWells({
   foreground,
@@ -35,32 +37,20 @@ export function ColorWells({
       aria-label="Colors"
       className={cn("relative shrink-0", large ? "h-11 w-11" : "h-10 w-10")}
     >
-      <label
-        title="Background color"
+      <ColorField
+        label="Background color"
+        value={background}
+        onChange={onBackgroundChange}
+        live={false}
         className={cn(wellClass, well, "bottom-0 right-0")}
-        style={{ backgroundColor: background }}
-      >
-        <input
-          type="color"
-          aria-label="Background color"
-          value={background}
-          onChange={(event) => onBackgroundChange(event.target.value)}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        />
-      </label>
-      <label
-        title="Foreground color"
+      />
+      <ColorField
+        label="Foreground color"
+        value={foreground}
+        onChange={onForegroundChange}
+        live={false}
         className={cn(wellClass, well, "left-0 top-0 z-10")}
-        style={{ backgroundColor: foreground }}
-      >
-        <input
-          type="color"
-          aria-label="Foreground color"
-          value={foreground}
-          onChange={(event) => onForegroundChange(event.target.value)}
-          className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        />
-      </label>
+      />
       {!large && (
         <>
           <button

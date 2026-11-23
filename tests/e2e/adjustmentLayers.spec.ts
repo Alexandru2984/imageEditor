@@ -1,5 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { autosavedLayerPixels, autosavedObjects, chooseMenu, chooseSubmenu, settle } from "./helpers";
+import {
+  autosavedLayerPixels,
+  autosavedObjects,
+  chooseMenu,
+  chooseSubmenu,
+  settle,
+  pickColor,
+} from "./helpers";
 import { BLEND_IDS, blendColors } from "../../src/compositing/blendMath";
 import {
   applyLuts,
@@ -514,7 +521,7 @@ test("a fill layer is made from the Layer menu, set in Properties, and merged in
   await expect(settings).toBeVisible();
   await expect(settings).toContainText("Color Fill");
   await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => [0, 0, 0]));
-  await settings.getByLabel("Fill colour").fill("#3366cc");
+  await pickColor(page, settings.getByLabel("Fill colour"), "#3366cc");
   await expect.poll(() => stripes(page)).toEqual(STRIPES.map(() => BLUE));
   await expect
     .poll(async () => (await autosavedObjects(page)).at(-1)?.fillContent)

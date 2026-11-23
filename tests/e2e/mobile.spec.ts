@@ -310,7 +310,7 @@ test("the layer style dialog fits the phone and styles the photo", async ({ page
   await expectOnScreen(page, dialog.getByRole("slider", { name: "Size" }));
   await expectOnScreen(page, dialog.getByRole("radio", { name: "Inside" }));
   await expectNoSidewaysScroll(page);
-  await dialog.getByRole("button", { name: "OK" }).tap();
+  await dialog.getByRole("button", { name: "OK", exact: true }).tap();
   await expect(dialog).toHaveCount(0);
   await expect
     .poll(async () => {
@@ -332,7 +332,7 @@ test("Levels opens from the menu, fits the phone and applies", async ({ page }) 
   await expectNoSidewaysScroll(page);
   await shadows.focus();
   await page.keyboard.press("End");
-  await dialog.getByRole("button", { name: "OK" }).tap();
+  await dialog.getByRole("button", { name: "OK", exact: true }).tap();
   await expect(dialog).toHaveCount(0);
   await expect
     .poll(async () => (await autosavedLayerPixels(page, "Background", [[200, 150]]))?.pixels[0]?.slice(0, 3))
@@ -464,11 +464,28 @@ test("Liquify fits the phone, its buttons clear of OK and Cancel", async ({ page
   await expect(dialog.getByRole("toolbar", { name: "Liquify tools" })).toBeVisible();
   await expectNoSidewaysScroll(page);
   const thaw = await dialog.getByRole("button", { name: "Thaw All" }).boundingBox();
-  const ok = await dialog.getByRole("button", { name: "OK" }).boundingBox();
+  const ok = await dialog.getByRole("button", { name: "OK", exact: true }).boundingBox();
   // Stacked, not on top of each other; the dialog scrolls to reach them.
   expect(thaw!.y + thaw!.height).toBeLessThanOrEqual(ok!.y);
   await dialog.getByRole("button", { name: "Cancel" }).scrollIntoViewIfNeeded();
   await expectOnScreen(page, dialog.getByRole("button", { name: "Cancel" }));
   await dialog.getByRole("button", { name: "Cancel" }).tap();
   await expect(dialog).toHaveCount(0);
+});
+
+test("the colour picker fits the phone and sets the brush colour", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Brush (B)" }).tap();
+  const foreground = page.getByRole("group", { name: "Tool options" }).getByRole("button", { name: "Foreground color" });
+  await foreground.tap();
+  const picker = page.getByRole("dialog", { name: "Color picker" });
+  await expectOnScreen(page, picker.getByRole("slider", { name: "Saturation and brightness" }));
+  await expectOnScreen(page, picker.getByRole("slider", { name: "Hue" }));
+  await expectNoSidewaysScroll(page);
+  await picker.getByLabel("Hex", { exact: true }).fill("ff8800");
+  await picker.getByRole("button", { name: "OK" }).scrollIntoViewIfNeeded();
+  await expectOnScreen(page, picker.getByRole("button", { name: "OK" }));
+  await picker.getByRole("button", { name: "OK" }).tap();
+  await expect(picker).toHaveCount(0);
+  await expect(foreground).toHaveAttribute("data-color", "#ff8800");
 });

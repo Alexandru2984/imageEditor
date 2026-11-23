@@ -28,6 +28,7 @@ import {
   supportsAlpha,
   type ExportFormat,
 } from "@/utils/exportImage";
+import { ColorField } from "./ColorPicker";
 
 interface ExportDialogProps {
   open: boolean;
@@ -251,12 +252,11 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
                 />
               </div>
               {effectiveMatteChoice === "custom" && (
-                <input
-                  type="color"
-                  aria-label="Background color"
+                <ColorField
+                  label="Background color"
                   value={customMatte}
-                  onChange={(event) => setCustomMatte(event.target.value)}
-                  className="h-10 w-10 cursor-pointer rounded-md border border-border bg-transparent"
+                  onChange={setCustomMatte}
+                  className="h-10 w-10 rounded-md"
                 />
               )}
             </div>

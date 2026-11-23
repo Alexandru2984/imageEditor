@@ -10,7 +10,7 @@ interface EyeDropperLike {
 }
 type EyeDropperConstructor = new () => EyeDropperLike;
 
-const nativeEyeDropper = (): EyeDropperConstructor | null =>
+export const nativeEyeDropper = (): EyeDropperConstructor | null =>
   typeof window !== "undefined" && "EyeDropper" in window
     ? ((window as unknown as { EyeDropper: EyeDropperConstructor }).EyeDropper)
     : null;
