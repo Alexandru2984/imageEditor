@@ -2,7 +2,7 @@
 export function sanitizeFileName(name: string, fallback = "edited-image"): string {
   const cleaned = name
     .normalize("NFKC")
-    .replace(/\.(png|jpe?g|webp)$/i, "")
+    .replace(/\.(png|jpe?g|webp|avif|zip)$/i, "")
     .replace(/[^\p{L}\p{N}._ -]+/gu, "-")
     .replace(/\s+/g, "-")
     .replace(/-{2,}/g, "-")

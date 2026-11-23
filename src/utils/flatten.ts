@@ -210,6 +210,31 @@ const encodeCanvas = (
     }
   });
 
+/** Paint an opaque colour behind what is on `element`. */
+export function paintMatte(element: HTMLCanvasElement, matte: string): void {
+  const ctx = element.getContext("2d");
+  if (!ctx) throw new Error("The browser could not prepare the export");
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "destination-over";
+  ctx.fillStyle = matte;
+  ctx.fillRect(0, 0, element.width, element.height);
+  ctx.restore();
+}
+
+/** Everything over a scene region, into a new canvas, as renderRegionBlob draws it before encoding. */
+export function renderRegionCanvas(
+  canvas: FabricCanvas,
+  region: TBBox,
+  requestedMultiplier: number
+): { element: HTMLCanvasElement; plan: RasterPlan } {
+  const plan = planRasterization(region, requestedMultiplier);
+  const element = renderWithIdentityViewport(canvas, () =>
+    canvas.toCanvasElement(plan.multiplier, cropFor(region, plan))
+  );
+  return { element, plan };
+}
+
 export async function renderRegionBlob(
   canvas: FabricCanvas,
   region: TBBox,
@@ -218,22 +243,10 @@ export async function renderRegionBlob(
   quality = 1,
   options: RenderBlobOptions = {}
 ): Promise<{ blob: Blob; plan: RasterPlan }> {
-  const plan = planRasterization(region, requestedMultiplier);
-  const element = renderWithIdentityViewport(canvas, () =>
-    canvas.toCanvasElement(plan.multiplier, cropFor(region, plan))
-  );
+  const { element, plan } = renderRegionCanvas(canvas, region, requestedMultiplier);
 
   const matte = options.matte ?? (format === "jpeg" ? "#ffffff" : null);
-  if (matte) {
-    const ctx = element.getContext("2d");
-    if (!ctx) throw new Error("The browser could not prepare the export");
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalCompositeOperation = "destination-over";
-    ctx.fillStyle = matte;
-    ctx.fillRect(0, 0, element.width, element.height);
-    ctx.restore();
-  }
+  if (matte) paintMatte(element, matte);
 
   const mime = `image/${format}`;
   const blob = await encodeCanvas(element, mime, quality);

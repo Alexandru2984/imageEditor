@@ -874,7 +874,9 @@ test("export dialog writes WebP at the chosen size and file name", async ({ page
   await uploadTransparentPng(page, "holiday photo.png");
   await page.getByRole("button", { name: "Export", exact: true }).click();
   await page.getByRole("radio", { name: "WebP", exact: true }).click();
-  await page.getByRole("radio", { name: "50%", exact: true }).click();
+  // 50% on, 100% off: one file, at half size.
+  await page.getByRole("button", { name: "50%", exact: true }).click();
+  await page.getByRole("button", { name: "100%", exact: true }).click();
   await expect(page.getByTestId("export-dimensions")).toHaveText("32 × 32 px");
   await expect(page.getByLabel("File name")).toHaveValue("holiday-photo");
   const downloadPromise = page.waitForEvent("download");

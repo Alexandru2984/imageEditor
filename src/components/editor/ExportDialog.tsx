@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { Copy, Download, Loader2, Share2 } from "lucide-react";
 import { toast } from "sonner";
@@ -20,14 +20,19 @@ import {
   FORMAT_LABEL,
   canShareFiles,
   copyImageToClipboard,
+  exportFiles,
   exportImage,
   formatBytes,
+  layerExports,
+  nativeWidth,
   planExport,
   sanitizeFileName,
-  shareImage,
   supportsAlpha,
   type ExportFormat,
+  type ExportedFile,
 } from "@/utils/exportImage";
+import { scaleOf, type ExportSize } from "@/export/exportPlan";
+import { zipStore } from "@/export/zip";
 import { ColorField } from "./ColorPicker";
 
 interface ExportDialogProps {
@@ -37,8 +42,11 @@ interface ExportDialogProps {
   defaultName?: string;
 }
 
-const FORMATS: ExportFormat[] = ["png", "jpeg", "webp"];
+const FORMATS: ExportFormat[] = ["png", "jpeg", "webp", "avif"];
 const SCALES = [0.25, 0.5, 1, 2] as const;
+/** The widest a custom size may ask for; the render is capped for safety anyway. */
+const MAX_CUSTOM_WIDTH = 16_384;
+type Content = "document" | "layers";
 type MatteChoice = "transparent" | "white" | "custom";
 
 const PREFS_KEY = "ie-export-prefs";
@@ -111,12 +119,16 @@ const Segmented = <T extends string | number>({
 export function ExportDialog({ open, onOpenChange, canvas, defaultName }: ExportDialogProps) {
   const [format, setFormat] = useState<ExportFormat>(() => loadPrefs().format);
   const [quality, setQuality] = useState(() => loadPrefs().quality);
-  const [scale, setScale] = useState<number>(1);
+  const [scales, setScales] = useState<readonly number[]>([1]);
+  const [custom, setCustom] = useState<{ on: boolean; width: string }>({ on: false, width: "" });
+  const [content, setContent] = useState<Content>("document");
   const [matteChoice, setMatteChoice] = useState<MatteChoice>("transparent");
   const [customMatte, setCustomMatte] = useState("#ffffff");
   const [fileName, setFileName] = useState(defaultName ?? "edited-image");
   const [busy, setBusy] = useState<null | "download" | "copy" | "share">(null);
+  const [progress, setProgress] = useState<string | null>(null);
   const shareSupported = useMemo(() => canShareFiles(), []);
+  const customId = useId();
 
   useEffect(() => {
     if (open && defaultName) setFileName(defaultName);
@@ -132,45 +144,80 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
         ? "#ffffff"
         : customMatte;
 
-  const plan = useMemo(
-    () => (open && canvas ? safePlan(canvas, scale) : null),
-    // Recompute when the dialog opens or the scale changes.
-    [open, canvas, scale]
+  const documentWidth = useMemo(() => (open && canvas ? safeWidth(canvas) : 0), [open, canvas]);
+  const customWidth = Math.round(Number.parseFloat(custom.width));
+  const customValid = Number.isFinite(customWidth) && customWidth >= 1 && customWidth <= MAX_CUSTOM_WIDTH;
+  const sizes = useMemo<ExportSize[]>(
+    () => [
+      ...[...scales].sort((a, b) => a - b).map((scale) => ({ scale })),
+      ...(custom.on && customValid ? [{ width: customWidth }] : []),
+    ],
+    [scales, custom.on, customValid, customWidth]
   );
+  const plans = useMemo(
+    () => (open && canvas ? sizes.map((size) => safePlan(canvas, size)) : []),
+    // Recompute when the dialog opens or the sizes change.
+    [open, canvas, sizes]
+  );
+  const layerCount = useMemo(() => (open && canvas && content === "layers" ? safeLayerCount(canvas) : 0), [open, canvas, content]);
+  const fileCount = sizes.length * (content === "layers" ? layerCount : 1);
+  // Copy and Share take the 1× size when it is chosen, otherwise the first.
+  const primary = sizes.find((size) => "scale" in size && size.scale === 1) ?? sizes[0];
 
-  const fullName = `${sanitizeFileName(fileName)}.${FORMAT_EXTENSION[format]}`;
+  const base = sanitizeFileName(fileName);
+  const fullName = fileCount > 1 ? `${base}.zip` : `${base}.${FORMAT_EXTENSION[format]}`;
 
-  const render = async (forceFormat?: ExportFormat) => {
-    if (!canvas) throw new Error("Nothing to export yet");
-    return exportImage(canvas, {
-      format: forceFormat ?? format,
-      quality: quality / 100,
-      scale,
-      matte,
+  const toggleScale = (scale: number) =>
+    setScales((current) => {
+      if (!current.includes(scale)) return [...current, scale];
+      // One size at least: the last one stays on unless the custom width is.
+      return current.length > 1 || (custom.on && customValid) ? current.filter((item) => item !== scale) : current;
     });
+  const toggleCustom = () =>
+    setCustom((current) => {
+      if (current.on && scales.length === 0) return current;
+      return { on: !current.on, width: current.width || String(documentWidth || 1000) };
+    });
+
+  const exportAll = (): Promise<ExportedFile[]> => {
+    if (!canvas) throw new Error("Nothing to export yet");
+    return exportFiles(
+      canvas,
+      { format, quality: quality / 100, matte, sizes, layers: content === "layers", baseName: fileName },
+      (done, total) => setProgress(total > 1 ? `${done} / ${total}` : null)
+    );
   };
 
   const run = async (kind: "download" | "copy" | "share") => {
-    if (busy) return;
+    if (busy || !primary) return;
     setBusy(kind);
     savePrefs({ format, quality });
     try {
       if (kind === "copy") {
-        const { blob } = await render("png");
+        if (!canvas) throw new Error("Nothing to export yet");
+        const scale = scaleOf(primary, documentWidth);
+        const { blob } = await exportImage(canvas, { format: "png", quality: 1, scale, matte });
         await copyImageToClipboard(blob);
         toast.success("Image copied to the clipboard");
       } else {
-        const { blob, plan: result } = await render();
+        const files = await exportAll();
         if (kind === "share") {
-          const shared = await shareImage(blob, fullName);
+          const shared = await shareFiles(files);
           if (!shared) return;
-        } else {
-          downloadBlob(blob, fullName);
+        } else if (files.length === 1) {
+          const [file] = files as [ExportedFile];
+          downloadBlob(file.blob, file.name);
           toast.success(
-            `Exported ${result.outputWidth}×${result.outputHeight} ${FORMAT_LABEL[format]} · ${formatBytes(blob.size)}${
-              result.limited ? " (capped for browser safety)" : ""
+            `Exported ${file.width}×${file.height} ${FORMAT_LABEL[format]} · ${formatBytes(file.blob.size)}${
+              file.limited ? " (capped for browser safety)" : ""
             }`
           );
+        } else {
+          const zip = zipStore(
+            await Promise.all(files.map(async (file) => ({ name: file.name, data: new Uint8Array(await file.blob.arrayBuffer()) })))
+          );
+          downloadBlob(zip, fullName);
+          toast.success(`Exported ${files.length} ${FORMAT_LABEL[format]} files in ${fullName} · ${formatBytes(zip.size)}`);
         }
       }
       onOpenChange(false);
@@ -179,14 +226,19 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
       toast.error(error instanceof Error ? error.message : "The image could not be exported");
     } finally {
       setBusy(null);
+      setProgress(null);
     }
   };
 
+  const dimensions = plans.every((plan) => plan)
+    ? `${plans.map((plan) => `${plan!.outputWidth} × ${plan!.outputHeight}`).join(", ")} px${plans.some((plan) => plan!.limited) ? " (max)" : ""}`
+    : "—";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Export image</DialogTitle>
+          <DialogTitle>Export As</DialogTitle>
           <DialogDescription>
             Rendered on your device at full photo resolution. Nothing is uploaded.
           </DialogDescription>
@@ -222,19 +274,64 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
           )}
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs text-muted-foreground">Size</Label>
-              <span className="text-xs tabular-nums text-muted-foreground" data-testid="export-dimensions">
-                {plan ? `${plan.outputWidth} × ${plan.outputHeight} px${plan.limited ? " (max)" : ""}` : "—"}
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs text-muted-foreground">Sizes</Label>
+              <span className="truncate text-xs tabular-nums text-muted-foreground" data-testid="export-dimensions">
+                {dimensions}
               </span>
             </div>
+            <div role="group" aria-label="Sizes" className="grid grid-cols-5 gap-1 rounded-lg bg-muted/70 p-1">
+              {SCALES.map((scale) => (
+                <button
+                  key={scale}
+                  type="button"
+                  aria-pressed={scales.includes(scale)}
+                  onClick={() => toggleScale(scale)}
+                  className={segmentClass(scales.includes(scale))}
+                >
+                  {scale * 100}%
+                </button>
+              ))}
+              <button type="button" aria-pressed={custom.on} onClick={toggleCustom} className={segmentClass(custom.on)}>
+                Custom
+              </button>
+            </div>
+            {custom.on && (
+              <div className="flex items-center gap-2">
+                <label htmlFor={customId} className="text-xs text-muted-foreground">
+                  Width
+                </label>
+                <input
+                  id={customId}
+                  type="number"
+                  aria-label="Custom width"
+                  min={1}
+                  max={MAX_CUSTOM_WIDTH}
+                  step={1}
+                  value={custom.width}
+                  aria-invalid={!customValid}
+                  onChange={(event) => setCustom({ on: true, width: event.target.value })}
+                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-right text-sm tabular-nums aria-[invalid=true]:border-destructive"
+                />
+                <span className="text-xs text-muted-foreground">px, the height follows</span>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Export</Label>
             <Segmented
-              label="Size"
-              value={scale}
-              options={SCALES}
-              onChange={setScale}
-              render={(value) => `${value * 100}%`}
+              label="Export"
+              value={content}
+              options={["document", "layers"] as const}
+              onChange={setContent}
+              render={(value) => (value === "document" ? "Document" : "Each layer")}
             />
+            {content === "layers" && (
+              <p className="text-xs text-muted-foreground" data-testid="export-layer-count">
+                {layerCount === 1 ? "1 visible layer" : `${layerCount} visible layers`}, each over the document's area
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -274,8 +371,13 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
                 onChange={(event) => setFileName(event.target.value)}
                 className="h-10 min-w-0 flex-1 bg-transparent px-3 text-sm outline-none"
               />
-              <span className="pr-3 text-sm text-muted-foreground">.{FORMAT_EXTENSION[format]}</span>
+              <span className="pr-3 text-sm text-muted-foreground">.{fileCount > 1 ? "zip" : FORMAT_EXTENSION[format]}</span>
             </div>
+            {fileCount > 1 && (
+              <p className="text-xs text-muted-foreground">
+                {fileCount} files in one zip, each named for its {content === "layers" ? "layer and " : ""}size
+              </p>
+            )}
           </div>
         </div>
 
@@ -283,21 +385,21 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
           <Button
             variant="outline"
             onClick={() => void run("copy")}
-            disabled={!!busy}
+            disabled={!!busy || !primary}
             aria-label="Copy image to clipboard"
           >
             {busy === "copy" ? <Loader2 className="animate-spin" /> : <Copy />}
             Copy
           </Button>
           {shareSupported && (
-            <Button variant="outline" onClick={() => void run("share")} disabled={!!busy}>
+            <Button variant="outline" onClick={() => void run("share")} disabled={!!busy || fileCount === 0}>
               {busy === "share" ? <Loader2 className="animate-spin" /> : <Share2 />}
               Share
             </Button>
           )}
-          <Button onClick={() => void run("download")} disabled={!!busy || !plan}>
+          <Button onClick={() => void run("download")} disabled={!!busy || fileCount === 0 || plans.some((plan) => !plan)}>
             {busy === "download" ? <Loader2 className="animate-spin" /> : <Download />}
-            Download
+            {busy === "download" && progress ? `Exporting ${progress}` : "Download"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -305,9 +407,47 @@ export function ExportDialog({ open, onOpenChange, canvas, defaultName }: Export
   );
 }
 
-function safePlan(canvas: FabricCanvas, scale: number) {
+const segmentClass = (active: boolean) =>
+  cn(
+    "h-8 rounded-md px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+    active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+  );
+
+/** Share the files where the system's share sheet takes them all; false when it does not or is cancelled. */
+async function shareFiles(files: readonly ExportedFile[]): Promise<boolean> {
+  const shared = files.map((file) => new File([file.blob], file.name, { type: file.blob.type }));
+  if (!navigator.canShare?.({ files: shared })) {
+    toast.error("This device cannot share these files; download them instead");
+    return false;
+  }
   try {
-    return planExport(canvas, scale);
+    await navigator.share({ files: shared, title: files[0]?.name });
+    return true;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") return false;
+    throw error;
+  }
+}
+
+function safeWidth(canvas: FabricCanvas): number {
+  try {
+    return nativeWidth(canvas);
+  } catch {
+    return 0;
+  }
+}
+
+function safeLayerCount(canvas: FabricCanvas): number {
+  try {
+    return layerExports(canvas).length;
+  } catch {
+    return 0;
+  }
+}
+
+function safePlan(canvas: FabricCanvas, size: ExportSize) {
+  try {
+    return planExport(canvas, size);
   } catch {
     return null;
   }
