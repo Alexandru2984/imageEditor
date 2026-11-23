@@ -13,6 +13,8 @@ export interface StrokePoint {
 export interface Dab extends StrokePoint {
   /** Tip diameter at this dab, in layer pixels. */
   diameter: number;
+  /** Which way the stroke is going here, radians (0 is to the right). */
+  direction: number;
 }
 
 /** Photoshop's default spacing: a quarter of the tip between dabs. */
@@ -36,11 +38,17 @@ export class DabSpacer {
 
   constructor(
     private readonly diameter: number,
-    private readonly spacing = DEFAULT_SPACING
+    private readonly spacing = DEFAULT_SPACING,
+    /** Pen pressure shrinks the tip (Photoshop's Size control: Pen Pressure). */
+    private readonly pressureSize = true
   ) {}
 
+  private sizeAt(pressure: number): number {
+    return this.pressureSize ? pressureDiameter(this.diameter, pressure) : this.diameter;
+  }
+
   private stepAt(pressure: number): number {
-    return Math.max(0.5, pressureDiameter(this.diameter, pressure) * this.spacing);
+    return Math.max(0.5, this.sizeAt(pressure) * this.spacing);
   }
 
   /** The dabs from the previous sample up to this one (the first sample dabs once). */
@@ -49,7 +57,7 @@ export class DabSpacer {
     const last = this.last;
     this.last = point;
     if (!last) {
-      dabs.push({ ...point, diameter: pressureDiameter(this.diameter, point.pressure) });
+      dabs.push({ ...point, diameter: this.sizeAt(point.pressure), direction: 0 });
       this.travelled = 0;
       return dabs;
     }
@@ -57,6 +65,7 @@ export class DabSpacer {
     const dy = point.y - last.y;
     const length = Math.hypot(dx, dy);
     if (length === 0) return dabs;
+    const direction = Math.atan2(dy, dx);
 
     let position = 0;
     // Distance still to go before the next dab is due.
@@ -69,7 +78,8 @@ export class DabSpacer {
         x: last.x + dx * t,
         y: last.y + dy * t,
         pressure,
-        diameter: pressureDiameter(this.diameter, pressure),
+        diameter: this.sizeAt(pressure),
+        direction,
       });
       remaining = this.stepAt(pressure);
     }

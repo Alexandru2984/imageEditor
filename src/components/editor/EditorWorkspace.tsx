@@ -43,7 +43,13 @@ import { useEyedropper } from "@/hooks/useEyedropper";
 import { useDocumentFonts } from "@/hooks/useDocumentFonts";
 import { useSmartGuides } from "@/hooks/useSmartGuides";
 import { BRUSHES, stepBrushHardness, stepBrushWidth, type BrushKind } from "@/utils/brushes";
-import { DEFAULT_PAINT_OPTIONS, stepPaintSize, type PaintOptions } from "@/raster/paintSettings";
+import { DEFAULT_PAINT_OPTIONS, PAINT_SIZE_MAX, stepPaintSize, type PaintOptions } from "@/raster/paintSettings";
+import { DEFAULT_DYNAMICS, DEFAULT_SYMMETRY, type BrushTip, type SymmetryOptions } from "@/raster/brushEngine";
+import { brushTipFromDocument } from "@/raster/defineBrush";
+import { addBrushPreset } from "@/utils/brushPresets";
+import { BrushSettingsPanel } from "./BrushControls";
+import { presetChange } from "@/hooks/useBrushPresets";
+import { DefineBrushDialog } from "./DefineBrushDialog";
 import { DEFAULT_BUCKET_OPTIONS, type BucketOptions } from "@/raster/fill";
 import { DEFAULT_GRADIENT_OPTIONS, type GradientOptions } from "@/raster/gradient";
 import {
@@ -190,6 +196,10 @@ export const EditorWorkspace = ({
   const [lastShape, setLastShape] = useSessionState<ShapeKind>("lastShape", "rectangle");
   const [lastBrushTool, setLastBrushTool] = useSessionState<BrushTool>("lastBrushTool", "brush");
   const [paint, setPaint] = useSessionState<PaintOptions>("paint", DEFAULT_PAINT_OPTIONS);
+  const [symmetry, setSymmetry] = useSessionState<SymmetryOptions>("symmetry", DEFAULT_SYMMETRY);
+  const [brushSettingsOpen, setBrushSettingsOpen] = useSessionState<boolean>("brushSettings", false);
+  /** Edit › Define Brush Preset: the tip taken from the document, being named. */
+  const [definingBrush, setDefiningBrush] = useState<{ tip: BrushTip; size: number } | null>(null);
   const [histogramOpen, setHistogramOpen] = useSessionState<boolean>("histogram", false);
   const [bucket, setBucket] = useSessionState<BucketOptions>("bucket", DEFAULT_BUCKET_OPTIONS);
   const [gradient, setGradient] = useSessionState<GradientOptions>("gradient", DEFAULT_GRADIENT_OPTIONS);
@@ -651,6 +661,17 @@ export const EditorWorkspace = ({
   const openSelectAndMask = useCallback(() => setSelectAndMaskOpen(true), []);
   const [liquifyOpen, setLiquifyOpen] = useState(false);
   const openLiquify = useCallback(() => setLiquifyOpen(true), []);
+  const defineBrush = useCallback(() => {
+    if (!fabricCanvas) return;
+    try {
+      const result = brushTipFromDocument(fabricCanvas);
+      if (typeof result === "string") toast.message(result);
+      else setDefiningBrush(result);
+    } catch (error) {
+      console.error("Define brush preset failed:", error);
+      toast.error("The brush could not be made");
+    }
+  }, [fabricCanvas]);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
   /** The layer the Layer style dialog is open for. */
   const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
@@ -757,6 +778,9 @@ export const EditorWorkspace = ({
     openColorRange,
     openSelectAndMask,
     openLiquify,
+    brushSettingsPanel: brushSettingsOpen,
+    setBrushSettingsPanel: setBrushSettingsOpen,
+    defineBrush,
     pathsPanel: pathsOpen,
     setPathsPanel: setPathsOpen,
     strokeSelection: openStrokeDialog,
@@ -930,6 +954,10 @@ export const EditorWorkspace = ({
       onBrushOpacityChange={setBrushOpacity}
       paint={paint}
       onPaintChange={updatePaint}
+      symmetry={symmetry}
+      onSymmetryChange={setSymmetry}
+      brushSettingsOpen={brushSettingsOpen}
+      onBrushSettingsOpenChange={setBrushSettingsOpen}
       bucket={bucket}
       onBucketChange={updateBucket}
       gradient={gradient}
@@ -1071,6 +1099,7 @@ export const EditorWorkspace = ({
             brushOpacity={brushOpacity}
             brushKind={brushKind}
             paint={paint}
+            symmetry={symmetry}
             bucket={bucket}
             gradient={gradient}
             selectionMode={selectionMode}
@@ -1100,6 +1129,9 @@ export const EditorWorkspace = ({
           {histogramOpen && <HistogramPanel canvas={fabricCanvas} onClose={() => setHistogramOpen(false)} />}
           {historyOpen && (
             <HistoryPanel steps={steps} current={currentStep} onPick={goTo} onClose={() => setHistoryOpen(false)} />
+          )}
+          {brushSettingsOpen && (
+            <BrushSettingsPanel paint={paint} onPaintChange={updatePaint} onClose={() => setBrushSettingsOpen(false)} />
           )}
 
           {eyedropper.picking && !("EyeDropper" in window) && (
@@ -1208,6 +1240,34 @@ export const EditorWorkspace = ({
       <ColorRangeDialog canvas={fabricCanvas} open={colorRangeOpen} onClose={() => setColorRangeOpen(false)} />
       <SelectAndMaskDialog canvas={fabricCanvas} open={selectAndMaskOpen} onClose={() => setSelectAndMaskOpen(false)} />
       <LiquifyDialog canvas={fabricCanvas} open={liquifyOpen} onClose={() => setLiquifyOpen(false)} />
+      <DefineBrushDialog
+        defining={definingBrush}
+        onCancel={() => setDefiningBrush(null)}
+        onDefine={(name) => {
+          const defining = definingBrush;
+          setDefiningBrush(null);
+          if (!defining) return;
+          const result = addBrushPreset(
+            {
+              name,
+              size: Math.min(PAINT_SIZE_MAX, Math.max(1, defining.size)),
+              hardness: 100,
+              flow: 100,
+              dynamics: DEFAULT_DYNAMICS,
+            },
+            defining.tip
+          );
+          if (typeof result === "string") {
+            toast.error(result);
+            return;
+          }
+          // As in Photoshop, the new brush is the one in hand.
+          updatePaint(presetChange(result.preset));
+          handleToolChange("brush");
+          if (result.kept) toast.success(`Defined the brush “${result.preset.name}”`);
+          else toast.message(`Defined “${result.preset.name}” for now; this browser would not keep it`);
+        }}
+      />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}

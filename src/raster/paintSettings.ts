@@ -1,3 +1,5 @@
+import { DEFAULT_DYNAMICS, type BrushDynamics } from "./brushEngine";
+
 /** Settings shared by the pixel brush and eraser; sizes are in image pixels. */
 export interface PaintOptions {
   size: number;
@@ -7,9 +9,20 @@ export interface PaintOptions {
   opacity: number;
   /** 0–100 */
   flow: number;
+  /** Brush Settings: tip shape, jitter, scattering, transfer. */
+  dynamics: BrushDynamics;
+  /** A tip made from pixels (a preset's), or null for the round tip. */
+  tipId: string | null;
 }
 
-export const DEFAULT_PAINT_OPTIONS: PaintOptions = { size: 30, hardness: 80, opacity: 100, flow: 100 };
+export const DEFAULT_PAINT_OPTIONS: PaintOptions = {
+  size: 30,
+  hardness: 80,
+  opacity: 100,
+  flow: 100,
+  dynamics: DEFAULT_DYNAMICS,
+  tipId: null,
+};
 
 export const PAINT_SIZE_MIN = 1;
 export const PAINT_SIZE_MAX = 1000;

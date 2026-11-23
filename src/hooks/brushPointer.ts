@@ -8,21 +8,30 @@ export function pressureOf(event: Event): number {
 
 /**
  * The brush's outline on the canvas's top layer, black and white so it shows
- * on any colour. `x`, `y` and `radius` are in screen pixels of the canvas.
+ * on any colour. `x`, `y` and `radius` are in screen pixels of the canvas; a
+ * tip less round than 1 is an ellipse turned `angle` degrees.
  */
-export function strokeBrushOutline(canvas: FabricCanvas, x: number, y: number, radius: number): void {
+export function strokeBrushOutline(
+  canvas: FabricCanvas,
+  x: number,
+  y: number,
+  radius: number,
+  roundness = 1,
+  angle = 0
+): void {
   if (radius < 2) return;
   const top = canvas.contextTop;
   const ratio = canvas.getRetinaScaling();
+  const turn = (-angle * Math.PI) / 180;
   top.save();
   top.setTransform(ratio, 0, 0, ratio, 0, 0);
   top.lineWidth = 1;
   top.beginPath();
-  top.arc(x, y, radius, 0, Math.PI * 2);
+  top.ellipse(x, y, radius, Math.max(1, radius * roundness), turn, 0, Math.PI * 2);
   top.strokeStyle = "rgba(0, 0, 0, 0.7)";
   top.stroke();
   top.beginPath();
-  top.arc(x, y, radius + 1, 0, Math.PI * 2);
+  top.ellipse(x, y, radius + 1, Math.max(2, radius * roundness + 1), turn, 0, Math.PI * 2);
   top.strokeStyle = "rgba(255, 255, 255, 0.8)";
   top.stroke();
   top.restore();

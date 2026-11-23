@@ -262,6 +262,11 @@ export interface EditorCommandContext {
   openSelectAndMask: () => void;
   /** Opens Filter › Liquify. */
   openLiquify: () => void;
+  /** View › Brush Settings, which floats over the canvas. */
+  brushSettingsPanel: boolean;
+  setBrushSettingsPanel: (open: boolean) => void;
+  /** Edit › Define Brush Preset: a brush from what is selected. */
+  defineBrush: () => void;
   /** View › Paths: the Paths section under the layers. */
   pathsPanel: boolean;
   setPathsPanel: (open: boolean) => void;
@@ -353,6 +358,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openColorRange,
     openSelectAndMask,
     openLiquify,
+    brushSettingsPanel,
+    setBrushSettingsPanel,
+    defineBrush,
     pathsPanel,
     setPathsPanel,
     adjustBrush,
@@ -858,6 +866,14 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         run: strokeSelection,
         isEnabled: () => !!pixelSelection(),
         keywords: "outline border selection edge",
+      },
+      {
+        id: "edit.defineBrush",
+        label: "Define brush preset…",
+        icon: Paintbrush,
+        run: defineBrush,
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "custom brush tip stamp from selection",
       },
 
       // ---------- Image ----------
@@ -1738,6 +1754,15 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         isChecked: () => histogram,
         toggle: true,
       },
+      {
+        id: "view.brushSettings",
+        label: "Brush settings",
+        icon: SlidersHorizontal,
+        run: () => setBrushSettingsPanel(!brushSettingsPanel),
+        isChecked: () => brushSettingsPanel,
+        toggle: true,
+        keywords: "brush tip spacing jitter scatter dynamics",
+      },
 
       // ---------- Help ----------
       {
@@ -2021,6 +2046,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openColorRange,
     openSelectAndMask,
     openLiquify,
+    brushSettingsPanel,
+    setBrushSettingsPanel,
+    defineBrush,
     pathsPanel,
     setPathsPanel,
     snapping,

@@ -42,6 +42,8 @@ import {
   Puzzle,
   Move,
   Eye,
+  FlipHorizontal2,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
@@ -64,6 +66,17 @@ import type { WandOptions } from "@/selection/magicWand";
 import { cn } from "@/lib/utils";
 import { isSelectionTool, usesPaintBrush } from "./toolGroups";
 import type { RetouchOptions } from "@/raster/retouchSettings";
+import { SYMMETRY_SEGMENTS, type SymmetryMode, type SymmetryOptions } from "@/raster/brushEngine";
+import { BrushPresetPicker } from "./BrushControls";
+
+const SYMMETRY_MODES: { value: SymmetryMode; label: string }[] = [
+  { value: "off", label: "No symmetry" },
+  { value: "vertical", label: "Vertical" },
+  { value: "horizontal", label: "Horizontal" },
+  { value: "dual", label: "Dual axis" },
+  { value: "radial", label: "Radial" },
+  { value: "mandala", label: "Mandala" },
+];
 import type { ToneRange } from "@/raster/retouchPainter";
 
 export interface BrushSettings {
@@ -106,6 +119,12 @@ interface OptionsBarProps {
   onWandChange: (change: Partial<WandOptions>) => void;
   retouch: RetouchOptions;
   onRetouchChange: (change: Partial<RetouchOptions>) => void;
+  /** Brush and eraser: paint mirrored or turned copies too. */
+  symmetry: SymmetryOptions;
+  onSymmetryChange: (symmetry: SymmetryOptions) => void;
+  /** Whether the Brush Settings panel is open. */
+  brushSettingsOpen: boolean;
+  onBrushSettingsOpenChange: (open: boolean) => void;
   /** The clone source is set by the next click (phones have no Alt key). */
   pickingSource: boolean;
   onPickingSourceChange: (picking: boolean) => void;
@@ -372,6 +391,10 @@ export function OptionsBar({
   onWandChange,
   retouch,
   onRetouchChange,
+  symmetry,
+  onSymmetryChange,
+  brushSettingsOpen,
+  onBrushSettingsOpenChange,
   pickingSource,
   onPickingSourceChange,
   warpMode,
@@ -626,6 +649,7 @@ export function OptionsBar({
   } else if (activeTool === "brush" || activeTool === "eraser") {
     options = (
       <>
+        <BrushPresetPicker paint={paint} onPaintChange={onPaintChange} compact={compact} />
         <Setting label="Size" value={`${paint.size}px`} keys="[ and ] change the size">
           <Slider
             value={[paintSizeToSlider(paint.size)]}
@@ -643,6 +667,58 @@ export function OptionsBar({
         {percentSetting("Hardness", "hardness", 0, "Shift+[ and Shift+] change the hardness")}
         {percentSetting("Opacity", "opacity", 1)}
         {percentSetting("Flow", "flow", 1)}
+        <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="Paint mirrored or turned copies of each stroke">
+          <FlipHorizontal2 className="h-3.5 w-3.5" aria-hidden="true" />
+          <select
+            aria-label="Symmetry"
+            value={symmetry.mode}
+            onChange={(event) => onSymmetryChange({ ...symmetry, mode: event.target.value as SymmetryMode })}
+            className="h-8 rounded-md border border-input bg-background px-1.5 text-xs text-foreground"
+          >
+            {SYMMETRY_MODES.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(symmetry.mode === "radial" || symmetry.mode === "mandala") && (
+          <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+            Segments
+            <input
+              type="number"
+              aria-label="Symmetry segments"
+              min={SYMMETRY_SEGMENTS[0]}
+              max={SYMMETRY_SEGMENTS[1]}
+              value={symmetry.segments}
+              onChange={(event) => {
+                const segments = Math.round(Number(event.target.value));
+                if (Number.isFinite(segments)) {
+                  onSymmetryChange({
+                    ...symmetry,
+                    segments: Math.min(SYMMETRY_SEGMENTS[1], Math.max(SYMMETRY_SEGMENTS[0], segments)),
+                  });
+                }
+              }}
+              className="h-8 w-12 rounded-md border border-input bg-background px-1.5 text-xs text-foreground"
+            />
+          </label>
+        )}
+        <button
+          type="button"
+          aria-label="Brush settings"
+          aria-pressed={brushSettingsOpen}
+          title="Brush settings: tip shape, jitter, scattering and transfer"
+          onClick={() => onBrushSettingsOpenChange(!brushSettingsOpen)}
+          className={cn(
+            "flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors [&_svg]:size-4",
+            brushSettingsOpen
+              ? "border-primary bg-primary/10 text-foreground"
+              : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+          )}
+        >
+          <SlidersHorizontal />
+        </button>
       </>
     );
   } else if (activeTool === "bucket") {

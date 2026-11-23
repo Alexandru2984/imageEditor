@@ -6,7 +6,16 @@ const point = (x: number, y = 0, pressure = 1) => ({ x, y, pressure });
 describe("DabSpacer", () => {
   it("stamps once where the stroke starts", () => {
     const spacer = new DabSpacer(20);
-    expect(spacer.add(point(5, 5))).toEqual([{ x: 5, y: 5, pressure: 1, diameter: 20 }]);
+    expect(spacer.add(point(5, 5))).toEqual([{ x: 5, y: 5, pressure: 1, diameter: 20, direction: 0 }]);
+  });
+
+  it("knows which way the stroke goes, and can leave the size to the brush instead of the pen", () => {
+    const spacer = new DabSpacer(20, 0.25, false);
+    spacer.add({ x: 0, y: 0, pressure: 0.2 });
+    const dabs = spacer.add({ x: 0, y: 20, pressure: 0.2 });
+    expect(dabs.length).toBe(4);
+    expect(dabs.every((dab) => dab.diameter === 20)).toBe(true);
+    expect(dabs[0]!.direction).toBeCloseTo(Math.PI / 2);
   });
 
   it("spaces dabs a quarter of the tip apart along the path", () => {

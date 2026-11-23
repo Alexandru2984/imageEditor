@@ -1,5 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import type { Canvas as FabricCanvas, FabricImage, FabricObject, TPointerEventInfo } from "fabric";
+import { util, type Canvas as FabricCanvas, type FabricImage, type FabricObject, type TMat2D, type TPointerEventInfo } from "fabric";
 import { toast } from "sonner";
 import {
   beginPixelEdit,
@@ -13,7 +13,9 @@ import {
   sceneToLayerPixel,
 } from "@/raster/pixelLayer";
 import { StrokePainter } from "@/raster/painter";
-import { bucketFill, bucketFillPixels, type BucketOptions } from "@/raster/fill";
+import { symmetryAxes, symmetryTransforms, type SymmetryOptions } from "@/raster/brushEngine";
+import { brushTip } from "@/utils/brushPresets";
+import { bucketFill, bucketFillPixels, sceneToLayerMatrix, type BucketOptions } from "@/raster/fill";
 import { currentMaskPixels, editedMaskLayer, maskTargetOf, type MaskableLayer } from "@/raster/layerMask";
 import { isDocumentLayer } from "@/adjustments/documentLayer";
 import { onSelectedGroupChange } from "@/layers/layerGroups";
@@ -24,7 +26,7 @@ import type { StrokePoint } from "@/raster/stroke";
 import { ensureLayerId, type EditorFabricObject, isObjectLocked, isTransparencyLocked } from "@/utils/editorObjects";
 import { nativeMultiplier } from "@/utils/flatten";
 import { releaseCanvas, restrictToClip, selectionClip, snapshotSurface } from "@/selection/clip";
-import { sceneToGrid, selectionOf } from "@/selection/state";
+import { documentGrid, sceneToGrid, selectionOf } from "@/selection/state";
 import { commitQuickMask, isQuickMaskPixels, quickMaskPixels } from "@/selection/quickMask";
 import { toolStepName } from "@/utils/historySteps";
 import type { Tool } from "@/types/editor";
@@ -41,6 +43,8 @@ interface UsePaintToolOptions {
   paint: PaintOptions;
   bucket: BucketOptions;
   gradient: GradientOptions;
+  /** Brush and eraser: paint mirrored or turned copies of each stroke too. */
+  symmetry: SymmetryOptions;
   spaceDownRef: MutableRefObject<boolean>;
 }
 
@@ -80,10 +84,16 @@ export function usePaintTool({
   paint,
   bucket,
   gradient,
+  symmetry,
   spaceDownRef,
 }: UsePaintToolOptions): void {
-  const settingsRef = useRef({ color, secondaryColor, paint, bucket, gradient });
-  settingsRef.current = { color, secondaryColor, paint, bucket, gradient };
+  const settingsRef = useRef({ color, secondaryColor, paint, bucket, gradient, symmetry });
+  settingsRef.current = { color, secondaryColor, paint, bucket, gradient, symmetry };
+  /** Redraws the brush outline and the symmetry axes, while a painting tool is on. */
+  const redrawRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    redrawRef.current?.();
+  }, [symmetry.mode, symmetry.segments, paint.dynamics.angle, paint.dynamics.roundness]);
   /** The layer the tools paint on, kept across tool switches. */
   const targetIdRef = useRef<string | null>(null);
   // A layer from a previous document never carries over.
@@ -166,16 +176,57 @@ export function usePaintTool({
     const lastPoints = new WeakMap<FabricImage, StrokePoint>();
     let outline: { x: number; y: number } | null = null;
 
+    /** The lines symmetry painting turns about, through the document's middle. */
+    const drawAxes = () => {
+      const axes = symmetryAxes(settingsRef.current.symmetry);
+      const grid = documentGrid(canvas);
+      if (!axes.length || !grid) return;
+      const top = canvas.contextTop;
+      const ratio = canvas.getRetinaScaling();
+      const [a, b, c, d, e, f] = canvas.viewportTransform;
+      const width = grid.width / grid.scale;
+      const height = grid.height / grid.scale;
+      const cx = grid.left + width / 2;
+      const cy = grid.top + height / 2;
+      const reach = Math.hypot(width, height) / 2;
+      const screen = (x: number, y: number) => [a * x + c * y + e, b * x + d * y + f] as const;
+      top.save();
+      top.setTransform(ratio, 0, 0, ratio, 0, 0);
+      // Kept to the document.
+      const corner = screen(grid.left, grid.top);
+      const far = screen(grid.left + width, grid.top + height);
+      top.beginPath();
+      top.rect(corner[0], corner[1], far[0] - corner[0], far[1] - corner[1]);
+      top.clip();
+      top.setLineDash([6, 4]);
+      top.lineWidth = 1.5;
+      top.strokeStyle = "rgba(168, 85, 247, 0.85)";
+      top.beginPath();
+      for (const angle of axes) {
+        const from = screen(cx, cy);
+        const to = screen(cx + Math.sin(angle) * reach, cy - Math.cos(angle) * reach);
+        top.moveTo(from[0], from[1]);
+        top.lineTo(to[0], to[1]);
+      }
+      top.stroke();
+      top.restore();
+    };
+
     const drawOutline = () => {
       // The vector eraser draws its own trail on the same layer.
       if (canvas.isDrawingMode || filling || blending) return;
-      const top = canvas.contextTop;
+      // Fabric takes the top layer away while it renders an export.
+      const top = canvas.contextTop as CanvasRenderingContext2D | undefined;
+      if (!top) return;
       canvas.clearContext(top);
+      drawAxes();
       if (!outline) return;
       const multiplier = nativeMultiplier(canvas);
-      const radius = (settingsRef.current.paint.size / 2 / multiplier) * canvas.getZoom();
-      strokeBrushOutline(canvas, outline.x, outline.y, radius);
+      const { size, dynamics } = settingsRef.current.paint;
+      const radius = (size / 2 / multiplier) * canvas.getZoom();
+      strokeBrushOutline(canvas, outline.x, outline.y, radius, dynamics.roundness / 100, dynamics.angle);
     };
+    redrawRef.current = drawOutline;
 
     const render = () => {
       if (!stroke) return;
@@ -389,6 +440,18 @@ export function usePaintTool({
       const keepAlpha = !target.mask && isTransparencyLocked(layer);
       // Sizes are in image pixels; this layer may be stored at another scale.
       const layerPerImagePixel = layerPixelsPerSceneUnit(layer) / nativeMultiplier(canvas);
+      // Symmetry turns about the document's middle, in this layer's pixels.
+      let mirrors: TMat2D[] = [];
+      const grid = documentGrid(canvas);
+      if (grid && settingsRef.current.symmetry.mode !== "off") {
+        const toLayer = sceneToLayerMatrix(layer);
+        const fromLayer = util.invertTransform(toLayer);
+        const cx = grid.left + grid.width / grid.scale / 2;
+        const cy = grid.top + grid.height / grid.scale / 2;
+        mirrors = symmetryTransforms(settingsRef.current.symmetry, cx, cy).map((turn) =>
+          util.multiplyTransformMatrices(toLayer, util.multiplyTransformMatrices(turn, fromLayer))
+        );
+      }
       const painter = new StrokePainter(session.surface, {
         diameter: Math.max(0.5, options.size * layerPerImagePixel),
         hardness: options.hardness / 100,
@@ -400,6 +463,9 @@ export function usePaintTool({
         // A second finger turns the stroke into a pinch; it must be undone.
         cancellable: (event as PointerEvent).pointerType === "touch",
         clip: clipFor(layer, session.surface),
+        dynamics: options.dynamics,
+        tip: brushTip(options.tipId),
+        mirrors,
       });
       stroke = { layer, painter, createdLayer: target.created, frame: null };
       const point = layerPoint(layer, event);
@@ -496,7 +562,10 @@ export function usePaintTool({
     canvas.on("mouse:out", onOut);
     canvas.on("selection:created", onSelection);
     canvas.on("selection:updated", onSelection);
+    // Zooming and panning move the symmetry axes.
+    canvas.on("after:render", drawOutline);
     window.addEventListener("touchstart", onTouchStart, { passive: true });
+    drawOutline();
 
     return () => {
       finishStroke();
@@ -508,6 +577,8 @@ export function usePaintTool({
       canvas.off("mouse:out", onOut);
       canvas.off("selection:created", onSelection);
       canvas.off("selection:updated", onSelection);
+      canvas.off("after:render", drawOutline);
+      redrawRef.current = null;
       unsubscribeMask();
       unsubscribeQuickMask();
       unsubscribePicks();

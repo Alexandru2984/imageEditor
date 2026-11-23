@@ -49,6 +49,7 @@ import type { WandOptions } from "@/selection/magicWand";
 import { SelectionTaskBar } from "./SelectionTaskBar";
 import { isSelectionTool } from "./toolGroups";
 import type { PaintOptions } from "@/raster/paintSettings";
+import type { SymmetryOptions } from "@/raster/brushEngine";
 import type { BucketOptions } from "@/raster/fill";
 import type { GradientOptions } from "@/raster/gradient";
 import { findBackgroundImage } from "@/utils/viewport";
@@ -64,6 +65,8 @@ interface CanvasProps {
   brushKind: BrushKind;
   /** Pixel brush and eraser settings (sizes in image pixels). */
   paint: PaintOptions;
+  /** Brush and eraser: paint mirrored or turned copies too. */
+  symmetry: SymmetryOptions;
   bucket: BucketOptions;
   gradient: GradientOptions;
   /** How a new selection shape joins the selection. */
@@ -130,6 +133,7 @@ export const Canvas = ({
   brushOpacity,
   brushKind,
   paint,
+  symmetry,
   bucket,
   gradient,
   selectionMode,
@@ -1005,6 +1009,7 @@ export const Canvas = ({
     paint,
     bucket,
     gradient,
+    symmetry,
     spaceDownRef,
   });
 
