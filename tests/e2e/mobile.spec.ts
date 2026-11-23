@@ -434,3 +434,23 @@ test("an adjustment layer is added from the Layers panel and set in Properties o
   await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.type)).toEqual(["Image", "AdjustmentLayer"]);
   await expectNoSidewaysScroll(page);
 });
+
+test("a dialog opened from the phone menu leaves the page tappable when it closes", async ({ page }) => {
+  await openPhoto(page);
+  for (const [menu, item, title] of [
+    ["Image", "Image Size…", "Image Size"],
+    ["Select", "Color Range…", "Color Range"],
+  ] as const) {
+    await page.getByRole("button", { name: "Menu" }).tap();
+    await page.getByRole("menuitem", { name: menu, exact: true }).tap();
+    await page.getByRole("menuitem", { name: item }).first().tap();
+    const dialog = page.getByRole("dialog", { name: title });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Cancel" }).tap();
+    await expect(dialog).toBeHidden();
+    // Menus and dialogs share one record of what blocks the page, so it is unblocked again.
+    await expect.poll(() => page.evaluate(() => document.body.style.pointerEvents)).not.toBe("none");
+  }
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await expect(page.getByRole("menuitem", { name: "File", exact: true })).toBeVisible();
+});
