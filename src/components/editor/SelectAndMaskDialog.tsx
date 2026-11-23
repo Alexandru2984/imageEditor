@@ -313,7 +313,7 @@ export function SelectAndMaskDialog({ canvas, open: isOpen, onClose }: SelectAnd
 
   return (
     <Dialog open={isOpen} onOpenChange={(next) => !next && !busy && onClose()}>
-      <DialogContent className="max-h-[95dvh] max-w-3xl overflow-y-auto">
+      <DialogContent className="max-h-[95dvh] overflow-y-auto sm:max-w-3xl">
         <form onSubmit={apply} className="grid gap-3">
           <DialogHeader>
             <DialogTitle>Select and Mask</DialogTitle>
