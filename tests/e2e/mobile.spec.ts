@@ -489,3 +489,18 @@ test("the colour picker fits the phone and sets the brush colour", async ({ page
   await expect(picker).toHaveCount(0);
   await expect(foreground).toHaveAttribute("data-color", "#ff8800");
 });
+
+test("the Character and Paragraph settings of text fit the phone", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Text (T)" }).tap();
+  const center = await canvasCenter(page);
+  await page.touchscreen.tap(center.x - 60, center.y);
+  await page.getByRole("button", { name: "Toggle properties" }).tap();
+  const alignment = page.getByRole("radiogroup", { name: "Paragraph alignment" });
+  await alignment.scrollIntoViewIfNeeded();
+  await expectOnScreen(page, alignment);
+  await expectOnScreen(page, page.getByLabel("Space after paragraph"));
+  await expectNoSidewaysScroll(page);
+  await alignment.getByRole("radio", { name: "Justify all" }).tap();
+  await expect.poll(async () => (await autosavedObjects(page)).find((object) => object.type === "IText")?.textAlign).toBe("justify");
+});

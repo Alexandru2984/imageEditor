@@ -294,6 +294,31 @@ describe("readProjectFile", () => {
     ).rejects.toThrow(/unsafe text value/);
   });
 
+  it("accepts text's paragraph spacing and character styles, and rejects hostile spacing", async () => {
+    const text = (extra: Record<string, unknown>) => ({
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "IText",
+            text: "E = mc2",
+            textAlign: "justify-center",
+            linethrough: true,
+            styles: [{ start: 6, end: 7, style: { fontSize: 24, deltaY: -14 } }],
+            ...extra,
+          },
+        ],
+      }),
+      srcs: [],
+    });
+    const read = (snapshot: object) => readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })));
+    await expect(read(text({ paragraphSpaceBefore: 4, paragraphSpaceAfter: 1000 }))).resolves.toBeTruthy();
+    for (const hostile of [-1, 1001, "12", Number.MAX_SAFE_INTEGER, null]) {
+      await expect(read(text({ paragraphSpaceAfter: hostile })), String(hostile)).rejects.toThrow(/unsafe paragraphSpaceAfter value/);
+    }
+    await expect(read(text({ paragraphSpaceBefore: "1e9" }))).rejects.toThrow(/unsafe paragraphSpaceBefore value/);
+    await expect(read(text({ styles: [{ start: 0, end: 1, style: { deltaY: 1e9 } }] }))).rejects.toThrow(/unsafe deltaY value/);
+  });
+
   it("accepts a layer mask whose image is an inline data image", async () => {
     const snapshot = {
       json: '{"objects":[{"type":"image","src":"__snapshot_src_0","layerMask":{"src":"__snapshot_src_1","enabled":false}}]}',

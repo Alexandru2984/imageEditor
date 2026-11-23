@@ -32,6 +32,9 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "__clipped",
   "passThrough",
   "collapsed",
+  // Paragraph settings of text.
+  "paragraphSpaceBefore",
+  "paragraphSpaceAfter",
 ];
 
 export interface CanvasSnapshot {

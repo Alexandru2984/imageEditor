@@ -5,9 +5,15 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  CaseLower,
+  CaseSensitive,
+  CaseUpper,
   Check,
   ChevronDown,
   Italic,
+  Strikethrough,
+  Subscript,
+  Superscript,
   Underline,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
@@ -17,6 +23,14 @@ import { cn } from "@/lib/utils";
 import { FONT_OPTIONS, cssFontFamily, ensureFontLoaded, isBundledFont } from "@/utils/fonts";
 import { TEXT_STYLES, type TextStyleProps } from "@/utils/textStyles";
 import { ColorField } from "./ColorPicker";
+import {
+  PARAGRAPH_SPACE_MAX,
+  changeCase,
+  scriptOf,
+  withScript,
+  type CharacterLocation,
+  type CharacterStyles,
+} from "@/text/typography";
 
 export type TextObject = FabricObject & {
   text?: string;
@@ -30,7 +44,14 @@ export type TextObject = FabricObject & {
   lineHeight?: number;
   textBackgroundColor?: string;
   paintFirst?: string;
+  linethrough?: boolean;
+  styles?: CharacterStyles;
+  paragraphSpaceBefore?: number;
+  paragraphSpaceAfter?: number;
   isEditing?: boolean;
+  selectionStart?: number;
+  selectionEnd?: number;
+  get2DCursorLocation?: (index: number, skipWrapping?: boolean) => CharacterLocation;
   exitEditing?: () => void;
 };
 
@@ -56,6 +77,29 @@ const toggleClass = (active: boolean) =>
       ? "border-primary bg-primary/15 text-foreground"
       : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
   );
+
+/** A justify icon: full lines, the last one placed as `last` says. */
+const justifyIcon = (last: "left" | "center" | "right" | "full") => {
+  const x = { left: 2, center: 5, right: 8, full: 2 }[last];
+  const width = last === "full" ? 12 : 6;
+  return (
+    <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" aria-hidden="true">
+      <path d="M2 3.5h12M2 7h12M2 10.5h12" />
+      <path d={`M${x} 14h${width}`} />
+    </svg>
+  );
+};
+
+/** Photoshop's seven paragraph alignments. */
+const ALIGNMENTS = [
+  { value: "left", label: "Align text left", icon: <AlignLeft className="h-3.5 w-3.5" /> },
+  { value: "center", label: "Align text center", icon: <AlignCenter className="h-3.5 w-3.5" /> },
+  { value: "right", label: "Align text right", icon: <AlignRight className="h-3.5 w-3.5" /> },
+  { value: "justify-left", label: "Justify last left", icon: justifyIcon("left") },
+  { value: "justify-center", label: "Justify last centered", icon: justifyIcon("center") },
+  { value: "justify-right", label: "Justify last right", icon: justifyIcon("right") },
+  { value: "justify", label: "Justify all", icon: justifyIcon("full") },
+] as const;
 
 const SliderRow = ({
   label,
@@ -108,6 +152,27 @@ export const TextControls = ({ object, readOnly, activeColor, apply, commit }: T
   const leaveEditing = () => {
     if (object.isEditing) object.exitEditing?.();
   };
+
+  /** Where superscript and subscript apply: the selected characters while editing, else all. */
+  const scriptRange = (): CharacterLocation[] => {
+    const length = typeof object.text === "string" ? object.text.length : 0;
+    let start = 0;
+    let end = length;
+    if (object.isEditing && (object.selectionEnd ?? 0) > (object.selectionStart ?? 0)) {
+      start = object.selectionStart ?? 0;
+      end = object.selectionEnd ?? length;
+    }
+    const locate = object.get2DCursorLocation?.bind(object);
+    if (!locate) return [];
+    const locations: CharacterLocation[] = [];
+    for (let index = start; index < end; index += 1) {
+      const location = locate(index, true);
+      // Line breaks take no style.
+      if (object.text?.[index] !== "\n") locations.push({ lineIndex: location.lineIndex, charIndex: location.charIndex });
+    }
+    return locations;
+  };
+  const script = scriptOf(object.styles, scriptRange());
 
   const setFont = async (next: string) => {
     setFontsOpen(false);
@@ -214,97 +279,183 @@ export const TextControls = ({ object, readOnly, activeColor, apply, commit }: T
         </Popover>
       </div>
 
-      <SliderRow
-        label="Font size"
-        value={Math.round(fontSize)}
-        display={`${Math.round(fontSize)}px`}
-        min={8}
-        max={400}
-        step={1}
-        disabled={readOnly}
-        onChange={(value) => apply({ fontSize: value }, "schedule")}
-        onCommit={commit}
-      />
+      <div className="space-y-3">
+        <Label className="block text-xs font-medium text-muted-foreground">Character</Label>
+        <SliderRow
+          label="Font size"
+          value={Math.round(fontSize)}
+          display={`${Math.round(fontSize)}px`}
+          min={8}
+          max={400}
+          step={1}
+          disabled={readOnly}
+          onChange={(value) => apply({ fontSize: value }, "schedule")}
+          onCommit={commit}
+        />
 
-      <div className="flex items-center gap-1">
-        {(
-          [
-            ["Bold", Bold, object.fontWeight === "bold" || object.fontWeight === 700, () => ({
-              fontWeight: object.fontWeight === "bold" || object.fontWeight === 700 ? "normal" : "bold",
-            })],
-            ["Italic", Italic, object.fontStyle === "italic", () => ({
-              fontStyle: object.fontStyle === "italic" ? "normal" : "italic",
-            })],
-            ["Underline", Underline, !!object.underline, () => ({ underline: !object.underline })],
-          ] as const
-        ).map(([label, Icon, active, changes]) => (
-          <button
-            key={label}
-            type="button"
-            aria-label={label}
-            aria-pressed={active}
+        <div className="flex items-center gap-1">
+          {(
+            [
+              ["Bold", Bold, object.fontWeight === "bold" || object.fontWeight === 700, () => ({
+                fontWeight: object.fontWeight === "bold" || object.fontWeight === 700 ? "normal" : "bold",
+              })],
+              ["Italic", Italic, object.fontStyle === "italic", () => ({
+                fontStyle: object.fontStyle === "italic" ? "normal" : "italic",
+              })],
+              ["Underline", Underline, !!object.underline, () => ({ underline: !object.underline })],
+              ["Strikethrough", Strikethrough, !!object.linethrough, () => ({ linethrough: !object.linethrough })],
+            ] as const
+          ).map(([label, Icon, active, changes]) => (
+            <button
+              key={label}
+              type="button"
+              aria-label={label}
+              title={label}
+              aria-pressed={active}
+              disabled={readOnly}
+              onClick={async () => {
+                const next = changes();
+                if ("fontWeight" in next || "fontStyle" in next) {
+                  await ensureFontLoaded(
+                    family,
+                    "fontWeight" in next ? next.fontWeight : (object.fontWeight ?? 400),
+                    "fontStyle" in next ? next.fontStyle : (object.fontStyle ?? "normal")
+                  );
+                }
+                apply(next, "commit");
+              }}
+              className={toggleClass(active)}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+          <div className="mx-0.5 h-6 w-px bg-border" />
+          {(
+            [
+              ["superscript", "Superscript", Superscript],
+              ["subscript", "Subscript", Subscript],
+            ] as const
+          ).map(([kind, label, Icon]) => (
+            <button
+              key={kind}
+              type="button"
+              aria-label={label}
+              title={object.isEditing ? `${label} (the selected characters)` : label}
+              aria-pressed={script === kind}
+              disabled={readOnly || !object.get2DCursorLocation}
+              onClick={() => apply({ styles: withScript(object.styles, scriptRange(), fontSize, script === kind ? null : kind) }, "commit")}
+              className={toggleClass(script === kind)}
+            >
+              <Icon className="h-3.5 w-3.5" />
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1">
+          {(
+            [
+              ["upper", "Uppercase", CaseUpper],
+              ["lower", "Lowercase", CaseLower],
+              ["title", "Title case", CaseSensitive],
+            ] as const
+          ).map(([to, label, Icon]) => (
+            <button
+              key={to}
+              type="button"
+              aria-label={label}
+              title={`Change to ${label.toLowerCase()}`}
+              disabled={readOnly}
+              onClick={() => {
+                if (typeof object.text !== "string") return;
+                leaveEditing();
+                const text = changeCase(object.text, to);
+                if (text !== object.text) apply({ text }, "commit");
+              }}
+              className={cn(toggleClass(false), "gap-1 text-xs")}
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <SliderRow
+            label="Letter spacing"
+            value={Math.round(object.charSpacing ?? 0)}
+            display={`${Math.round(object.charSpacing ?? 0)}`}
+            min={-100}
+            max={800}
+            step={10}
             disabled={readOnly}
-            onClick={async () => {
-              const next = changes();
-              if ("fontWeight" in next || "fontStyle" in next) {
-                await ensureFontLoaded(
-                  family,
-                  "fontWeight" in next ? next.fontWeight : (object.fontWeight ?? 400),
-                  "fontStyle" in next ? next.fontStyle : (object.fontStyle ?? "normal")
-                );
-              }
-              apply(next, "commit");
-            }}
-            className={toggleClass(active)}
-          >
-            <Icon className="h-3.5 w-3.5" />
-          </button>
-        ))}
-        <div className="mx-0.5 h-6 w-px bg-border" />
-        {(
-          [
-            ["left", AlignLeft],
-            ["center", AlignCenter],
-            ["right", AlignRight],
-          ] as const
-        ).map(([align, Icon]) => (
-          <button
-            key={align}
-            type="button"
-            aria-label={`Align text ${align}`}
-            aria-pressed={object.textAlign === align}
+            onChange={(value) => apply({ charSpacing: value }, "schedule")}
+            onCommit={commit}
+          />
+          <SliderRow
+            label="Line height"
+            value={Math.round((object.lineHeight ?? 1.16) * 100)}
+            display={(object.lineHeight ?? 1.16).toFixed(2)}
+            min={70}
+            max={300}
+            step={5}
             disabled={readOnly}
-            onClick={() => apply({ textAlign: align }, "commit")}
-            className={toggleClass(object.textAlign === align)}
-          >
-            <Icon className="h-3.5 w-3.5" />
-          </button>
-        ))}
+            onChange={(value) => apply({ lineHeight: value / 100 }, "schedule")}
+            onCommit={commit}
+          />
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <SliderRow
-          label="Letter spacing"
-          value={Math.round(object.charSpacing ?? 0)}
-          display={`${Math.round(object.charSpacing ?? 0)}`}
-          min={-100}
-          max={800}
-          step={10}
-          disabled={readOnly}
-          onChange={(value) => apply({ charSpacing: value }, "schedule")}
-          onCommit={commit}
-        />
-        <SliderRow
-          label="Line height"
-          value={Math.round((object.lineHeight ?? 1.16) * 100)}
-          display={(object.lineHeight ?? 1.16).toFixed(2)}
-          min={70}
-          max={300}
-          step={5}
-          disabled={readOnly}
-          onChange={(value) => apply({ lineHeight: value / 100 }, "schedule")}
-          onCommit={commit}
-        />
+      <div className="space-y-3">
+        <Label className="block text-xs font-medium text-muted-foreground">Paragraph</Label>
+        <div role="radiogroup" aria-label="Paragraph alignment" className="flex items-center gap-1">
+          {ALIGNMENTS.map(({ value, label, icon }) => {
+            const active = (object.textAlign ?? "left") === value;
+            return (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-label={label}
+                title={label}
+                aria-checked={active}
+                disabled={readOnly}
+                onClick={() => apply({ textAlign: value }, "commit")}
+                className={toggleClass(active)}
+              >
+                {icon}
+              </button>
+            );
+          })}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {(
+            [
+              ["paragraphSpaceBefore", "Space before paragraph", "Before"],
+              ["paragraphSpaceAfter", "Space after paragraph", "After"],
+            ] as const
+          ).map(([key, label, short]) => (
+            <label key={key} className="grid gap-1.5">
+              <span className="text-xs font-medium text-muted-foreground">{short}</span>
+              <span className="flex items-center gap-1">
+                <input
+                  type="number"
+                  aria-label={label}
+                  disabled={readOnly}
+                  min={0}
+                  max={PARAGRAPH_SPACE_MAX}
+                  step={1}
+                  value={Math.round(object[key] ?? 0)}
+                  onChange={(event) => {
+                    const value = Number.parseFloat(event.target.value);
+                    if (Number.isFinite(value)) apply({ [key]: Math.min(PARAGRAPH_SPACE_MAX, Math.max(0, value)) }, "schedule");
+                  }}
+                  onBlur={commit}
+                  className="h-8 w-full min-w-0 rounded-md border border-input bg-background px-2 text-right text-xs tabular-nums disabled:opacity-50"
+                />
+                <span className="text-xs text-muted-foreground">px</span>
+              </span>
+            </label>
+          ))}
+        </div>
       </div>
 
       <div className="space-y-2.5">

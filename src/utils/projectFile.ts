@@ -11,6 +11,7 @@ import { readAdjustment } from "@/adjustments/adjustmentData";
 import { readFill } from "@/adjustments/fillLayer";
 import { isGuideList } from "./guideData";
 import { isPathList } from "@/paths/pathData";
+import { PARAGRAPH_SPACE_MAX } from "@/text/typography";
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -123,6 +124,8 @@ const NUMERIC_PROPERTY_LIMITS = new Map<
   ["fontSize", { min: 0, max: MAX_OBJECT_DIMENSION }],
   ["lineHeight", { min: 0, max: 1_000 }],
   ["charSpacing", { min: -100_000, max: 100_000 }],
+  ["paragraphSpaceBefore", { min: 0, max: PARAGRAPH_SPACE_MAX }],
+  ["paragraphSpaceAfter", { min: 0, max: PARAGRAPH_SPACE_MAX }],
   ["deltaY", { min: -MAX_OBJECT_DIMENSION, max: MAX_OBJECT_DIMENSION }],
   ["scaleX", { min: -MAX_OBJECT_SCALE, max: MAX_OBJECT_SCALE }],
   ["scaleY", { min: -MAX_OBJECT_SCALE, max: MAX_OBJECT_SCALE }],

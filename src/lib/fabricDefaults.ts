@@ -6,6 +6,7 @@ import { registerGroupClasses } from "@/layers/groupMarkers";
 import { registerAdjustmentClasses } from "@/adjustments/adjustmentLayer";
 import { FillLayer } from "@/adjustments/fillLayer";
 import { paintFillLayer } from "@/compositing/fillPaint";
+import { installParagraphSpacing } from "@/text/typography";
 
 /**
  * Fabric 7 changed the default object origin from left/top to center. Every
@@ -34,6 +35,8 @@ export function applyFabricDefaults(): void {
   installCompositor(adjustmentMaskOver);
   // Fill layers draw their colour or gradient over the document.
   FillLayer.painter = paintFillLayer;
+  // Text keeps Photoshop's space before and after paragraphs.
+  installParagraphSpacing();
 }
 
 applyFabricDefaults();
