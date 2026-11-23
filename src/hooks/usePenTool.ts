@@ -41,10 +41,15 @@ type Drag =
   /** Alt on an anchor (Convert Point): a click makes a corner, a drag pulls out new handles. */
   | { kind: "convert"; start: Point; base: DocumentPath[]; path: number; ref: AnchorRef; dragged: boolean };
 
-const isTypingTarget = (target: EventTarget | null): boolean => {
+/** Keys typed in a field, or meant for an open menu, dialog or list, are not the Pen's. */
+const isElsewhere = (target: EventTarget | null): boolean => {
   const element = target as HTMLElement | null;
   if (!element || !element.tagName) return false;
-  return element.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName);
+  return (
+    element.isContentEditable ||
+    ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName) ||
+    element.closest('[role="menu"], [role="menubar"], [role="dialog"], [role="alertdialog"], [role="listbox"]') !== null
+  );
 };
 
 const clonePaths = (paths: readonly DocumentPath[]): DocumentPath[] => structuredClone(paths) as DocumentPath[];
@@ -362,7 +367,7 @@ export function usePenTool({ canvasRef, canvasKey, activeTool, spaceDownRef }: U
     const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isTypingTarget(event.target) || event.ctrlKey || event.metaKey) return;
+      if (event.defaultPrevented || isElsewhere(event.target) || event.ctrlKey || event.metaKey) return;
       if (pen && view.drawing !== null) {
         if (event.key === "Enter" || event.key === "Escape") {
           view.setDrawing(null);

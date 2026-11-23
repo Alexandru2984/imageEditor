@@ -213,3 +213,19 @@ test("the Paths panel makes selections, fills, strokes and shapes from a path", 
   await page.keyboard.press("Control+z");
   await expect.poll(async () => (await savedPaths(page)).map((path) => path.name)).toEqual(["Outline"]);
 });
+
+test("Escape closes a menu opened while the Pen draws, and the path goes on", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff");
+  await arm(page, "p", "Pen");
+  const c = await canvasCenter(page);
+  await page.mouse.click(c.x - 100, c.y);
+  await page.mouse.click(c.x, c.y - 50);
+  await expect.poll(async () => (await savedPaths(page))[0]?.subpaths[0]?.anchors.length).toBe(2);
+  await page.getByRole("menuitem", { name: "View", exact: true }).click();
+  await expect(page.getByRole("menu")).toHaveCount(1);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  // The menu had the key: the same subpath takes the next anchor.
+  await page.mouse.click(c.x + 100, c.y);
+  await expect.poll(async () => (await savedPaths(page))[0]?.subpaths.map((subpath) => subpath.anchors.length)).toEqual([3]);
+});
