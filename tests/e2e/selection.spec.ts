@@ -292,16 +292,14 @@ test("Select › Color Range selects the colours clicked in its preview", async 
   // Nothing to select before a colour is picked.
   await expect(ok).toBeDisabled();
   const preview = dialog.getByTestId("color-range-preview");
-  /** Where a photo pixel is in the preview, once the dialog has stopped opening. */
+  /**
+   * Where a photo pixel is in the preview, once the dialog has stopped
+   * opening: until its zoom-in animation ends the preview is elsewhere, and
+   * a slow frame can show the same place twice in a row.
+   */
   const previewPoint = async (x: number, y: number) => {
-    let box = (await preview.boundingBox())!;
-    await expect
-      .poll(async () => {
-        const previous = box;
-        box = (await preview.boundingBox())!;
-        return JSON.stringify(box) === JSON.stringify(previous);
-      })
-      .toBe(true);
+    await dialog.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished)));
+    const box = (await preview.boundingBox())!;
     return { x: box.x + (x / 400) * box.width, y: box.y + (y / 300) * box.height };
   };
   const red = await previewPoint(100, 150);
