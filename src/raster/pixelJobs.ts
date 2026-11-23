@@ -28,6 +28,8 @@ import {
 } from "./filters";
 import { inpaint } from "./inpaint";
 import { liquifyPixels } from "./liquify";
+import { contentAwareMovePixels, patchPixels } from "./patch";
+import { fixRedEye } from "./redEye";
 import { motionBlur } from "./motionBlur";
 
 /**
@@ -65,7 +67,16 @@ export type PixelJob =
    * displacement there, from a field of `columns` × `rows` nodes `cell`
    * pixels apart (dx, dy each); `reach` is the longest displacement.
    */
-  | { op: "liquify"; field: Float32Array; columns: number; rows: number; cell: number; reach: number };
+  | { op: "liquify"; field: Float32Array; columns: number; rows: number; cell: number; reach: number }
+  /** Patch: where `covered` (the region's size) is set, the pixels `source` away, healed in. */
+  | { op: "patch"; covered: Uint8Array; sourceX: number; sourceY: number; reach: number }
+  /**
+   * Content-Aware Move: what `moved` covers goes `offset` away, healed in;
+   * unless `extend`, where it was is filled in from around it.
+   */
+  | { op: "contentAwareMove"; moved: Uint8Array; offsetX: number; offsetY: number; extend: boolean; reach: number; seed?: number }
+  /** Red Eye: the red pupil nearest the region's middle made grey and dark. */
+  | { op: "redEye"; pupilSize: number; darken: number };
 
 /** How many pixels around each one a job looks at. */
 export function jobReach(job: PixelJob): number {
@@ -85,6 +96,8 @@ export function jobReach(job: PixelJob): number {
       return 1;
     case "inpaint":
     case "liquify":
+    case "patch":
+    case "contentAwareMove":
       return job.reach;
     default:
       return 0;
@@ -136,6 +149,10 @@ export function runJob(job: PixelJob, area: JobArea, width: number, height: numb
       return warpPixels(area, job.inverse, width, height);
     case "liquify":
       return liquifyPixels({ data: job.field, columns: job.columns, rows: job.rows, cell: job.cell }, area, width, height);
+    case "patch":
+      return patchPixels(area, width, height, job.covered, { x: job.sourceX, y: job.sourceY });
+    case "contentAwareMove":
+      return contentAwareMovePixels(area, width, height, job.moved, { x: job.offsetX, y: job.offsetY }, job.extend, job.seed);
   }
   // Pixel by pixel: only the region itself.
   let source = area.data;
@@ -164,6 +181,9 @@ export function runJob(job: PixelJob, area: JobArea, width: number, height: numb
       break;
     case "colorBalance":
       colorBalance(source, out, job.settings);
+      break;
+    case "redEye":
+      out.set(fixRedEye(source, width, height, job) ?? source);
       break;
   }
   return out;

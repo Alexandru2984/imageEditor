@@ -17,6 +17,9 @@ import {
   Droplet,
   Triangle,
   Pointer,
+  Puzzle,
+  Move,
+  Eye,
   type LucideIcon,
 } from "lucide-react";
 import type { Tool } from "@/types/editor";
@@ -136,7 +139,7 @@ export const CLONE_STAMP_TOOL: GroupedToolDef<"cloneStamp"> = {
 };
 
 /** Photoshop's healing group (J). */
-export type HealingTool = "spotHealing" | "healingBrush";
+export type HealingTool = "spotHealing" | "healingBrush" | "patch" | "contentAwareMove" | "redEye";
 
 export const HEALING_TOOLS: GroupedToolDef<HealingTool>[] = [
   {
@@ -153,9 +156,34 @@ export const HEALING_TOOLS: GroupedToolDef<HealingTool>[] = [
     name: "Healing brush",
     description: "Alt-click a source; the copy blends into where it lands",
   },
+  {
+    id: "patch",
+    icon: Puzzle,
+    label: "Patch (J)",
+    name: "Patch",
+    description: "Draw around a flaw, then drag it onto a clean area",
+  },
+  {
+    id: "contentAwareMove",
+    icon: Move,
+    label: "Content-aware move (J)",
+    name: "Content-aware move",
+    description: "Draw around something, then drag it; the gap fills in",
+  },
+  {
+    id: "redEye",
+    icon: Eye,
+    label: "Red eye (J)",
+    name: "Red eye",
+    description: "Click a red pupil, or drag a box around the eye",
+  },
 ];
 
-export const isHealingTool = (tool: Tool): tool is HealingTool => tool === "spotHealing" || tool === "healingBrush";
+export const isHealingTool = (tool: Tool): tool is HealingTool =>
+  tool === "spotHealing" || tool === "healingBrush" || tool === "patch" || tool === "contentAwareMove" || tool === "redEye";
+
+/** Patch and Content-Aware Move: they draw a selection, and act when it is dragged. */
+export const isPatchingTool = (tool: Tool): tool is "patch" | "contentAwareMove" => tool === "patch" || tool === "contentAwareMove";
 
 /** Photoshop's toning group (O). */
 export type ToningTool = "dodge" | "burn" | "sponge";
@@ -181,7 +209,7 @@ export const isFocusTool = (tool: Tool): tool is FocusTool => tool === "blur" ||
 
 /** Tools that rework a layer's own pixels as they paint. */
 export const isRetouchTool = (tool: Tool): boolean =>
-  tool === "cloneStamp" || isHealingTool(tool) || isToningTool(tool) || isFocusTool(tool);
+  tool === "cloneStamp" || tool === "spotHealing" || tool === "healingBrush" || isToningTool(tool) || isFocusTool(tool);
 
 /** Retouching tools that copy from a source the user sets (Alt-click). */
 export const needsCloneSource = (tool: Tool): boolean => tool === "cloneStamp" || tool === "healingBrush";

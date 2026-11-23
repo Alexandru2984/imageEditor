@@ -21,6 +21,10 @@ export type Tool =
   | "cloneStamp"
   | "spotHealing"
   | "healingBrush"
+  /** Patch and Content-Aware Move: draw around an area, then drag it. */
+  | "patch"
+  | "contentAwareMove"
+  | "redEye"
   | "dodge"
   | "burn"
   | "sponge"

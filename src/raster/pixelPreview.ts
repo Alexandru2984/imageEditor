@@ -171,6 +171,18 @@ export class PixelPreview {
     return area;
   }
 
+  /** How much of each region pixel another selection takes (0–255), on the same surface. */
+  coverage(selection: PixelSelection): Uint8Array {
+    const { region } = this;
+    const width = region.right - region.left;
+    const height = region.bottom - region.top;
+    const clip = selectionClip(this.target.pixels, selection, this.surfaceSize.width, this.surfaceSize.height);
+    const alpha = clip.getContext("2d")!.getImageData(region.left, region.top, width, height).data;
+    const out = new Uint8Array(width * height);
+    for (let index = 0; index < out.length; index += 1) out[index] = alpha[index * 4 + 3]!;
+    return out;
+  }
+
   /** The colours of the pixels the change applies to. */
   histogram(): Histogram {
     this.histogramCache ??= histogramOf(this.original.data, this.weights);

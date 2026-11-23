@@ -72,6 +72,9 @@ import {
   Stamp,
   Bandage,
   Syringe,
+  Puzzle,
+  Move,
+  Eye,
   Lollipop,
   Hand,
   Droplets,
@@ -158,6 +161,7 @@ import { ADJUSTMENT_ICONS } from "@/components/editor/layers/adjustmentIcons";
 import type { AdjustmentKind } from "@/components/editor/adjustments/AdjustmentDialog";
 import type { PanelTab, Tool, ViewOptions } from "@/types/editor";
 import {
+  HEALING_TOOLS,
   isBrushTool,
   isHealingTool,
   isToningTool,
@@ -1784,13 +1788,14 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       },
       {
         id: "tool.nextHealing",
-        label: "Switch between Spot healing and Healing brush",
+        label: "Next of the healing tools",
         icon: Bandage,
         shortcuts: KEYMAP.nextHealingTool,
-        run: () =>
-          onToolChange(
-            activeTool === "spotHealing" ? "healingBrush" : activeTool === "healingBrush" ? "spotHealing" : lastHealingTool
-          ),
+        run: () => {
+          const order = HEALING_TOOLS.map((entry) => entry.id);
+          const at = order.indexOf(activeTool as HealingTool);
+          onToolChange(at < 0 ? lastHealingTool : order[(at + 1) % order.length]!);
+        },
       },
       tool("tool.spotHealing", "spotHealing", "Spot healing brush", Bandage, undefined, "heal blemish remove spot content aware"),
       {
@@ -1819,6 +1824,9 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       tool("tool.sharpen", "sharpen", "Sharpen tool", Triangle, undefined, "crisp focus detail"),
       tool("tool.smudge", "smudge", "Smudge", Pointer, undefined, "smear finger drag blend"),
       tool("tool.healingBrush", "healingBrush", "Healing brush", Syringe, undefined, "heal repair retouch source"),
+      tool("tool.patch", "patch", "Patch", Puzzle, undefined, "heal repair retouch replace area"),
+      tool("tool.contentAwareMove", "contentAwareMove", "Content-aware move", Move, undefined, "move fill extend duplicate retouch"),
+      tool("tool.redEye", "redEye", "Red eye", Eye, undefined, "flash pupil retouch photo"),
       {
         id: "tool.fill",
         label: "Paint bucket or gradient",

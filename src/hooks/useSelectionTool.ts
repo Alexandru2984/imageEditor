@@ -13,7 +13,7 @@ import {
   type PixelSelection,
 } from "@/selection/state";
 import { constrainAngle } from "@/raster/gradient";
-import { isSelectionTool } from "@/components/editor/toolGroups";
+import { isPatchingTool, isSelectionTool } from "@/components/editor/toolGroups";
 import type { Tool } from "@/types/editor";
 
 interface UseSelectionToolOptions {
@@ -25,6 +25,11 @@ interface UseSelectionToolOptions {
   mode: SelectionMode;
   wand: WandOptions;
   spaceDownRef: MutableRefObject<boolean>;
+  /**
+   * Patch and Content-Aware Move: the selection was dragged `dx`, `dy` grid
+   * pixels; they act on it instead of moving it.
+   */
+  onDrop?: (canvas: FabricCanvas, selection: PixelSelection, dx: number, dy: number) => void;
 }
 
 type PointerInfo = TPointerEventInfo<MouseEvent | TouchEvent | PointerEvent>;
@@ -101,13 +106,16 @@ export function useSelectionTool({
   mode,
   wand,
   spaceDownRef,
+  onDrop,
 }: UseSelectionToolOptions): void {
-  const settingsRef = useRef({ mode, wand });
-  settingsRef.current = { mode, wand };
+  const settingsRef = useRef({ mode, wand, onDrop });
+  settingsRef.current = { mode, wand, onDrop };
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !isSelectionTool(activeTool)) return;
+    if (!canvas || !(isSelectionTool(activeTool) || isPatchingTool(activeTool))) return;
+    /** Patch and Content-Aware Move draw like the lasso and act when the selection is dragged. */
+    const patching = isPatchingTool(activeTool);
     const store = selectionOf(canvas);
     const tool = activeTool;
     const step = TOOL_STEPS[tool] ?? "Selection";
@@ -248,7 +256,7 @@ export function useSelectionTool({
           return;
         }
       }
-      if (tool === "lasso") {
+      if (tool === "lasso" || patching) {
         drag = { kind: "lasso", points: [point], mode: chosen };
         return;
       }
@@ -307,6 +315,7 @@ export function useSelectionTool({
         const { mask, grid } = current.selection;
         // A click in the selection deselects, like anywhere else.
         if (current.dx === 0 && current.dy === 0) store.set(null);
+        else if (patching) settingsRef.current.onDrop?.(canvas, current.selection, current.dx, current.dy);
         else store.set(mask.translated(current.dx, current.dy), grid, "Move Selection");
         return;
       }

@@ -41,7 +41,9 @@ import { useSelectionTool } from "@/hooks/useSelectionTool";
 import { usePenTool } from "@/hooks/usePenTool";
 import { installSelectionOverlay } from "@/selection/overlay";
 import { OUTSIDE_PHOTO } from "@/selection/actions";
-import { gridBoxToScene, selectionOf } from "@/selection/state";
+import { gridBoxToScene, selectionOf, type PixelSelection } from "@/selection/state";
+import { applyContentAwareMove, applyPatch } from "@/raster/patchTool";
+import { useRedEyeTool } from "@/hooks/useRedEyeTool";
 import type { SelectionMode } from "@/selection/mask";
 import type { WandOptions } from "@/selection/magicWand";
 import { SelectionTaskBar } from "./SelectionTaskBar";
@@ -949,12 +951,46 @@ export const Canvas = ({
     });
   }, [loadGeneratedImage, onToolChange, onZoomChange, runRaster]);
 
+  const retouchRef = useRef(retouch);
+  retouchRef.current = retouch;
+  /** Patch and Content-Aware Move act when their selection is dragged. */
+  const dropSelection = useCallback(
+    (canvas: FabricCanvas, selection: PixelSelection, dx: number, dy: number) => {
+      const options = retouchRef.current;
+      const done =
+        activeTool === "patch"
+          ? applyPatch(canvas, selection, dx, dy, options.patchMode)
+          : applyContentAwareMove(canvas, selection, dx, dy, options.moveMode === "extend");
+      const notice = activeTool === "contentAwareMove" ? toast.loading("Moving…") : undefined;
+      void done
+        .then((result) => {
+          if (notice !== undefined) toast.dismiss(notice);
+          if (result !== true) toast.message(result);
+        })
+        .catch((error: unknown) => {
+          if (notice !== undefined) toast.dismiss(notice);
+          console.error(`${activeTool} failed:`, error);
+          toast.error(activeTool === "patch" ? "The patch could not be applied" : "The move could not be made");
+        });
+    },
+    [activeTool]
+  );
+
   useSelectionTool({
     canvasRef: fabricCanvasRef,
     canvasKey: uploadedImage,
     activeTool,
     mode: selectionMode,
     wand,
+    spaceDownRef,
+    onDrop: dropSelection,
+  });
+
+  useRedEyeTool({
+    canvasRef: fabricCanvasRef,
+    canvasKey: uploadedImage,
+    activeTool,
+    settings: { pupilSize: retouch.pupilSize, darken: retouch.darken },
     spaceDownRef,
   });
 

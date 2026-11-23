@@ -252,3 +252,101 @@ test("blur softens, sharpen crisps and smudge drags colour along", async ({ page
   await page.keyboard.press("Control+z");
   await expect.poll(() => photoPixels(page, [[215, 250]])).toEqual([[255, 255, 255]]);
 });
+
+/** Shift+J until the healing group's `name` is the tool. */
+async function healingTool(page: Page, name: string) {
+  await page.keyboard.press("j");
+  for (let tries = 0; tries < 5; tries += 1) {
+    if ((await page.getByRole("group", { name: "Tool options" }).textContent())?.includes(name)) break;
+    await page.keyboard.press("Shift+J");
+  }
+  await expect(page.getByRole("group", { name: "Tool options" })).toContainText(name);
+  await settle(page);
+}
+
+/** A freehand outline through photo pixels, closed back at the start. */
+async function lasso(page: Page, points: [number, number][]) {
+  const first = await onPhoto(page, ...points[0]!, SIZE);
+  await page.mouse.move(first.x, first.y);
+  await page.mouse.down();
+  for (const point of [...points.slice(1), points[0]!]) {
+    const at = await onPhoto(page, ...point, SIZE);
+    await page.mouse.move(at.x, at.y, { steps: 6 });
+  }
+  await page.mouse.up();
+}
+
+const near = (pixel: number[] | undefined, expected: number[], tolerance: number) =>
+  !!pixel && pixel.every((value, index) => Math.abs(value - expected[index]!) <= tolerance);
+
+test("the Patch tool replaces a drawn-around flaw with a clean area dragged onto it, in one undo step", async ({ page }) => {
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#808080", [{ x: 100, y: 100, width: 20, height: 20, color: "#000000" }]);
+  await expect.poll(() => photoPixels(page, [[110, 110]])).toEqual([[0, 0, 0]]);
+  await healingTool(page, "Patch");
+  await lasso(page, [
+    [92, 92],
+    [128, 92],
+    [128, 128],
+    [92, 128],
+  ]);
+  await expect(page.getByRole("button", { name: "New layer", exact: true })).toHaveCount(0);
+  // Dragged onto the clean grey to the right.
+  await dragOnPhoto(page, [110, 110], [240, 110]);
+  await expect.poll(async () => near((await photoPixels(page, [[110, 110]]))?.[0], [128, 128, 128], 6)).toBe(true);
+  expect(near((await photoPixels(page, [[100, 100]]))?.[0], [128, 128, 128], 6)).toBe(true);
+  // The clean area itself is untouched.
+  expect((await photoPixels(page, [[240, 110]]))?.[0]).toEqual([128, 128, 128]);
+
+  await page.keyboard.press("Control+z");
+  await expect.poll(() => photoPixels(page, [[110, 110]])).toEqual([[0, 0, 0]]);
+});
+
+test("Content-Aware Move moves what is drawn around and fills where it was", async ({ page }) => {
+  await uploadSolidImage(page, SIZE.width, SIZE.height, "#d0d0d0", [{ x: 100, y: 100, width: 20, height: 20, color: "#c81e1e" }]);
+  await expect.poll(() => photoPixels(page, [[110, 110]])).toEqual([[200, 30, 30]]);
+  await healingTool(page, "Content-aware move");
+  await lasso(page, [
+    [94, 94],
+    [126, 94],
+    [126, 126],
+    [94, 126],
+  ]);
+  await dragOnPhoto(page, [110, 110], [260, 150]);
+  // The red square is where it was dragged, and gone from where it was.
+  await expect.poll(async () => near((await photoPixels(page, [[260, 150]]))?.[0], [200, 30, 30], 12), { timeout: 20_000 }).toBe(true);
+  expect(near((await photoPixels(page, [[110, 110]]))?.[0], [208, 208, 208], 12)).toBe(true);
+});
+
+test("the Red Eye tool greys and darkens the red pupil clicked", async ({ page }) => {
+  // Skin, with a red pupil of radius 8 at (200, 150) and red lips well away.
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 400;
+    canvas.height = 300;
+    const context = canvas.getContext("2d")!;
+    context.fillStyle = "#c89678";
+    context.fillRect(0, 0, 400, 300);
+    context.fillStyle = "#d22828";
+    context.beginPath();
+    context.arc(200, 150, 8, 0, Math.PI * 2);
+    context.fill();
+    context.fillRect(20, 260, 60, 20);
+    return canvas.toDataURL("image/png").split(",")[1]!;
+  });
+  await page.getByTestId("image-input").setInputFiles({ name: "face.png", mimeType: "image/png", buffer: Buffer.from(base64, "base64") });
+  await expect.poll(() => photoPixels(page, [[200, 150]])).toEqual([[210, 40, 40]]);
+  await healingTool(page, "Red eye");
+
+  // A click on the skin finds no red eye.
+  const skin = await onPhoto(page, 300, 60, SIZE);
+  await page.mouse.click(skin.x, skin.y);
+  await expect(page.getByText("No red eye found there")).toBeVisible();
+
+  const pupil = await onPhoto(page, 200, 150, SIZE);
+  await page.mouse.click(pupil.x, pupil.y);
+  await expect.poll(async () => (await photoPixels(page, [[200, 150]]))?.[0]?.[0]).toBeLessThan(60);
+  const [middle, skinAfter, lips] = (await photoPixels(page, [[200, 150], [300, 60], [40, 270]]))!;
+  expect(Math.abs(middle![0]! - middle![1]!)).toBeLessThan(12);
+  expect(skinAfter).toEqual([200, 150, 120]);
+  expect(lips).toEqual([210, 40, 40]);
+});

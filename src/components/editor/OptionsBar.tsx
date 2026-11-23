@@ -39,6 +39,9 @@ import {
   X,
   PenTool,
   MousePointer,
+  Puzzle,
+  Move,
+  Eye,
   type LucideIcon,
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
@@ -190,6 +193,17 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     name: "Healing brush",
     hint: "Alt-click sets the source · the copy takes on the light where it lands",
   },
+  patch: {
+    icon: Puzzle,
+    name: "Patch",
+    hint: "Draw around a flaw, then drag the selection onto a clean area · Shift adds, Alt subtracts",
+  },
+  contentAwareMove: {
+    icon: Move,
+    name: "Content-aware move",
+    hint: "Draw around something, then drag the selection to move it; the gap fills in",
+  },
+  redEye: { icon: Eye, name: "Red eye", hint: "Click in a red pupil, or drag a box around the eye" },
   dodge: { icon: Lollipop, name: "Dodge", hint: "Paint to lighten · stroke again to go further" },
   burn: { icon: Hand, name: "Burn", hint: "Paint to darken · stroke again to go further" },
   sponge: { icon: Droplets, name: "Sponge", hint: "Paint to take colour away, or add it" },
@@ -443,7 +457,11 @@ export function OptionsBar({
     </Setting>
   );
 
-  const retouchSlider = (label: string, key: "exposure" | "spongeFlow" | "strength", aria: string) => (
+  const retouchSlider = (
+    label: string,
+    key: "exposure" | "spongeFlow" | "strength" | "pupilSize" | "darken",
+    aria: string
+  ) => (
     <Setting label={label} value={`${retouch[key]}%`}>
       <Slider
         value={[retouch[key]]}
@@ -532,6 +550,39 @@ export function OptionsBar({
           render={textChoice}
         />
         {retouchSlider("Flow", "spongeFlow", "Sponge flow")}
+      </>
+    );
+  } else if (activeTool === "patch") {
+    options = (
+      <Choice
+        label="Patch"
+        value={retouch.patchMode}
+        onChange={(patchMode) => onRetouchChange({ patchMode })}
+        options={[
+          { value: "source" as const, label: "Source" },
+          { value: "destination" as const, label: "Destination" },
+        ]}
+        render={textChoice}
+      />
+    );
+  } else if (activeTool === "contentAwareMove") {
+    options = (
+      <Choice
+        label="Mode"
+        value={retouch.moveMode}
+        onChange={(moveMode) => onRetouchChange({ moveMode })}
+        options={[
+          { value: "move" as const, label: "Move" },
+          { value: "extend" as const, label: "Extend" },
+        ]}
+        render={textChoice}
+      />
+    );
+  } else if (activeTool === "redEye") {
+    options = (
+      <>
+        {retouchSlider("Pupil size", "pupilSize", "Pupil size")}
+        {retouchSlider("Darken", "darken", "Darken amount")}
       </>
     );
   } else if (activeTool === "spotHealing") {
