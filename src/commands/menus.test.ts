@@ -68,6 +68,7 @@ function editorCommands(): CommandMap {
     modifySelection: noop,
     wand: DEFAULT_WAND_OPTIONS,
     openColorRange: noop,
+    openSelectAndMask: noop,
     pathsPanel: false,
     setPathsPanel: noop,
     adjustBrush: noop,

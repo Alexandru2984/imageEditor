@@ -254,6 +254,8 @@ export interface EditorCommandContext {
   wand: WandOptions;
   /** Opens Select › Color Range. */
   openColorRange: () => void;
+  /** Opens Select › Select and Mask. */
+  openSelectAndMask: () => void;
   /** View › Paths: the Paths section under the layers. */
   pathsPanel: boolean;
   setPathsPanel: (open: boolean) => void;
@@ -343,6 +345,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     modifySelection,
     wand,
     openColorRange,
+    openSelectAndMask,
     pathsPanel,
     setPathsPanel,
     adjustBrush,
@@ -1422,6 +1425,14 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         keywords: "colour sample fuzziness highlights shadows midtones reds skin",
       },
       {
+        id: "select.selectAndMask",
+        label: "Select and Mask…",
+        shortcuts: KEYMAP.selectAndMask,
+        run: openSelectAndMask,
+        isEnabled: () => !!pixelSelection(),
+        keywords: "refine edge hair fur matting radius feather contrast shift",
+      },
+      {
         id: "select.quickMask",
         label: "Edit in Quick Mask Mode",
         icon: Paintbrush,
@@ -1984,6 +1995,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     modifySelection,
     wand,
     openColorRange,
+    openSelectAndMask,
     pathsPanel,
     setPathsPanel,
     snapping,

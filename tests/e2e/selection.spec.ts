@@ -708,3 +708,82 @@ test("Quick Mask: paint the selection with the brush, then turn it back into a s
   expect(copied.pixels[1]![3]).toBeLessThan(40);
   expect(copied.pixels[2]![3]).toBe(255);
 });
+
+test("Select and Mask fits a rough selection to the picture's edge", async ({ page }) => {
+  // A dark red square, 100 pixels wide, in the middle of a white photo.
+  await uploadSolidImage(page, 400, 300, "#ffffff", [{ x: 150, y: 100, width: 100, height: 100, color: "#8b1010" }]);
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const scale = photo.scaleX as number;
+  await arm(page, "m", "Rectangle select");
+  // A selection 20 pixels too large all round.
+  await drag(page, [-70 * scale, -70 * scale], [70 * scale, 70 * scale]);
+
+  await page.keyboard.press("Control+Alt+r");
+  const dialog = page.getByRole("dialog", { name: "Select and Mask" });
+  await expect(dialog).toBeVisible();
+  // The overlay view tints what is not selected red; the black-and-white view shows the mask.
+  await dialog.getByRole("radio", { name: "Black & White" }).check();
+  const preview = dialog.getByTestId("select-and-mask-preview");
+  const corner = () =>
+    preview.evaluate((element: HTMLCanvasElement) => {
+      // The selection's corner, outside the square but inside the marquee.
+      const x = Math.round(element.width * (135 / 400));
+      const y = Math.round(element.height * (85 / 300));
+      return element.getContext("2d")!.getImageData(x, y, 1, 1).data[0];
+    });
+  await expect.poll(corner).toBe(255);
+
+  await dialog.getByLabel("Radius value").fill("30");
+  // The preview follows: the white margin drops out of the selection.
+  await expect.poll(corner).toBeLessThan(40);
+  await dialog.getByLabel("Output to").selectOption("New Layer");
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(dialog).toBeHidden();
+
+  // The copy holds the square alone, not the marquee's white margin.
+  await expect.poll(async () => (await autosavedObjects(page)).some((o) => o.name === "Layer 1")).toBe(true);
+  const layer = (await autosavedLayerPixels(page, "Layer 1", []))!;
+  expect(layer.width).toBeGreaterThanOrEqual(98);
+  expect(layer.width).toBeLessThanOrEqual(108);
+  const middle = Math.floor(layer.width / 2);
+  expect((await autosavedLayerPixels(page, "Layer 1", [[middle, middle]]))!.pixels[0]).toEqual([139, 16, 16, 255]);
+  // The selection became the layer.
+  await expect(page.getByRole("button", { name: "New layer", exact: true })).toHaveCount(0);
+});
+
+test("Select and Mask's Refine Edge brush, out to a layer mask", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#ffffff", [{ x: 150, y: 100, width: 100, height: 100, color: "#8b1010" }]);
+  const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;
+  const scale = photo.scaleX as number;
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-70 * scale, -70 * scale], [70 * scale, 70 * scale]);
+  await chooseMenu(page, "Select", "Select and Mask…");
+  const dialog = page.getByRole("dialog", { name: "Select and Mask" });
+  await dialog.getByRole("radio", { name: "Black & White" }).check();
+  await dialog.getByLabel("Radius value").fill("0");
+  const preview = dialog.getByTestId("select-and-mask-preview");
+  const at = (fx: number, fy: number) =>
+    preview.evaluate(
+      (element: HTMLCanvasElement, [fx, fy]) =>
+        element.getContext("2d")!.getImageData(Math.round(element.width * fx), Math.round(element.height * fy), 1, 1).data[0],
+      [fx, fy] as const
+    );
+  await expect.poll(() => at(140 / 400, 150 / 300)).toBe(255);
+
+  // Brush down the left side of the margin: only there the selection follows the square.
+  const box = (await preview.boundingBox())!;
+  await page.mouse.move(box.x + box.width * (140 / 400), box.y + box.height * (110 / 300));
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * (140 / 400), box.y + box.height * (190 / 300), { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => at(140 / 400, 150 / 300)).toBeLessThan(40);
+  // The right side of the margin was not brushed.
+  expect(await at(260 / 400, 150 / 300)).toBe(255);
+
+  await dialog.getByLabel("Output to").selectOption("Layer Mask");
+  await dialog.getByRole("button", { name: "OK", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect
+    .poll(async () => typeof ((await autosavedObjects(page)).find((o) => o.name === "Background")?.layerMask as { src?: string } | undefined)?.src)
+    .toBe("string");
+});

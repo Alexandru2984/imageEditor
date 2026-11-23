@@ -107,6 +107,7 @@ export const KEYMAP = {
   magicWandTool: [{ key: "w" }],
   cropTool: [{ key: "c" }],
   penTool: [{ key: "p" }],
+  selectAndMask: [{ key: "r", mod: true, alt: true }],
   pathToSelection: [{ key: "Enter", mod: true }],
   directSelectTool: [{ key: "a" }],
   eyedropper: [{ key: "i" }],

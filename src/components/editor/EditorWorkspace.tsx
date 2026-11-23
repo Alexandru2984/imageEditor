@@ -67,6 +67,7 @@ import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import { ColorRangeDialog } from "./ColorRangeDialog";
 import { PathsPanel } from "./PathsPanel";
+import { SelectAndMaskDialog } from "./SelectAndMaskDialog";
 import { LayerStyleDialog } from "./LayerStyleDialog";
 import { AdjustmentDialog, type AdjustmentKind } from "./adjustments/AdjustmentDialog";
 import { DocumentDialog, type DocumentDialogKind } from "./DocumentDialog";
@@ -645,6 +646,8 @@ export const EditorWorkspace = ({
   const [colorRangeOpen, setColorRangeOpen] = useState(false);
   const [pathsOpen, setPathsOpen] = useSessionState<boolean>("pathsPanel", false);
   const openColorRange = useCallback(() => setColorRangeOpen(true), []);
+  const [selectAndMaskOpen, setSelectAndMaskOpen] = useState(false);
+  const openSelectAndMask = useCallback(() => setSelectAndMaskOpen(true), []);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
   /** The layer the Layer style dialog is open for. */
   const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
@@ -749,6 +752,7 @@ export const EditorWorkspace = ({
     modifySelection: setSelectionModification,
     wand,
     openColorRange,
+    openSelectAndMask,
     pathsPanel: pathsOpen,
     setPathsPanel: setPathsOpen,
     strokeSelection: openStrokeDialog,
@@ -1198,6 +1202,7 @@ export const EditorWorkspace = ({
         onClose={() => setSelectionModification(null)}
       />
       <ColorRangeDialog canvas={fabricCanvas} open={colorRangeOpen} onClose={() => setColorRangeOpen(false)} />
+      <SelectAndMaskDialog canvas={fabricCanvas} open={selectAndMaskOpen} onClose={() => setSelectAndMaskOpen(false)} />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}

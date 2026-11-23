@@ -165,6 +165,7 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
       "select.inverse",
       "-",
       "select.colorRange",
+      "select.selectAndMask",
       "select.subject",
       "select.layerPixels",
       "select.allLayers",
