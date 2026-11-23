@@ -330,6 +330,8 @@ test("Select › Color Range selects the colours clicked in its preview", async 
   await page.keyboard.press("Escape");
   await arm(page, "m", "Rectangle select");
   await page.keyboard.press("Control+a");
+  // The selection's actions show once Select All has landed.
+  await expect(page.getByRole("button", { name: "New layer", exact: true })).toBeVisible();
   await chooseMenu(page, "Select", "Color Range…");
   await expect(dialog.getByText("inside the current selection")).toBeVisible();
   const again = await previewPoint(100, 150);
