@@ -175,3 +175,38 @@ describe("outlineSegments", () => {
     expect(outlineSegments(checker, 50)).toBeNull();
   });
 });
+
+describe("Border and Smooth", () => {
+  it("Border selects a band centred on the edge", () => {
+    const mask = Mask.rect(60, 60, 20, 20, 40, 40).bordered(6);
+    // 3 px each side of the edge at x = 20.
+    expect(mask.includes(17, 30)).toBe(true);
+    expect(mask.includes(22, 30)).toBe(true);
+    expect(mask.includes(15, 30)).toBe(false);
+    expect(mask.includes(24, 30)).toBe(false);
+    expect(mask.includes(30, 30)).toBe(false);
+  });
+
+  it("Border of everything is a frame inside the document", () => {
+    const mask = Mask.full(40, 30).bordered(8);
+    expect(mask.includes(0, 15)).toBe(true);
+    expect(mask.includes(3, 15)).toBe(true);
+    expect(mask.includes(5, 15)).toBe(false);
+    expect(mask.includes(20, 15)).toBe(false);
+    expect(mask.includes(39, 29)).toBe(true);
+  });
+
+  it("Smooth drops specks and holes and rounds corners", () => {
+    const base = Mask.rect(50, 50, 10, 10, 40, 40);
+    base.data[25 * 50 + 25] = 0; // a hole
+    base.data[2 * 50 + 2] = 255; // a speck
+    const smooth = base.smoothed(2);
+    expect(smooth.includes(25, 25)).toBe(true);
+    expect(smooth.includes(2, 2)).toBe(false);
+    expect(smooth.includes(10, 10)).toBe(false);
+    expect(smooth.includes(12, 12)).toBe(true);
+    expect(smooth.includes(25, 10)).toBe(true);
+    // Everything stays everything, up to the document's border.
+    expect(Mask.full(20, 20).smoothed(3).bounds()).toEqual({ x: 0, y: 0, width: 20, height: 20 });
+  });
+});

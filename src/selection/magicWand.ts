@@ -4,7 +4,8 @@ import { renderObjectsRegion } from "@/utils/flatten";
 import { floodFillMask } from "@/raster/floodFill";
 import { releaseSurface } from "@/raster/pixelLayer";
 import { Mask } from "./mask";
-import { sceneToGrid, type DocumentGrid } from "./state";
+import { grownSelection } from "./similar";
+import { sceneToGrid, type DocumentGrid, type PixelSelection } from "./state";
 
 export interface WandOptions {
   /** 0–255: how far a channel may differ from the clicked pixel. */
@@ -29,20 +30,13 @@ function sampledLayer(canvas: FabricCanvas): FabricObject | null {
 }
 
 /**
- * Magic wand: the pixels of the document that look like the one under a
- * scene point, or null when the point is outside the document.
+ * The document's pixels at its own resolution, as the wand sees them: all
+ * visible layers, or only the selected one (judged by its own pixels, not
+ * how it is blended). Null when there is no layer to sample.
  */
-export function wandSelect(
-  canvas: FabricCanvas,
-  grid: DocumentGrid,
-  point: { x: number; y: number },
-  options: WandOptions
-): Mask | null {
-  const seed = sceneToGrid(grid, point.x, point.y);
-  if (seed.x < 0 || seed.y < 0 || seed.x >= grid.width || seed.y >= grid.height) return null;
-
-  const layer = options.sampleAll ? null : sampledLayer(canvas);
-  if (!options.sampleAll && !layer) return null;
+export function sampleDocument(canvas: FabricCanvas, grid: DocumentGrid, sampleAll: boolean): Uint8ClampedArray | null {
+  const layer = sampleAll ? null : sampledLayer(canvas);
+  if (!sampleAll && !layer) return null;
   const include = layer
     ? (object: FabricObject) => object === layer
     : (object: FabricObject) => !isEditorChrome(object) && object.visible !== false;
@@ -53,7 +47,6 @@ export function wandSelect(
     height: grid.height / grid.scale,
   };
 
-  // Alone, a layer is judged by its own pixels, not how it is blended.
   const kept = layer
     ? { opacity: layer.opacity, globalCompositeOperation: layer.globalCompositeOperation, visible: layer.visible }
     : null;
@@ -72,10 +65,41 @@ export function wandSelect(
     }
     const context = element.getContext("2d");
     if (!context) throw new Error("The browser could not read the pixels to select");
-    const pixels = context.getImageData(0, 0, grid.width, grid.height).data;
-    const data = floodFillMask(pixels, grid.width, grid.height, seed.x, seed.y, options);
-    return data ? new Mask(grid.width, grid.height, data) : null;
+    return context.getImageData(0, 0, grid.width, grid.height).data;
   } finally {
     releaseSurface(element);
   }
+}
+
+/**
+ * Magic wand: the pixels of the document that look like the one under a
+ * scene point, or null when the point is outside the document.
+ */
+export function wandSelect(
+  canvas: FabricCanvas,
+  grid: DocumentGrid,
+  point: { x: number; y: number },
+  options: WandOptions
+): Mask | null {
+  const seed = sceneToGrid(grid, point.x, point.y);
+  if (seed.x < 0 || seed.y < 0 || seed.x >= grid.width || seed.y >= grid.height) return null;
+  const pixels = sampleDocument(canvas, grid, options.sampleAll);
+  if (!pixels) return null;
+  const data = floodFillMask(pixels, grid.width, grid.height, seed.x, seed.y, options);
+  return data ? new Mask(grid.width, grid.height, data) : null;
+}
+
+/**
+ * Select › Grow (`contiguous`) and Select › Similar: the selection with the
+ * pixels like it added, by the magic wand's tolerance and sampling.
+ */
+export function growSelection(
+  canvas: FabricCanvas,
+  selection: PixelSelection,
+  options: WandOptions,
+  contiguous: boolean
+): Mask | null {
+  const pixels = sampleDocument(canvas, selection.grid, options.sampleAll);
+  if (!pixels) return null;
+  return grownSelection(pixels, selection.mask, options.tolerance, contiguous);
 }

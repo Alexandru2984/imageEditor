@@ -126,6 +126,7 @@ import type { AiActions } from "@/hooks/useAiActions";
 import { Mask } from "@/selection/mask";
 import { documentGrid, selectionOf, type PixelSelection } from "@/selection/state";
 import { toggleQuickMask } from "@/selection/quickMask";
+import { growSelection, type WandOptions } from "@/selection/magicWand";
 import { copySelectionToLayer } from "@/selection/actions";
 import { clearTarget, editPixels, paintTarget } from "@/selection/edits";
 import {
@@ -245,6 +246,8 @@ export interface EditorCommandContext {
   showShortcuts: () => void;
   /** Opens Select › Modify's dialog. */
   modifySelection: (modification: SelectionModification) => void;
+  /** The magic wand's settings, which Select › Grow and Similar use. */
+  wand: WandOptions;
   /** [ ] and Shift+[ ]: brush size and hardness. */
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
   swapColors: () => void;
@@ -329,6 +332,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     openPanel,
     showShortcuts,
     modifySelection,
+    wand,
     adjustBrush,
     swapColors,
     colors,
@@ -347,6 +351,24 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     // A layer on the canvas, or a group or adjustment layer picked in the Layers panel.
     const selected = () => hasSelection(canvas) || (!!canvas && hasPicks(canvas));
     const pixelSelection = () => (canvas ? selectionOf(canvas).current() : null);
+    /** Select › Grow (contiguous) and Similar, by the magic wand's tolerance. */
+    const grow = (contiguous: boolean) => {
+      const selection = pixelSelection();
+      if (!canvas || !selection) return;
+      let grown: ReturnType<typeof growSelection>;
+      try {
+        grown = growSelection(canvas, selection, wand, contiguous);
+      } catch (error) {
+        reportFailure(error);
+        return;
+      }
+      if (!grown) {
+        toast.error("Pick a layer to sample, or sample all layers in the magic wand's options");
+        return;
+      }
+      const store = selectionOf(canvas);
+      if (store.current() === selection) store.set(grown, selection.grid, contiguous ? "Grow" : "Similar");
+    };
 
     /** Delete with a selection: clear its pixels on the layer (or the photo). */
     const clearPixels = (selection: PixelSelection) => {
@@ -1427,6 +1449,34 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         keywords: "select everything",
       },
       {
+        id: "select.border",
+        label: "Border…",
+        run: () => modifySelection("border"),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "edge band frame outline selection",
+      },
+      {
+        id: "select.smooth",
+        label: "Smooth…",
+        run: () => modifySelection("smooth"),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "round corners clean specks selection",
+      },
+      {
+        id: "select.grow",
+        label: "Grow",
+        run: () => grow(true),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "expand similar adjacent colours magic wand tolerance",
+      },
+      {
+        id: "select.similar",
+        label: "Similar",
+        run: () => grow(false),
+        isEnabled: () => !!pixelSelection(),
+        keywords: "same colours everywhere magic wand tolerance",
+      },
+      {
         id: "select.feather",
         label: "Feather…",
         shortcuts: KEYMAP.featherSelection,
@@ -1868,6 +1918,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     setSnapping,
     showShortcuts,
     modifySelection,
+    wand,
     snapping,
     swapColors,
     colors,

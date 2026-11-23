@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { useEditorCommands, type EditorCommandContext } from "@/hooks/useEditorCommands";
 import { EDITOR_MENUS } from "./menus";
 import type { CommandMap, MenuEntry } from "./types";
+import { DEFAULT_WAND_OPTIONS } from "@/selection/magicWand";
 
 const noop = () => {};
 
@@ -65,6 +66,7 @@ function editorCommands(): CommandMap {
     openPanel: noop,
     showShortcuts: noop,
     modifySelection: noop,
+    wand: DEFAULT_WAND_OPTIONS,
     adjustBrush: noop,
     swapColors: noop,
     colors: { foreground: "#000000", background: "#ffffff" },

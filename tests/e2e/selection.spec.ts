@@ -230,6 +230,55 @@ test("Select › Modify feathers and expands the selection", async ({ page }) =>
   expect(edge[1]![3]).toBeLessThan(128);
 });
 
+test("Select › Grow, Similar and Modify › Border", async ({ page }) => {
+  // Red on the left, blue on the right with a red patch in it.
+  await uploadSolidImage(page, 400, 300, "#2020e0", [
+    { x: 0, y: 0, width: 200, height: 300, color: "#d02020" },
+    { x: 300, y: 100, width: 40, height: 40, color: "#d02020" },
+  ]);
+  await arm(page, "m", "Rectangle select");
+  // A little square in the red half.
+  await drag(page, [-150, -20], [-110, 20]);
+  await chooseMenu(page, "Select", "Grow");
+  await copyLayer(page);
+  const grown = (await autosavedLayerPixels(page, "Layer 1", [[0, 0]]))!;
+  expect(grown.width).toBe(200);
+  expect(grown.height).toBe(300);
+
+  // Similar reaches the red patch too.
+  await page.keyboard.press("Escape");
+  await arm(page, "m", "Rectangle select");
+  await drag(page, [-150, -20], [-110, 20]);
+  await chooseMenu(page, "Select", "Similar");
+  await copyLayer(page, "Layer 2");
+  const similar = (await autosavedLayerPixels(page, "Layer 2", [
+    [320, 120],
+    [250, 120],
+  ]))!;
+  expect(similar.width).toBe(340);
+  expect(similar.pixels[0]![3]).toBe(255);
+  expect(similar.pixels[1]![3]).toBe(0);
+
+  // Border of everything: a frame.
+  await page.keyboard.press("Escape");
+  await arm(page, "m", "Rectangle select");
+  await page.keyboard.press("Control+a");
+  await page.getByRole("menuitem", { name: "Select", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Modify" }).click();
+  await menuItem(page, "Border…").click();
+  const dialog = page.getByRole("dialog", { name: "Border selection" });
+  await dialog.getByLabel("Width").fill("40");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await copyLayer(page, "Layer 3");
+  const frame = (await autosavedLayerPixels(page, "Layer 3", [
+    [5, 150],
+    [200, 150],
+  ]))!;
+  expect(frame.width).toBe(400);
+  expect(frame.pixels[0]![3]).toBe(255);
+  expect(frame.pixels[1]![3]).toBe(0);
+});
+
 /** Where a pixel of the photo is on screen. */
 async function photoPoint(page: Page, x: number, y: number) {
   const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;

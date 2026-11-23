@@ -742,6 +742,7 @@ export const EditorWorkspace = ({
     openPanel,
     showShortcuts,
     modifySelection: setSelectionModification,
+    wand,
     strokeSelection: openStrokeDialog,
     openLayerStyle: setStyledLayer,
     openDocumentDialog: setDocumentDialog,

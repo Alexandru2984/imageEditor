@@ -14,7 +14,7 @@ import { selectionOf } from "@/selection/state";
 import { paintTarget, strokeSelection, type StrokeLocation } from "@/selection/edits";
 import { cn } from "@/lib/utils";
 
-export type SelectionModification = "feather" | "expand" | "contract" | "stroke";
+export type SelectionModification = "border" | "smooth" | "feather" | "expand" | "contract" | "stroke";
 
 const STROKE_LOCATIONS: { value: StrokeLocation; label: string }[] = [
   { value: "inside", label: "Inside" },
@@ -24,8 +24,26 @@ const STROKE_LOCATIONS: { value: StrokeLocation; label: string }[] = [
 
 const MODIFICATIONS: Record<
   SelectionModification,
-  { title: string; description: string; label: string; min: number; max: number; initial: number }
+  { title: string; description: string; label: string; min: number; max: number; initial: number; step: string }
 > = {
+  border: {
+    title: "Border selection",
+    description: "Select a band along the selection's edge instead of the selection.",
+    label: "Width",
+    min: 1,
+    max: 200,
+    initial: 10,
+    step: "Border",
+  },
+  smooth: {
+    title: "Smooth selection",
+    description: "Round off corners and drop specks and holes smaller than the radius.",
+    label: "Sample radius",
+    min: 1,
+    max: 100,
+    initial: 2,
+    step: "Smooth",
+  },
   feather: {
     title: "Feather selection",
     description: "Soften the selection's edge so changes fade out across it.",
@@ -33,6 +51,7 @@ const MODIFICATIONS: Record<
     min: 0.5,
     max: 250,
     initial: 5,
+    step: "Feather",
   },
   expand: {
     title: "Expand selection",
@@ -41,6 +60,7 @@ const MODIFICATIONS: Record<
     min: 1,
     max: 500,
     initial: 5,
+    step: "Expand",
   },
   contract: {
     title: "Contract selection",
@@ -49,6 +69,7 @@ const MODIFICATIONS: Record<
     min: 1,
     max: 500,
     initial: 5,
+    step: "Contract",
   },
   stroke: {
     title: "Stroke",
@@ -57,6 +78,7 @@ const MODIFICATIONS: Record<
     min: 1,
     max: 250,
     initial: 4,
+    step: "Stroke",
   },
 };
 
@@ -70,8 +92,8 @@ interface SelectionModifyDialogProps {
 }
 
 /**
- * Select › Modify (Feather, Expand, Contract) and Edit › Stroke, each by a
- * number of pixels.
+ * Select › Modify (Border, Smooth, Expand, Contract, Feather) and Edit ›
+ * Stroke, each by a number of pixels.
  */
 export function SelectionModifyDialog({ canvas, modification, strokeColor, onClose }: SelectionModifyDialogProps) {
   const inputId = useId();
@@ -115,14 +137,15 @@ export function SelectionModifyDialog({ canvas, modification, strokeColor, onClo
       return;
     }
     const { mask, grid } = selection;
-    const changed =
-      modification === "feather"
-        ? mask.feathered(amount)
-        : modification === "expand"
-          ? mask.expanded(amount)
-          : mask.contracted(amount);
+    const changed = {
+      border: () => mask.bordered(amount),
+      smooth: () => mask.smoothed(amount),
+      feather: () => mask.feathered(amount),
+      expand: () => mask.expanded(amount),
+      contract: () => mask.contracted(amount),
+    }[modification]();
     if (changed.isEmpty()) toast.warning("Nothing is left selected");
-    store.set(changed, grid, modification === "feather" ? "Feather" : modification === "expand" ? "Expand" : "Contract");
+    store.set(changed, grid, MODIFICATIONS[modification].step);
     setRemembered((current) => ({ ...current, [modification]: amount }));
     onClose();
   };

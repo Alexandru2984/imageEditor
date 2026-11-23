@@ -188,6 +188,65 @@ export class Mask {
   }
 
   /**
+   * Select › Modify › Border: a band `width` pixels wide centred on the
+   * selection's edge, in place of the selection. Along the document's
+   * border only its inner half is left.
+   */
+  bordered(width: number): Mask {
+    if (!(width > 0) || this.isEmpty()) return new Mask(this.width, this.height);
+    const half = width / 2;
+    const outer = this.expanded(half);
+    const inner = this.contracted(half);
+    // The document's border is an edge too (Select All, Border: a frame).
+    const inset = Math.ceil(half);
+    const insideFrame = Mask.rect(this.width, this.height, inset, inset, this.width - inset, this.height - inset);
+    return outer.combine(inner.combine(insideFrame, "intersect"), "subtract");
+  }
+
+  /**
+   * Select › Modify › Smooth: each pixel takes what most of the pixels
+   * within `radius` (a square) are, which rounds corners and drops specks
+   * and holes smaller than that.
+   */
+  smoothed(radius: number): Mask {
+    const reach = Math.round(radius);
+    if (!(reach >= 1) || this.isEmpty()) return this.clone();
+    const { width, height, data } = this;
+    // Selected pixels in each row's window, then in each square.
+    const rows = new Uint16Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      const row = y * width;
+      let sum = 0;
+      for (let x = 0; x < Math.min(reach, width); x += 1) if (data[row + x]! >= SELECTED) sum += 1;
+      for (let x = 0; x < width; x += 1) {
+        const enter = x + reach;
+        const leave = x - reach - 1;
+        if (enter < width && data[row + enter]! >= SELECTED) sum += 1;
+        if (leave >= 0 && data[row + leave]! >= SELECTED) sum -= 1;
+        rows[row + x] = sum;
+      }
+    }
+    const out = new Mask(width, height);
+    const column = new Uint32Array(width);
+    for (let y = 0; y < Math.min(reach, height); y += 1) {
+      for (let x = 0; x < width; x += 1) column[x] = column[x]! + rows[y * width + x]!;
+    }
+    for (let y = 0; y < height; y += 1) {
+      const enter = y + reach;
+      const leave = y - reach - 1;
+      if (enter < height) for (let x = 0; x < width; x += 1) column[x] = column[x]! + rows[enter * width + x]!;
+      if (leave >= 0) for (let x = 0; x < width; x += 1) column[x] = column[x]! - rows[leave * width + x]!;
+      const spanY = Math.min(height - 1, y + reach) - Math.max(0, y - reach) + 1;
+      for (let x = 0; x < width; x += 1) {
+        // Only pixels inside the document vote.
+        const spanX = Math.min(width - 1, x + reach) - Math.max(0, x - reach) + 1;
+        if (column[x]! * 2 > spanX * spanY) out.data[y * width + x] = 255;
+      }
+    }
+    return out;
+  }
+
+  /**
    * Shrink the selection by `distance` pixels (hard-edged). As in Photoshop,
    * an edge along the document's border stays where it is.
    */
