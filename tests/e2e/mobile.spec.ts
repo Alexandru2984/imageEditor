@@ -504,3 +504,40 @@ test("the Character and Paragraph settings of text fit the phone", async ({ page
   await alignment.getByRole("radio", { name: "Justify all" }).tap();
   await expect.poll(async () => (await autosavedObjects(page)).find((object) => object.type === "IText")?.textAlign).toBe("justify");
 });
+
+test("Type on Path from the Paths panel, and its options, fit the phone", async ({ page }) => {
+  await openPhoto(page);
+  await page.getByRole("button", { name: "Pen (P)" }).tap();
+  const center = await canvasCenter(page);
+  for (const [dx, dy] of [
+    [-130, 40],
+    [0, -60],
+    [130, 40],
+  ] as const) {
+    await page.touchscreen.tap(center.x + dx, center.y + dy);
+  }
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "View", exact: true }).tap();
+  await page.getByRole("menuitemcheckbox", { name: "Paths panel" }).tap();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  if (!(await page.getByRole("tab", { name: "Layers" }).isVisible())) await page.getByRole("button", { name: "Toggle properties" }).tap();
+  await page.getByRole("tab", { name: "Layers" }).tap();
+  const more = page.getByRole("region", { name: "Paths" }).getByRole("button", { name: "More path actions" });
+  await more.scrollIntoViewIfNeeded();
+  await more.tap();
+  const typeOnPath = page.getByRole("menuitem", { name: "Type on Path" });
+  await expectOnScreen(page, typeOnPath);
+  await typeOnPath.tap();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await page.keyboard.type("Along the arch");
+  await page.getByRole("tab", { name: "Properties" }).tap();
+  const options = page.getByRole("region", { name: "Type on Path" });
+  await options.scrollIntoViewIfNeeded();
+  await expectOnScreen(page, options);
+  await expectNoSidewaysScroll(page);
+  await options.getByRole("button", { name: "Flip side" }).tap();
+  const text = async () => (await autosavedObjects(page)).find((object) => object.type === "IText") as { text?: string; pathSide?: string } | undefined;
+  await expect.poll(async () => (await text())?.pathSide).toBe("right");
+  expect((await text())?.text).toBe("Along the arch");
+});

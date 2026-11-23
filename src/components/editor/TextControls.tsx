@@ -48,6 +48,13 @@ export type TextObject = FabricObject & {
   styles?: CharacterStyles;
   paragraphSpaceBefore?: number;
   paragraphSpaceAfter?: number;
+  /** Type on a path: the path the letters follow, and where and how they sit on it. */
+  path?: { segmentsInfo?: { length: number }[] } | null;
+  pathStartOffset?: number;
+  pathSide?: string;
+  pathAlign?: string;
+  /** Fabric's letter boxes; those past the end of an open path are hidden (src/text/textOnPath.ts). */
+  __charBounds?: ({ pastPathEnd?: boolean } | undefined)[][];
   isEditing?: boolean;
   selectionStart?: number;
   selectionEnd?: number;
@@ -56,6 +63,14 @@ export type TextObject = FabricObject & {
 };
 
 export type ApplyMode = "commit" | "schedule";
+
+/** Where the letters sit on their path, as Photoshop's Type on Path options name it. */
+const PATH_ALIGNMENTS = [
+  { value: "baseline", label: "Baseline", title: "The letters stand on the path" },
+  { value: "center", label: "Center", title: "The path runs through the letters' middle" },
+  { value: "ascender", label: "Top", title: "The letters hang from the path (ascender)" },
+  { value: "descender", label: "Bottom", title: "The path runs under the letters' tails (descender)" },
+] as const;
 
 interface TextControlsProps {
   object: TextObject;
@@ -457,6 +472,73 @@ export const TextControls = ({ object, readOnly, activeColor, apply, commit }: T
           ))}
         </div>
       </div>
+
+      {object.path && (
+        <div role="region" aria-label="Type on Path" className="space-y-3">
+          <Label className="block text-xs font-medium text-muted-foreground">Type on Path</Label>
+          {(() => {
+            const hidden = (object.__charBounds ?? []).reduce((count, line) => count + line.filter((box) => box?.pastPathEnd).length, 0);
+            return hidden > 0 ? (
+              <p role="status" className="text-xs text-amber-700 dark:text-amber-400">
+                {hidden === 1 ? "1 letter runs" : `${hidden} letters run`} past the end of the path and {hidden === 1 ? "is" : "are"} hidden.
+              </p>
+            ) : null;
+          })()}
+          <SliderRow
+            label="Position on the path"
+            value={Math.round(object.pathStartOffset ?? 0)}
+            display={`${Math.round(object.pathStartOffset ?? 0)}px`}
+            min={0}
+            max={Math.max(1, Math.round(object.path.segmentsInfo?.at(-1)?.length ?? 1000))}
+            step={1}
+            disabled={readOnly}
+            onChange={(value) => apply({ pathStartOffset: value }, "schedule")}
+            onCommit={commit}
+          />
+          <div role="radiogroup" aria-label="Letters sit on the path at their" className="flex items-center gap-1">
+            {PATH_ALIGNMENTS.map(({ value, label, title }) => {
+              const active = (object.pathAlign ?? "baseline") === value;
+              return (
+                <button
+                  key={value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  title={title}
+                  disabled={readOnly}
+                  onClick={() => apply({ pathAlign: value }, "commit")}
+                  className={cn(toggleClass(active), "min-w-0 px-1 text-xs")}
+                >
+                  <span className="truncate">{label}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              aria-pressed={object.pathSide === "right"}
+              title="The letters cross to the other side of the path and run the other way"
+              disabled={readOnly}
+              onClick={() => apply({ pathSide: object.pathSide === "right" ? "left" : "right" }, "commit")}
+              className={cn(toggleClass(object.pathSide === "right"), "px-2 text-xs")}
+            >
+              Flip side
+            </button>
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => {
+                leaveEditing();
+                apply({ path: undefined, pathStartOffset: 0, pathSide: "left", pathAlign: "baseline" }, "commit");
+              }}
+              className={cn(toggleClass(false), "px-2 text-xs")}
+            >
+              Release from path
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-2.5">
         <Label className="block text-xs font-medium text-muted-foreground">Effects</Label>

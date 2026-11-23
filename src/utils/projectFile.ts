@@ -127,6 +127,7 @@ const NUMERIC_PROPERTY_LIMITS = new Map<
   ["paragraphSpaceBefore", { min: 0, max: PARAGRAPH_SPACE_MAX }],
   ["paragraphSpaceAfter", { min: 0, max: PARAGRAPH_SPACE_MAX }],
   ["deltaY", { min: -MAX_OBJECT_DIMENSION, max: MAX_OBJECT_DIMENSION }],
+  ["pathStartOffset", { min: -MAX_ABSOLUTE_NUMBER, max: MAX_ABSOLUTE_NUMBER }],
   ["scaleX", { min: -MAX_OBJECT_SCALE, max: MAX_OBJECT_SCALE }],
   ["scaleY", { min: -MAX_OBJECT_SCALE, max: MAX_OBJECT_SCALE }],
   ["cropX", { min: 0, max: MAX_OBJECT_DIMENSION }],
@@ -152,6 +153,19 @@ function assertSafeNumericProperty(key: string, value: unknown): void {
     value < limits.min ||
     value > limits.max
   ) {
+    throw new Error(`Project contains an unsafe ${key} value`);
+  }
+}
+
+/** Text on a path: the side of the path and the line of the letters that sits on it. */
+const ENUM_PROPERTY_VALUES = new Map<string, readonly string[]>([
+  ["pathSide", ["left", "right"]],
+  ["pathAlign", ["baseline", "center", "ascender", "descender"]],
+]);
+
+function assertSafeEnumProperty(key: string, value: unknown): void {
+  const allowed = ENUM_PROPERTY_VALUES.get(key);
+  if (allowed && !(typeof value === "string" && allowed.includes(value))) {
     throw new Error(`Project contains an unsafe ${key} value`);
   }
 }
@@ -358,6 +372,7 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
       const child = object[key];
       assertSafeNumericProperty(key, child);
       assertSafeStringProperty(key, child);
+      assertSafeEnumProperty(key, child);
 
       if (key === "objects" || key === "filters") {
         if (!Array.isArray(child)) {

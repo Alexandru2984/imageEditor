@@ -10,13 +10,12 @@ import {
   type ShapeKind,
 } from "@/utils/shapes";
 import { markEditorChrome } from "@/utils/editorObjects";
-import { DEFAULT_TEXT_FONT } from "@/utils/fonts";
+import { DEFAULT_TEXT_FONT, DEFAULT_TEXT_SCREEN_SIZE } from "@/utils/fonts";
 import type { Tool } from "@/types/editor";
 
 const CLICK_TOLERANCE_PX = 4;
 /** Default on-screen size for a click-placed shape, in CSS pixels. */
 const DEFAULT_SCREEN_SIZE = 160;
-const DEFAULT_TEXT_SCREEN_SIZE = 36;
 
 interface UseShapeToolOptions {
   canvasRef: MutableRefObject<FabricCanvas | null>;

@@ -6,6 +6,7 @@ import { registerGroupClasses } from "@/layers/groupMarkers";
 import { registerAdjustmentClasses } from "@/adjustments/adjustmentLayer";
 import { FillLayer } from "@/adjustments/fillLayer";
 import { paintFillLayer } from "@/compositing/fillPaint";
+import { installTextOnPathEditing } from "@/text/textOnPath";
 import { installParagraphSpacing } from "@/text/typography";
 
 /**
@@ -37,6 +38,7 @@ export function applyFabricDefaults(): void {
   FillLayer.painter = paintFillLayer;
   // Text keeps Photoshop's space before and after paragraphs.
   installParagraphSpacing();
+  installTextOnPathEditing();
 }
 
 applyFabricDefaults();

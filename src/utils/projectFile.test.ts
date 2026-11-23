@@ -319,6 +319,32 @@ describe("readProjectFile", () => {
     await expect(read(text({ styles: [{ start: 0, end: 1, style: { deltaY: 1e9 } }] }))).rejects.toThrow(/unsafe deltaY value/);
   });
 
+  it("accepts text on a path, and rejects hostile path settings", async () => {
+    const onPath = (extra: Record<string, unknown>) => ({
+      json: JSON.stringify({
+        objects: [
+          {
+            type: "IText",
+            text: "Along the arch",
+            path: { type: "Path", visible: false, path: [["M", 0, 50], ["C", 0, 50, 150, -50, 300, 50]] },
+            pathStartOffset: 40,
+            pathSide: "right",
+            pathAlign: "center",
+            ...extra,
+          },
+        ],
+      }),
+      srcs: [],
+    });
+    const read = (snapshot: object) => readProjectFile(fileOf(JSON.stringify({ version: 1, snapshot })));
+    await expect(read(onPath({}))).resolves.toBeTruthy();
+    await expect(read(onPath({ pathSide: "up" }))).rejects.toThrow(/unsafe pathSide value/);
+    await expect(read(onPath({ pathAlign: { toString: "x" } }))).rejects.toThrow(/unsafe pathAlign value/);
+    await expect(read(onPath({ pathStartOffset: 1e12 }))).rejects.toThrow(/unsafe pathStartOffset value/);
+    await expect(read(onPath({ pathStartOffset: "0" }))).rejects.toThrow(/unsafe pathStartOffset value/);
+    await expect(read(onPath({ path: { type: "Script", path: [] } }))).rejects.toThrow(/unsupported object type/);
+  });
+
   it("accepts a layer mask whose image is an inline data image", async () => {
     const snapshot = {
       json: '{"objects":[{"type":"image","src":"__snapshot_src_0","layerMask":{"src":"__snapshot_src_1","enabled":false}}]}',

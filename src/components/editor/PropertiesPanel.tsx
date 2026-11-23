@@ -277,6 +277,8 @@ export const PropertiesPanel = ({
     fabricCanvas.on("selection:updated", onSelect);
     fabricCanvas.on("selection:cleared", onClear);
     fabricCanvas.on("object:modified", onSelect);
+    // Typing: whether letters still fit on a text's path.
+    fabricCanvas.on("text:changed", onSelect);
 
     return () => {
       offCanvasEvent(fabricCanvas, HISTORY_RESTORED, onSelect);
@@ -284,6 +286,7 @@ export const PropertiesPanel = ({
       fabricCanvas.off("selection:updated", onSelect);
       fabricCanvas.off("selection:cleared", onClear);
       fabricCanvas.off("object:modified", onSelect);
+      fabricCanvas.off("text:changed", onSelect);
     };
   }, [fabricCanvas, readSelectedObject]);
 

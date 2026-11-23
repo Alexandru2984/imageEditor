@@ -23,6 +23,8 @@ export interface FontOption {
 }
 
 export const DEFAULT_TEXT_FONT = "Inter Variable";
+/** New text is this many screen pixels tall, whatever the zoom. */
+export const DEFAULT_TEXT_SCREEN_SIZE = 36;
 
 export const FONT_OPTIONS: FontOption[] = [
   { family: "Inter Variable", label: "Inter", category: "Sans" },

@@ -919,7 +919,14 @@ export const EditorWorkspace = ({
         <div className="min-h-0 flex-1">
           <LayersPanel fabricCanvas={fabricCanvas} commands={commands} />
         </div>
-        <PathsPanel canvas={fabricCanvas} open={pathsOpen} onOpenChange={setPathsOpen} color={activeColor} brush={paint} />
+        <PathsPanel
+          canvas={fabricCanvas}
+          open={pathsOpen}
+          onOpenChange={setPathsOpen}
+          color={activeColor}
+          brush={paint}
+          onTextPlaced={() => handleToolChange("select")}
+        />
       </TabsContent>
     </Tabs>
   );

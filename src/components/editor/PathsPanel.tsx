@@ -37,6 +37,7 @@ import {
   renamePath,
   selectionFromPath,
   shapeFromPath,
+  textOnPath,
   strokePath,
   workPathFromSelection,
   type PathResult,
@@ -56,6 +57,8 @@ interface PathsPanelProps {
   color: string;
   /** The brush paths are stroked with. */
   brush: PaintOptions;
+  /** After Type on Path: the Move tool, so the new text can be clicked into and moved. */
+  onTextPlaced?: () => void;
 }
 
 const report = (result: PathResult) => {
@@ -115,7 +118,7 @@ const MODES: { value: SelectionMode; label: string }[] = [
  * (renaming the Work Path saves it), Ctrl-clicked to load as a selection;
  * and below, what to do with the picked path.
  */
-export function PathsPanel({ canvas, open, onOpenChange, color, brush }: PathsPanelProps) {
+export function PathsPanel({ canvas, open, onOpenChange, color, brush, onTextPlaced }: PathsPanelProps) {
   usePathsVersion(canvas);
   const [renaming, setRenaming] = useState<{ index: number; name: string } | null>(null);
   const [makeSelection, setMakeSelection] = useState<{ feather: string; mode: SelectionMode } | null>(null);
@@ -262,9 +265,30 @@ export function PathsPanel({ canvas, open, onOpenChange, color, brush }: PathsPa
                   <MoreHorizontal className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent
+                align="end"
+                onCloseAutoFocus={(event) => {
+                  // Typing goes on in the text just put on the path.
+                  const active = canvas?.getActiveObject() as { isEditing?: boolean; hiddenTextarea?: HTMLTextAreaElement | null } | undefined;
+                  if (!active?.isEditing) return;
+                  event.preventDefault();
+                  active.hiddenTextarea?.focus();
+                }}
+              >
                 <DropdownMenuItem disabled={!hasPath} onSelect={() => setMakeSelection({ feather: "0", mode: "replace" })}>
                   Make Selection…
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={!hasPath}
+                  onSelect={() =>
+                    run((target, index) => {
+                      const result = textOnPath(target, index, color);
+                      if (result === true) onTextPlaced?.();
+                      return result;
+                    })
+                  }
+                >
+                  Type on Path
                 </DropdownMenuItem>
                 <DropdownMenuItem disabled={shown === null} onSelect={() => shown !== null && setRenaming({ index: shown, name: paths[shown]!.name })}>
                   Rename Path…

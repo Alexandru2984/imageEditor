@@ -1,4 +1,4 @@
-import { Path as FabricPath, type Canvas as FabricCanvas } from "fabric";
+import { IText, Path as FabricPath, type Canvas as FabricCanvas } from "fabric";
 import {
   beginPixelEdit,
   commitPixelEdit,
@@ -16,14 +16,15 @@ import { documentGrid, selectionOf, type DocumentGrid } from "@/selection/state"
 import { ensureLayerId, type EditorFabricObject } from "@/utils/editorObjects";
 import { nativeMultiplier } from "@/utils/flatten";
 import { nameNextStep } from "@/utils/historySteps";
+import { DEFAULT_TEXT_FONT, DEFAULT_TEXT_SCREEN_SIZE } from "@/utils/fonts";
 import { cornerAt, flattenSubpath, nextPathName, segmentsOf, svgPathData, WORK_PATH, type DocumentPath } from "./pathData";
 import { pathsOf, pathViewOf, setPaths } from "./paths";
 import { traceOutlines } from "./trace";
 
 /**
  * What the Paths panel does with a path: make a selection of it, fill or
- * stroke it on the layer, make a shape layer of it; and a path made from
- * the selection. Each is one history step.
+ * stroke it on the layer, make a shape layer of it, type text along it; and
+ * a path made from the selection. Each is one history step.
  */
 
 /** A string is a refusal to show the person. */
@@ -142,6 +143,34 @@ export function shapeFromPath(canvas: FabricCanvas, index: number, color: string
   nameNextStep(canvas, "New Shape Layer");
   canvas.add(shape);
   canvas.setActiveObject(shape);
+  canvas.requestRenderAll();
+  return true;
+}
+
+/**
+ * Type on a path: a text layer whose letters follow the path's first
+ * subpath, from its start, in `color`; editing begins with its words
+ * selected, as the Type tool's do. The path itself is not drawn.
+ */
+export function textOnPath(canvas: FabricCanvas, index: number, color: string): PathResult {
+  const found = documentAndPath(canvas, index);
+  if (typeof found === "string") return found;
+  const subpath = found.path.subpaths.find((candidate) => candidate.anchors.length > 1)!;
+  const guide = new FabricPath(svgPathData([subpath]), { visible: false, fill: "", stroke: "", strokeWidth: 0 });
+  const text = new IText("Type on a path", {
+    path: guide,
+    fill: color,
+    fontSize: Math.max(8, Math.round(DEFAULT_TEXT_SCREEN_SIZE / (canvas.getZoom() || 1))),
+    fontFamily: DEFAULT_TEXT_FONT,
+  });
+  // The letters sit where the path is: the text's box is the path's.
+  text.setPositionByOrigin(guide.getCenterPoint(), "center", "center");
+  ensureLayerId(text, new Set(canvas.getObjects().map((object) => (object as EditorFabricObject).__layerId ?? "")));
+  nameNextStep(canvas, "Type on Path");
+  canvas.add(text);
+  canvas.setActiveObject(text);
+  text.enterEditing();
+  text.selectAll();
   canvas.requestRenderAll();
   return true;
 }
