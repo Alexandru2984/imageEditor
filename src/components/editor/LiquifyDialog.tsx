@@ -526,7 +526,7 @@ export function LiquifyDialog({ canvas, open, onClose }: LiquifyDialogProps) {
             {HINTS[tool]}
           </DialogDescription>
         </DialogHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-3 md:flex-row">
+        <div className="flex shrink-0 flex-col gap-3 md:min-h-0 md:flex-1 md:shrink md:flex-row">
           <div role="toolbar" aria-label="Liquify tools" className="flex shrink-0 flex-wrap gap-1 md:flex-col">
             {TOOLS.map(({ tool: value, label, key, Icon }) => (
               <Button

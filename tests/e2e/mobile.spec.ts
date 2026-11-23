@@ -454,3 +454,21 @@ test("a dialog opened from the phone menu leaves the page tappable when it close
   await page.getByRole("button", { name: "Menu" }).tap();
   await expect(page.getByRole("menuitem", { name: "File", exact: true })).toBeVisible();
 });
+
+test("Liquify fits the phone, its buttons clear of OK and Cancel", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  await page.getByRole("button", { name: "Menu" }).tap();
+  await page.getByRole("menuitem", { name: "Filter", exact: true }).tap();
+  await page.getByRole("menuitem", { name: /^Liquify/ }).tap();
+  const dialog = page.getByRole("dialog", { name: "Liquify" });
+  await expect(dialog.getByRole("toolbar", { name: "Liquify tools" })).toBeVisible();
+  await expectNoSidewaysScroll(page);
+  const thaw = await dialog.getByRole("button", { name: "Thaw All" }).boundingBox();
+  const ok = await dialog.getByRole("button", { name: "OK" }).boundingBox();
+  // Stacked, not on top of each other; the dialog scrolls to reach them.
+  expect(thaw!.y + thaw!.height).toBeLessThanOrEqual(ok!.y);
+  await dialog.getByRole("button", { name: "Cancel" }).scrollIntoViewIfNeeded();
+  await expectOnScreen(page, dialog.getByRole("button", { name: "Cancel" }));
+  await dialog.getByRole("button", { name: "Cancel" }).tap();
+  await expect(dialog).toHaveCount(0);
+});
