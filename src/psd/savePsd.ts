@@ -7,7 +7,7 @@ import { isDocumentLayer, type DocumentLayer } from "@/adjustments/documentLayer
 import { isFillLayer } from "@/adjustments/fillLayer";
 import { isGroupEnd, isGroupHeader } from "@/layers/groupMarkers";
 import { fillOf } from "@/raster/layerStyle";
-import { hasEffects, type LayerStyle } from "@/raster/layerStyleData";
+import type { LayerStyle } from "@/raster/layerStyleData";
 import { documentMaskGrey } from "@/raster/layerMask";
 import { isEditorChrome } from "@/utils/editorObjects";
 import { renderObjectsRegion } from "@/utils/flatten";
@@ -146,17 +146,23 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
       });
       continue;
     }
-    // Drawn plainly: its opacity, blend and visibility go into the file as
-    // settings. Fill does too, unless effects are drawn into the pixels (the
-    // file's Fill would fade them as well).
+    // Drawn plainly: its opacity, blend, visibility, Fill and effects go
+    // into the file as settings.
     const fill = fillOf(object);
-    const fillAsSetting = !hasEffects(item.layerStyle);
-    const settings = { visible: object.visible, opacity: object.opacity, blend: object.globalCompositeOperation, fill: item.__fill };
+    const style = item.layerStyle && Object.keys(item.layerStyle).length ? item.layerStyle : undefined;
+    const settings = {
+      visible: object.visible,
+      opacity: object.opacity,
+      blend: object.globalCompositeOperation,
+      fill: item.__fill,
+      layerStyle: item.layerStyle,
+    };
     let surface: HTMLCanvasElement;
     object.visible = true;
     object.opacity = 1;
     object.globalCompositeOperation = "source-over";
-    if (fillAsSetting) item.__fill = undefined;
+    item.__fill = undefined;
+    item.layerStyle = undefined;
     try {
       // The layer's own pixels: its group and clipping are settings in the file.
       surface = withoutCompositing(() => render((candidate) => candidate === object));
@@ -165,6 +171,7 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
       object.opacity = settings.opacity;
       object.globalCompositeOperation = settings.blend;
       item.__fill = settings.fill;
+      item.layerStyle = settings.layerStyle;
     }
     try {
       // A layer without pixels stays, as what a clipped layer above it clips to.
@@ -177,7 +184,8 @@ export async function documentAsPsd(canvas: FabricCanvas, signal?: AbortSignal):
         visible: settings.visible !== false,
         blend: (settings.blend ?? "source-over") as GlobalCompositeOperation,
         clipped: item.__clipped === true,
-        fill: fillAsSetting ? fill : 1,
+        fill,
+        ...(style ? { style } : {}),
       });
     } finally {
       releaseSurface(surface);

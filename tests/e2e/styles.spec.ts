@@ -11,9 +11,10 @@ async function arm(page: Page, key: string, name: string) {
   await expect(page.getByRole("group", { name: "Tool options" })).toContainText(name);
 }
 
-/** What the canvas shows along a line from its centre (RGBA per pixel). */
-async function line(page: Page, dx: number, dy: number, length: number): Promise<number[][]> {
-  const center = await canvasCenter(page);
+/** What the canvas shows along a line from its centre, or `shift` from it (RGBA per pixel). */
+async function line(page: Page, dx: number, dy: number, length: number, shift = { x: 0, y: 0 }): Promise<number[][]> {
+  const centre = await canvasCenter(page);
+  const center = { x: centre.x + shift.x, y: centre.y + shift.y };
   return page.evaluate(
     ({ x, y, dx, dy, length }) => {
       const lower = document.querySelector("canvas.lower-canvas") as HTMLCanvasElement;
@@ -125,4 +126,65 @@ test("a stroke follows the painted pixels of an image layer", async ({ page }) =
   const along = await line(page, 1, 0, 450);
   expect(count(along.slice(0, 200), RED)).toBeGreaterThanOrEqual(8);
   expect(count(along.slice(250), RED)).toBe(0);
+});
+
+test("inner shadow, gradient overlay and bevel shade the inside of a shape", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300, "#00ff00");
+  await arm(page, "u", "Shape");
+  const center = await canvasCenter(page);
+  await page.mouse.click(center.x, center.y);
+  await expect(page.getByRole("button", { name: "Select (V)" })).toHaveAttribute("aria-pressed", "true");
+  const GREEN = (p: number[]) => p[0]! < 40 && p[1]! > 220 && p[2]! < 40;
+  /**
+   * The shape's pixels along a line from near its centre, up to where the
+   * green begins: off the middle, clear of the handles and the rotation stem.
+   */
+  const inside = async (dx: number, dy: number) => {
+    const pixels = await line(page, dx, dy, 250, dx === 0 ? { x: 30, y: 0 } : { x: 0, y: 20 });
+    return pixels.slice(0, pixels.findIndex(GREEN));
+  };
+  const brightness = (p: number[]) => (p[0]! + p[1]! + p[2]!) / 3;
+
+  // Inner shadow: dark inside the edges facing the light (upper left), not the others.
+  let dialog = await openStyle(page);
+  await dialog.getByLabel("Inner shadow", { exact: true }).check();
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect.poll(async () => (await styleOf(page, rect))?.innerShadow?.enabled).toBe(true);
+  let left = await inside(-1, 0);
+  let right = await inside(1, 0);
+  expect(PURPLE(left[0]!)).toBe(true);
+  expect(brightness(left.at(-2)!)).toBeLessThan(brightness(left[0]!) - 40);
+  expect(PURPLE(right.at(-2)!)).toBe(true);
+
+  // Gradient overlay, black at the bottom to white at the top, over the inner shadow's place.
+  dialog = await openStyle(page);
+  await dialog.getByLabel("Inner shadow", { exact: true }).uncheck();
+  await dialog.getByLabel("Gradient overlay", { exact: true }).check();
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect.poll(async () => (await styleOf(page, rect))?.gradientOverlay?.enabled).toBe(true);
+  const up = await inside(0, -1);
+  const down = await inside(0, 1);
+  expect(Math.abs(brightness(up[0]!) - 128)).toBeLessThan(30);
+  expect(brightness(up.at(-2)!)).toBeGreaterThan(200);
+  expect(brightness(down.at(-2)!)).toBeLessThan(55);
+
+  // An inner bevel: lit along the top, shaded along the bottom.
+  dialog = await openStyle(page);
+  await dialog.getByLabel("Gradient overlay", { exact: true }).uncheck();
+  await dialog.getByLabel("Bevel & emboss", { exact: true }).check();
+  await expect(dialog.getByRole("radio", { name: "Inner bevel" })).toHaveAttribute("aria-checked", "true");
+  await dialog.getByRole("button", { name: "OK" }).click();
+  await expect.poll(async () => (await styleOf(page, rect))?.bevel?.enabled).toBe(true);
+  const top = await inside(0, -1);
+  const bottom = await inside(0, 1);
+  expect(brightness(top.at(-2)!)).toBeGreaterThan(brightness(top[0]!) + 25);
+  expect(brightness(bottom.at(-2)!)).toBeLessThan(brightness(bottom[0]!) - 25);
+
+  // Each OK was one step.
+  await page.keyboard.press("Control+z");
+  await expect.poll(async () => (await styleOf(page, rect))?.gradientOverlay?.enabled).toBe(true);
+  left = await inside(-1, 0);
+  right = await inside(1, 0);
+  expect(left.length).toBeGreaterThan(10);
+  expect(right.length).toBeGreaterThan(10);
 });

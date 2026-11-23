@@ -121,6 +121,7 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
     bottom.width === psd.width &&
     bottom.height === psd.height &&
     !bottom.mask &&
+    !bottom.style &&
     bottom.fill === 1 &&
     bottom.blend === "source-over";
   const photoLayer = fillsCanvas ? (layers.shift() as DecodedLayer) : null;
@@ -194,6 +195,7 @@ export async function readPsdFile(file: File, signal?: AbortSignal): Promise<Ope
       globalCompositeOperation: layer.blend,
     };
     if (layer.mask) object.layerMask = { src: source(await maskPng(layer.mask, layer)), enabled: layer.mask.enabled };
+    if (layer.style) object.layerStyle = layer.style;
     if (layer.clipped) object.__clipped = true;
     if (layer.fill < 1) object.__fill = layer.fill;
     objects.push(object);

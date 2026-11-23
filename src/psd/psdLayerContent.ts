@@ -98,13 +98,13 @@ export function hexOfPsdColor(color: Color | undefined): string | null {
   return null;
 }
 
-const rgbOfHex = (hex: string) => {
+export const rgbOfHex = (hex: string) => {
   const value = parseInt(hex.slice(1), 16);
   return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
 };
 
 /** A gradient's two ends from its stops, and whether it had more than that. */
-function endsOf(colorStops: ColorStop[] | undefined, opacityStops: OpacityStop[] | undefined): Read<[string, string]> | null {
+export function endsOf(colorStops: ColorStop[] | undefined, opacityStops: OpacityStop[] | undefined): Read<[string, string]> | null {
   const stops = (Array.isArray(colorStops) ? colorStops : []).filter((stop) => stop && typeof stop === "object");
   if (!stops.length) return null;
   const sorted = [...stops].sort((a, b) => finite(a.location, 0) - finite(b.location, 0));
@@ -122,7 +122,7 @@ function endsOf(colorStops: ColorStop[] | undefined, opacityStops: OpacityStop[]
   return { value: [from, to], simplified };
 }
 
-const twoStops = (from: string, to: string) => ({
+export const twoStops = (from: string, to: string) => ({
   colorStops: [
     { color: rgbOfHex(from), location: 0, midpoint: 0.5 },
     { color: rgbOfHex(to), location: 1, midpoint: 0.5 },

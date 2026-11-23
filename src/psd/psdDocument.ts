@@ -15,6 +15,8 @@ import type { FillContent } from "@/adjustments/fillData";
 import { MAX_GROUP_DEPTH } from "@/layers/layerTree";
 import { MAX_RASTER_PIXELS, MAX_RASTER_SIDE } from "@/utils/flatten";
 import type { Guide } from "@/utils/guideData";
+import type { LayerStyle } from "@/raster/layerStyleData";
+import { effectsFromPsd, effectsToPsd } from "./psdEffects";
 import { adjustmentFromPsd, adjustmentToPsd, fillFromPsd, fillToPsd } from "./psdLayerContent";
 
 /**
@@ -58,6 +60,8 @@ export interface DecodedLayer {
   clipped: boolean;
   /** Fill opacity, 0–1. */
   fill: number;
+  /** Its layer effects, drawn by the editor (not in `pixels`). */
+  style?: LayerStyle;
 }
 
 /** What adjustment and fill layers have, besides what they show. */
@@ -232,7 +236,7 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
     throw new Error(`The document is too large: at most ${MAX_RASTER_SIDE} pixels a side and ${MAX_RASTER_PIXELS / 1e6} megapixels`);
   }
 
-  const counts = { effects: 0, adjustments: 0, simplified: 0, blend: 0, deep: 0 };
+  const counts = { effects: 0, simplifiedEffects: 0, adjustments: 0, simplified: 0, blend: 0, deep: 0 };
   const layers: DecodedEntry[] = [];
   let seen = 0;
   let total = 0;
@@ -315,7 +319,9 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
       if (total > MAX_TOTAL_LAYER_PIXELS) throw new Error("The document's layers are too large to open together");
       const data = getLayerImageData(layer);
       if (!data || data.width !== layerWidth || data.height !== layerHeight) continue;
-      if (layer.effects) counts.effects += 1;
+      const effects = layer.effects ? effectsFromPsd(layer.effects) : null;
+      if (layer.effects && !effects) counts.effects += 1;
+      if (effects?.simplified) counts.simplifiedEffects += 1;
       let blend = blendFromPsd(layer.blendMode);
       if (!blend) {
         counts.blend += 1;
@@ -336,6 +342,7 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
         clipped: layer.clipping === true,
         fill: typeof fill === "number" && Number.isFinite(fill) ? Math.min(1, Math.max(0, fill)) : 1,
       };
+      if (effects) decoded.style = effects.value;
       const mask = maskOf(layer, { left, top });
       if (mask) decoded.mask = mask;
       layers.push(decoded);
@@ -356,7 +363,8 @@ export function decodePsd(buffer: ArrayBuffer): DecodedPsd {
     .map((guide) => ({ axis: guide.direction === "vertical" ? "x" : "y", position: guide.location }));
 
   const notes: string[] = [];
-  if (counts.effects) notes.push("layer effects were left out");
+  if (counts.effects) notes.push("layer effects the editor does not have were left out");
+  if (counts.simplifiedEffects) notes.push("some layer effect settings were simplified");
   if (counts.adjustments) notes.push("adjustment layers of kinds the editor does not have were left out");
   if (counts.simplified) notes.push("some adjustment and fill layer settings were simplified");
   if (counts.blend) notes.push("some blend modes became Normal");
@@ -456,6 +464,10 @@ export function nestLayers(entries: PsdToWrite["layers"]): Layer[] {
       blendMode: blendToPsd(entry.blend),
     };
     if (entry.width > 0 && entry.height > 0) layer.imageData = pixelData(entry.width, entry.height, entry.pixels);
+    if (entry.kind === "layer" && entry.style) {
+      const effects = effectsToPsd(entry.style);
+      if (effects) layer.effects = effects;
+    }
     if (entry.kind === "fill") {
       layer.vectorFill = fillToPsd(entry.content);
       if (entry.mask) layer.mask = maskData(entry.mask);

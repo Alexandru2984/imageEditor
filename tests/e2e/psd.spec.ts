@@ -202,3 +202,63 @@ test("adjustment and fill layers come in from a Photoshop file, masked, and go b
   await expect(page.getByRole("navigation", { name: "Tools" })).toBeVisible();
   await expect.poll(shape).toEqual(["Image:Paper", "AdjustmentLayer:Invert 1", "FillLayer:Color Fill 1"]);
 });
+
+test("layer effects come in from a Photoshop file as effects and go back out as Photoshop's own", async ({ page }) => {
+  await openPsd(page, [
+    layer("Paper", 0, 0, 200, 100, [255, 255, 255, 255]),
+    layer("Button", 50, 25, 100, 50, [255, 0, 0, 255], {
+      effects: {
+        dropShadow: [{ enabled: true, color: { r: 0, g: 0, b: 0 }, opacity: 0.75, angle: 90, distance: { units: "Pixels", value: 6 }, size: { units: "Pixels", value: 4 } }],
+        gradientOverlay: [
+          {
+            enabled: true,
+            opacity: 1,
+            angle: 90,
+            type: "linear",
+            gradient: {
+              name: "Custom",
+              type: "solid",
+              colorStops: [
+                { color: { r: 0, g: 0, b: 255 }, location: 0, midpoint: 0.5 },
+                { color: { r: 0, g: 255, b: 255 }, location: 1, midpoint: 0.5 },
+              ],
+              opacityStops: [
+                { opacity: 1, location: 0, midpoint: 0.5 },
+                { opacity: 1, location: 1, midpoint: 0.5 },
+              ],
+            },
+          },
+        ],
+        bevel: { enabled: false, style: "emboss", size: { units: "Pixels", value: 8 } },
+      },
+    }),
+  ]);
+  await expect.poll(async () => (await autosavedObjects(page)).map((object) => object.name)).toEqual(["Paper", "Button"]);
+  const style = (await autosavedObjects(page))[1]!.layerStyle as Record<string, Record<string, unknown>>;
+  expect(style.dropShadow).toMatchObject({ enabled: true, distance: 6, size: 4, angle: 90, opacity: 75 });
+  expect(style.gradientOverlay).toMatchObject({ enabled: true, color: "#0000ff", endColor: "#00ffff", gradient: "linear" });
+  expect(style.bevel).toMatchObject({ enabled: false, kind: "emboss", size: 8 });
+  await expect(page.getByText(/effects .*left out|effect settings were simplified/)).toHaveCount(0);
+  await settle(page);
+
+  const download = page.waitForEvent("download");
+  await chooseMenu(page, "File", "Save as Photoshop (PSD)");
+  const psd = readPsd(readFileSync((await (await download).path())!), { useRawData: true, skipThumbnail: true });
+  const button = psd.children![1]!;
+  // The layer's own pixels, red; its effects are settings.
+  expect([button.left, button.top, button.right, button.bottom]).toEqual([50, 25, 150, 75]);
+  const pixels = getLayerImageData(button)!.data;
+  expect([...pixels.slice((25 * 100 + 50) * 4, (25 * 100 + 50) * 4 + 4)]).toEqual([255, 0, 0, 255]);
+  expect(button.effects?.dropShadow?.[0]).toMatchObject({ enabled: true, angle: 90, distance: { value: 6 }, size: { value: 4 } });
+  expect(button.effects?.gradientOverlay?.[0]).toMatchObject({ enabled: true, type: "linear", angle: 90 });
+  expect(button.effects?.bevel).toMatchObject({ enabled: false, style: "emboss" });
+  // The flattened image shows them: blue below, cyan above, a shadow under the button.
+  const composite = getCompositeImageData(psd)!.data;
+  const at = (x: number, y: number) => [...composite.slice((y * 200 + x) * 4, (y * 200 + x) * 4 + 3)];
+  const low = at(100, 72);
+  const high = at(100, 28);
+  expect(low[0]).toBeLessThan(30);
+  expect(low[1]).toBeLessThan(60);
+  expect(high[1]).toBeGreaterThan(195);
+  expect(at(100, 79)[0]).toBeLessThan(200);
+});

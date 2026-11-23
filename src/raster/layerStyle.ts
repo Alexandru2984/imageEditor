@@ -2,7 +2,17 @@ import { FabricImage, FabricObject } from "fabric";
 import { nativeMultiplier } from "@/utils/flatten";
 import { Mask } from "@/selection/mask";
 import { strokeBand } from "@/selection/edits";
-import { hasEffects, layerStyleMargin, rgba, shadowOffset, type LayerStyle, type StrokeStyle } from "./layerStyleData";
+import {
+  hasEffects,
+  layerStyleMargin,
+  rgba,
+  shadowOffset,
+  type BevelStyle,
+  type GradientOverlayStyle,
+  type LayerStyle,
+  type SatinStyle,
+  type StrokeStyle,
+} from "./layerStyleData";
 
 /**
  * Drawing layer styles. A styled layer is drawn onto a work canvas at the
@@ -11,7 +21,10 @@ import { hasEffects, layerStyleMargin, rgba, shadowOffset, type LayerStyle, type
  *
  * - drop shadow and outer glow are the canvas's own blurred shadow, cast by
  *   the layer drawn out of sight so that only the shadow lands;
- * - colour overlay is the colour cut to the layer's pixels;
+ * - colour and gradient overlays are the colour cut to the layer's pixels;
+ * - inner shadow, inner glow and the bevel's shading are the blurred shadow
+ *   of everything outside the layer, cut to the layer; satin is the layer's
+ *   blurred shape against itself shifted both ways;
  * - the stroke of text, shapes and drawings is a wider round-joined outline
  *   of their own; the stroke of an image follows its opaque pixels and is
  *   worked out once in the image's own pixels, then reused at every zoom.
@@ -82,6 +95,224 @@ function castShadow(
   target.shadowOffsetY = dy;
   target.drawImage(source, 0, 0, width, height, -away, 0, width, height);
   target.restore();
+}
+
+/** Sides of the work area the screen cut off: the layer may go on past them. */
+interface CutSides {
+  left: boolean;
+  top: boolean;
+  right: boolean;
+  bottom: boolean;
+}
+
+type Take = (slot: number, width: number, height: number) => HTMLCanvasElement;
+
+/**
+ * Into `target` (cleared): the shadow that everything outside the layer
+ * casts onto it, `dx`, `dy` away and blurred by `blur`, cut to the layer.
+ * Past the work area counts as outside, but not past the sides the screen
+ * cut off. `passes` draws it again, denser near the edge.
+ */
+function castInner(
+  take: Take,
+  target: CanvasRenderingContext2D,
+  content: HTMLCanvasElement,
+  width: number,
+  height: number,
+  cut: CutSides,
+  color: string,
+  blur: number,
+  dx: number,
+  dy: number,
+  passes = 1
+) {
+  // What is outside, with room around the work area for the blur to fill.
+  const frame = Math.ceil(blur * 2 + Math.max(Math.abs(dx), Math.abs(dy)) + 8);
+  const outerWidth = width + frame * 2;
+  const outerHeight = height + frame * 2;
+  const outside = take(3, outerWidth, outerHeight);
+  const context = contextOf(outside, outerWidth, outerHeight);
+  const x0 = cut.left ? frame : 0;
+  const y0 = cut.top ? frame : 0;
+  const x1 = cut.right ? frame + width : outerWidth;
+  const y1 = cut.bottom ? frame + height : outerHeight;
+  context.fillStyle = "#000000";
+  context.fillRect(x0, y0, x1 - x0, y1 - y0);
+  context.globalCompositeOperation = "destination-out";
+  context.drawImage(content, 0, 0, width, height, frame, frame, width, height);
+  context.globalCompositeOperation = "source-over";
+
+  // Drawn out of sight, so that only its shadow lands.
+  const away = outerWidth + blur * 3 + 64;
+  target.save();
+  target.shadowColor = color;
+  target.shadowBlur = blur;
+  target.shadowOffsetX = away + dx;
+  target.shadowOffsetY = dy;
+  for (let pass = 0; pass < passes; pass += 1) {
+    target.drawImage(outside, 0, 0, outerWidth, outerHeight, -away - frame, -frame, outerWidth, outerHeight);
+  }
+  target.restore();
+  clipTo(target, content, width, height, "destination-in");
+}
+
+/** Keep `target` only where the layer is (`destination-in`) or is not (`destination-out`). */
+function clipTo(
+  target: CanvasRenderingContext2D,
+  content: HTMLCanvasElement,
+  width: number,
+  height: number,
+  operation: "destination-in" | "destination-out"
+) {
+  target.globalCompositeOperation = operation;
+  target.drawImage(content, 0, 0, width, height, 0, 0, width, height);
+  target.globalCompositeOperation = "source-over";
+}
+
+/** Put `source` onto `out` at `alpha` with `operation`. */
+function lay(
+  out: CanvasRenderingContext2D,
+  source: HTMLCanvasElement,
+  width: number,
+  height: number,
+  alpha: number,
+  operation: GlobalCompositeOperation
+) {
+  out.globalAlpha = alpha;
+  out.globalCompositeOperation = operation;
+  out.drawImage(source, 0, 0, width, height, 0, 0, width, height);
+  out.globalAlpha = 1;
+  out.globalCompositeOperation = "source-over";
+}
+
+/** The gradient of a gradient overlay over the layer's box (work pixels), running `direction`. */
+function overlayGradient(
+  context: CanvasRenderingContext2D,
+  overlay: GradientOverlayStyle,
+  box: { x0: number; y0: number; x1: number; y1: number },
+  direction: { x: number; y: number }
+): CanvasGradient {
+  const cx = (box.x0 + box.x1) / 2;
+  const cy = (box.y0 + box.y1) / 2;
+  const boxWidth = box.x1 - box.x0;
+  const boxHeight = box.y1 - box.y0;
+  if (overlay.gradient === "radial") {
+    const gradient = context.createRadialGradient(cx, cy, 0, cx, cy, Math.max(1, Math.max(boxWidth, boxHeight) / 2));
+    gradient.addColorStop(0, overlay.color);
+    gradient.addColorStop(1, overlay.endColor);
+    return gradient;
+  }
+  // Long enough to cross the box the way it runs.
+  const half = Math.max(0.5, (Math.abs(direction.x) * boxWidth + Math.abs(direction.y) * boxHeight) / 2);
+  const gradient = context.createLinearGradient(
+    cx - direction.x * half,
+    cy - direction.y * half,
+    cx + direction.x * half,
+    cy + direction.y * half
+  );
+  if (overlay.gradient === "reflected") {
+    gradient.addColorStop(0, overlay.endColor);
+    gradient.addColorStop(0.5, overlay.color);
+    gradient.addColorStop(1, overlay.endColor);
+  } else {
+    gradient.addColorStop(0, overlay.color);
+    gradient.addColorStop(1, overlay.endColor);
+  }
+  return gradient;
+}
+
+/** Satin: the layer's blurred shape against itself shifted both ways, cut to the layer, into a work canvas. */
+function satinOf(
+  take: Take,
+  content: HTMLCanvasElement,
+  width: number,
+  height: number,
+  satin: SatinStyle,
+  devicePerDoc: number
+): HTMLCanvasElement {
+  const offset = shadowOffset(satin);
+  const blur = satin.size * devicePerDoc;
+  const dx = offset.x * devicePerDoc;
+  const dy = offset.y * devicePerDoc;
+  const one = take(4, width, height);
+  const first = contextOf(one, width, height);
+  castShadow(first, content, width, height, satin.color, blur, dx, dy);
+  const other = take(3, width, height);
+  const second = contextOf(other, width, height);
+  castShadow(second, content, width, height, satin.color, blur, -dx, -dy);
+  // Where just one of them is: their difference.
+  first.globalCompositeOperation = "xor";
+  first.drawImage(other, 0, 0, width, height, 0, 0, width, height);
+  first.globalCompositeOperation = "source-over";
+  let result = one;
+  if (satin.invert) {
+    const inverted = contextOf(other, width, height);
+    inverted.fillStyle = satin.color;
+    inverted.fillRect(0, 0, width, height);
+    clipTo(inverted, one, width, height, "destination-out");
+    result = other;
+  }
+  clipTo(result.getContext("2d")!, content, width, height, "destination-in");
+  return result;
+}
+
+/**
+ * Bevel and emboss, onto `out`: highlight (Screen) on the slopes facing the
+ * light and shadow (Multiply) on those facing away, inside the edge, outside
+ * it, or both.
+ */
+function drawBevel(
+  take: Take,
+  out: CanvasRenderingContext2D,
+  content: HTMLCanvasElement,
+  width: number,
+  height: number,
+  cut: CutSides,
+  bevel: BevelStyle,
+  devicePerDoc: number
+) {
+  const raised = bevel.direction === "up" ? 1 : -1;
+  const reach = bevel.size * devicePerDoc;
+  // A lower light throws the shading further; Photoshop's 30° is the measure.
+  const lift = Math.cos((Math.min(90, Math.max(0, bevel.altitude)) * Math.PI) / 180) / Math.cos(Math.PI / 6);
+  const depth = bevel.depth / 100;
+  const strength = Math.min(1, depth);
+  const spread = Math.min(3, Math.max(1, Math.sqrt(depth)));
+  const blur = reach + bevel.soften * devicePerDoc;
+  const highlight = rgba(bevel.color, bevel.opacity * strength);
+  const shadow = rgba(bevel.shadowColor, bevel.shadowOpacity * strength);
+  const fx = take(4, width, height);
+  const part = (inside: boolean, scale: number, sign: number) => {
+    const distance = Math.max(0.5, reach * 0.5 * lift * spread * scale);
+    // Away from the light.
+    const away = shadowOffset({ angle: bevel.angle, distance });
+    for (const [color, toward, operation] of [
+      [highlight, 1, "screen"],
+      [shadow, -1, "multiply"],
+    ] as const) {
+      const context = contextOf(fx, width, height);
+      const s = toward * raised * sign;
+      if (inside) {
+        // What is outside, shifted away from the light, lands on the slope facing it.
+        castInner(take, context, content, width, height, cut, color, blur * scale, away.x * s, away.y * s);
+      } else {
+        // The layer shifted towards the light lands on the outer slope facing it.
+        castShadow(context, content, width, height, color, blur * scale, -away.x * s, -away.y * s);
+        clipTo(context, content, width, height, "destination-out");
+      }
+      lay(out, fx, width, height, 1, operation);
+    }
+  };
+  if (bevel.kind === "innerBevel") part(true, 1, 1);
+  else if (bevel.kind === "outerBevel") part(false, 1, 1);
+  else if (bevel.kind === "emboss") {
+    part(true, 0.5, 1);
+    part(false, 0.5, 1);
+  } else {
+    // Pillow emboss: raised inside, sunk outside.
+    part(true, 0.5, 1);
+    part(false, 0.5, -1);
+  }
 }
 
 // ---------- The stroke of an image, in its own pixels ----------
@@ -260,17 +491,36 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
     xs.push(placed.a * x + placed.c * y + placed.e);
     ys.push(placed.b * x + placed.d * y + placed.f);
   }
-  const left = Math.max(0, Math.floor(Math.min(...xs) - margin));
-  const top = Math.max(0, Math.floor(Math.min(...ys) - margin));
-  const right = Math.min(ctx.canvas.width, Math.ceil(Math.max(...xs) + margin));
-  const bottom = Math.min(ctx.canvas.height, Math.ceil(Math.max(...ys) + margin));
+  const wanted = {
+    left: Math.floor(Math.min(...xs) - margin),
+    top: Math.floor(Math.min(...ys) - margin),
+    right: Math.ceil(Math.max(...xs) + margin),
+    bottom: Math.ceil(Math.max(...ys) + margin),
+  };
+  const left = Math.max(0, wanted.left);
+  const top = Math.max(0, wanted.top);
+  const right = Math.min(ctx.canvas.width, wanted.right);
+  const bottom = Math.min(ctx.canvas.height, wanted.bottom);
   const width = right - left;
   const height = bottom - top;
   if (width <= 0 || height <= 0) return;
+  const cut: CutSides = {
+    left: wanted.left < 0,
+    top: wanted.top < 0,
+    right: wanted.right > ctx.canvas.width,
+    bottom: wanted.bottom > ctx.canvas.height,
+  };
 
+  const works: { element: HTMLCanvasElement; temporary: boolean }[] = [];
+  const take: Take = (slot, takeWidth, takeHeight) => {
+    const work = workCanvas(slot, takeWidth, takeHeight);
+    works.push(work);
+    return work.element;
+  };
   const content = workCanvas(0, width, height);
   const result = workCanvas(1, width, height);
   const extra = workCanvas(2, width, height);
+  works.push(content, result, extra);
   try {
     // The layer itself, plain: its opacity and blending apply at the end.
     const contentContext = contextOf(content.element, width, height);
@@ -287,7 +537,7 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
     }
 
     const out = contextOf(result.element, width, height);
-    const { dropShadow, outerGlow, colorOverlay, stroke } = style;
+    const { dropShadow, outerGlow, colorOverlay, stroke, gradientOverlay, satin, innerGlow, innerShadow, bevel } = style;
     if (dropShadow?.enabled && dropShadow.opacity > 0) {
       const offset = shadowOffset(dropShadow);
       castShadow(
@@ -312,6 +562,24 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
     out.drawImage(content.element, 0, 0, width, height, 0, 0, width, height);
     out.globalAlpha = 1;
 
+    if (gradientOverlay?.enabled && gradientOverlay.opacity > 0) {
+      const overlay = contextOf(extra.element, width, height);
+      // The angle is the document's; the view may be turned or flipped.
+      const radians = (gradientOverlay.angle * Math.PI) / 180;
+      const along = { x: Math.cos(radians), y: -Math.sin(radians) };
+      const mapped = { x: base.a * along.x + base.c * along.y, y: base.b * along.x + base.d * along.y };
+      const length = Math.hypot(mapped.x, mapped.y) || 1;
+      overlay.fillStyle = overlayGradient(
+        overlay,
+        gradientOverlay,
+        { x0: Math.min(...xs) - left, y0: Math.min(...ys) - top, x1: Math.max(...xs) - left, y1: Math.max(...ys) - top },
+        { x: mapped.x / length, y: mapped.y / length }
+      );
+      overlay.fillRect(0, 0, width, height);
+      clipTo(overlay, content.element, width, height, "destination-in");
+      lay(out, extra.element, width, height, gradientOverlay.opacity / 100, "source-over");
+    }
+
     if (colorOverlay?.enabled && colorOverlay.opacity > 0) {
       const overlay = contextOf(extra.element, width, height);
       overlay.fillStyle = colorOverlay.color;
@@ -321,6 +589,46 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
       out.globalAlpha = colorOverlay.opacity / 100;
       out.drawImage(extra.element, 0, 0, width, height, 0, 0, width, height);
       out.globalAlpha = 1;
+    }
+
+    if (satin?.enabled && satin.opacity > 0) {
+      lay(out, satinOf(take, content.element, width, height, satin, devicePerDoc), width, height, satin.opacity / 100, "multiply");
+    }
+
+    if (innerGlow?.enabled && innerGlow.opacity > 0 && innerGlow.size > 0) {
+      const glow = contextOf(extra.element, width, height);
+      const blur = innerGlow.size * devicePerDoc;
+      if (innerGlow.source === "edge") {
+        // Twice, as with the outer glow.
+        castInner(take, glow, content.element, width, height, cut, rgba(innerGlow.color, innerGlow.opacity), blur, 0, 0, 2);
+        lay(out, extra.element, width, height, 1, "screen");
+      } else {
+        // From the middle: the colour, less the glow of the edge.
+        const edge = take(4, width, height);
+        castInner(take, contextOf(edge, width, height), content.element, width, height, cut, "#000000", blur, 0, 0, 2);
+        glow.fillStyle = innerGlow.color;
+        glow.fillRect(0, 0, width, height);
+        clipTo(glow, content.element, width, height, "destination-in");
+        clipTo(glow, edge, width, height, "destination-out");
+        lay(out, extra.element, width, height, innerGlow.opacity / 100, "screen");
+      }
+    }
+
+    if (innerShadow?.enabled && innerShadow.opacity > 0) {
+      const offset = shadowOffset(innerShadow);
+      castInner(
+        take,
+        contextOf(extra.element, width, height),
+        content.element,
+        width,
+        height,
+        cut,
+        rgba(innerShadow.color, innerShadow.opacity),
+        innerShadow.size * devicePerDoc,
+        offset.x * devicePerDoc,
+        offset.y * devicePerDoc
+      );
+      lay(out, extra.element, width, height, 1, "multiply");
     }
 
     if (stroke?.enabled && stroke.size > 0 && stroke.opacity > 0) {
@@ -351,6 +659,10 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
       out.globalAlpha = 1;
     }
 
+    if (bevel?.enabled && bevel.size > 0 && (bevel.opacity > 0 || bevel.shadowOpacity > 0)) {
+      drawBevel(take, out, content.element, width, height, cut, bevel, devicePerDoc);
+    }
+
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha *= opacity;
@@ -358,7 +670,7 @@ function renderStyled(object: StyledObject, ctx: CanvasRenderingContext2D, style
     ctx.drawImage(result.element, 0, 0, width, height, left, top, width, height);
     ctx.restore();
   } finally {
-    for (const work of [content, result, extra]) {
+    for (const work of works) {
       if (work.temporary) {
         work.element.width = 0;
         work.element.height = 0;
