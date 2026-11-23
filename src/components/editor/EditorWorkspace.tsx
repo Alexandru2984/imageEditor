@@ -915,7 +915,7 @@ export const EditorWorkspace = ({
       <TabsContent value="adjust" className="mt-0 min-h-0 flex-1">
         <AdjustPanel fabricCanvas={fabricCanvas} />
       </TabsContent>
-      <TabsContent value="layers" className="mt-0 flex min-h-0 flex-1 flex-col">
+      <TabsContent value="layers" className="mt-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
         <div className="min-h-0 flex-1">
           <LayersPanel fabricCanvas={fabricCanvas} commands={commands} />
         </div>

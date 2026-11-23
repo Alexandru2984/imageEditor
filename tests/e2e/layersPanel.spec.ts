@@ -289,3 +289,13 @@ test("Lock image pixels sends the brush to a new layer, and Lock position keeps 
   await page.waitForTimeout(300);
   expect((await layerOf(page, "Layer 2")).left).toEqual(before.left);
 });
+
+test("the side panel's hidden tabs take no room from the one shown", async ({ page }) => {
+  await uploadSolidImage(page, 400, 300);
+  for (const tab of ["Properties", "Adjust", "Layers"]) {
+    await page.getByRole("tab", { name: tab }).click();
+    await expect(page.getByRole("tab", { name: tab })).toHaveAttribute("aria-selected", "true");
+    const inactive = page.locator('[role="tabpanel"][data-state="inactive"]');
+    for (let index = 0; index < (await inactive.count()); index += 1) await expect(inactive.nth(index)).toBeHidden();
+  }
+});
