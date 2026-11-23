@@ -107,6 +107,7 @@ export const KEYMAP = {
   magicWandTool: [{ key: "w" }],
   cropTool: [{ key: "c" }],
   penTool: [{ key: "p" }],
+  pathToSelection: [{ key: "Enter", mod: true }],
   directSelectTool: [{ key: "a" }],
   eyedropper: [{ key: "i" }],
 } satisfies Record<string, Shortcut[]>;

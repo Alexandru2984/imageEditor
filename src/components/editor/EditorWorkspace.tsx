@@ -66,6 +66,7 @@ import { DEFAULT_WAND_OPTIONS, type WandOptions } from "@/selection/magicWand";
 import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
 import { ColorRangeDialog } from "./ColorRangeDialog";
+import { PathsPanel } from "./PathsPanel";
 import { LayerStyleDialog } from "./LayerStyleDialog";
 import { AdjustmentDialog, type AdjustmentKind } from "./adjustments/AdjustmentDialog";
 import { DocumentDialog, type DocumentDialogKind } from "./DocumentDialog";
@@ -642,6 +643,7 @@ export const EditorWorkspace = ({
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const [selectionModification, setSelectionModification] = useState<SelectionModification | null>(null);
   const [colorRangeOpen, setColorRangeOpen] = useState(false);
+  const [pathsOpen, setPathsOpen] = useSessionState<boolean>("pathsPanel", false);
   const openColorRange = useCallback(() => setColorRangeOpen(true), []);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
   /** The layer the Layer style dialog is open for. */
@@ -747,6 +749,8 @@ export const EditorWorkspace = ({
     modifySelection: setSelectionModification,
     wand,
     openColorRange,
+    pathsPanel: pathsOpen,
+    setPathsPanel: setPathsOpen,
     strokeSelection: openStrokeDialog,
     openLayerStyle: setStyledLayer,
     openDocumentDialog: setDocumentDialog,
@@ -879,8 +883,11 @@ export const EditorWorkspace = ({
       <TabsContent value="adjust" className="mt-0 min-h-0 flex-1">
         <AdjustPanel fabricCanvas={fabricCanvas} />
       </TabsContent>
-      <TabsContent value="layers" className="mt-0 min-h-0 flex-1">
-        <LayersPanel fabricCanvas={fabricCanvas} commands={commands} />
+      <TabsContent value="layers" className="mt-0 flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1">
+          <LayersPanel fabricCanvas={fabricCanvas} commands={commands} />
+        </div>
+        <PathsPanel canvas={fabricCanvas} open={pathsOpen} onOpenChange={setPathsOpen} color={activeColor} brush={paint} />
       </TabsContent>
     </Tabs>
   );

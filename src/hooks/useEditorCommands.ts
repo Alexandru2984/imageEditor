@@ -128,6 +128,8 @@ import type { AiActions } from "@/hooks/useAiActions";
 import { Mask } from "@/selection/mask";
 import { documentGrid, selectionOf, type PixelSelection } from "@/selection/state";
 import { toggleQuickMask } from "@/selection/quickMask";
+import { selectionFromPath, workPathFromSelection } from "@/paths/pathActions";
+import { pathsOf, pathViewOf } from "@/paths/paths";
 import { growSelection, type WandOptions } from "@/selection/magicWand";
 import { copySelectionToLayer } from "@/selection/actions";
 import { clearTarget, editPixels, paintTarget } from "@/selection/edits";
@@ -252,6 +254,9 @@ export interface EditorCommandContext {
   wand: WandOptions;
   /** Opens Select › Color Range. */
   openColorRange: () => void;
+  /** View › Paths: the Paths section under the layers. */
+  pathsPanel: boolean;
+  setPathsPanel: (open: boolean) => void;
   /** [ ] and Shift+[ ]: brush size and hardness. */
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
   swapColors: () => void;
@@ -338,6 +343,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     modifySelection,
     wand,
     openColorRange,
+    pathsPanel,
+    setPathsPanel,
     adjustBrush,
     swapColors,
     colors,
@@ -356,6 +363,13 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     // A layer on the canvas, or a group or adjustment layer picked in the Layers panel.
     const selected = () => hasSelection(canvas) || (!!canvas && hasPicks(canvas));
     const pixelSelection = () => (canvas ? selectionOf(canvas).current() : null);
+    /** The path shown, or the only one there is. */
+    const shownPath = (): number | null => {
+      if (!canvas) return null;
+      const shown = pathViewOf(canvas).shown;
+      if (shown !== null) return shown;
+      return pathsOf(canvas).length === 1 ? 0 : null;
+    };
     /** Select › Grow (contiguous) and Similar, by the magic wand's tolerance. */
     const grow = (contiguous: boolean) => {
       const selection = pixelSelection();
@@ -1641,6 +1655,42 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         toggle: true,
       },
       {
+        id: "view.pathsPanel",
+        label: "Paths panel",
+        run: () => {
+          const showing = panel === "layers" && pathsPanel;
+          setPathsPanel(!showing);
+          if (!showing) openPanel("layers");
+        },
+        isChecked: () => panel === "layers" && pathsPanel,
+        toggle: true,
+      },
+      {
+        id: "path.toSelection",
+        label: "Load path as a selection",
+        icon: SquareDashed,
+        shortcuts: KEYMAP.pathToSelection,
+        run: () => {
+          if (!canvas) return;
+          const result = selectionFromPath(canvas, shownPath()!);
+          if (result !== true) toast.error(result);
+        },
+        isEnabled: () => shownPath() !== null,
+        keywords: "path selection make convert pen",
+      },
+      {
+        id: "path.fromSelection",
+        label: "Make work path from selection",
+        run: () => {
+          if (!canvas) return;
+          const result = workPathFromSelection(canvas);
+          if (result !== true) toast.error(result);
+          else setPathsPanel(true);
+        },
+        isEnabled: () => !!pixelSelection(),
+        keywords: "path outline trace vector pen",
+      },
+      {
         id: "view.history",
         label: "History",
         icon: History,
@@ -1934,6 +1984,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     modifySelection,
     wand,
     openColorRange,
+    pathsPanel,
+    setPathsPanel,
     snapping,
     swapColors,
     colors,
