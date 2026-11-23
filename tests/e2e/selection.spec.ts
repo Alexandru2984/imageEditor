@@ -279,6 +279,72 @@ test("Select › Grow, Similar and Modify › Border", async ({ page }) => {
   expect(frame.pixels[1]![3]).toBe(0);
 });
 
+test("Select › Color Range selects the colours clicked in its preview", async ({ page }) => {
+  // Red on the left, blue on the right with a red patch in it.
+  await uploadSolidImage(page, 400, 300, "#2020e0", [
+    { x: 0, y: 0, width: 200, height: 300, color: "#d02020" },
+    { x: 300, y: 100, width: 40, height: 40, color: "#d02020" },
+  ]);
+  await arm(page, "m", "Rectangle select");
+  await chooseMenu(page, "Select", "Color Range…");
+  const dialog = page.getByRole("dialog", { name: "Color Range" });
+  const ok = dialog.getByRole("button", { name: "OK" });
+  // Nothing to select before a colour is picked.
+  await expect(ok).toBeDisabled();
+  const preview = dialog.getByTestId("color-range-preview");
+  /** Where a photo pixel is in the preview, once the dialog has stopped opening. */
+  const previewPoint = async (x: number, y: number) => {
+    let box = (await preview.boundingBox())!;
+    await expect
+      .poll(async () => {
+        const previous = box;
+        box = (await preview.boundingBox())!;
+        return JSON.stringify(box) === JSON.stringify(previous);
+      })
+      .toBe(true);
+    return { x: box.x + (x / 400) * box.width, y: box.y + (y / 300) * box.height };
+  };
+  const red = await previewPoint(100, 150);
+  await page.mouse.click(red.x, red.y);
+  await expect(ok).toBeEnabled();
+  // The preview shows the red as selected (white), the blue not.
+  const shades = await preview.evaluate((element: HTMLCanvasElement) => {
+    const context = element.getContext("2d")!;
+    const pick = (x: number, y: number) =>
+      context.getImageData(Math.floor((x / 400) * element.width), Math.floor((y / 300) * element.height), 1, 1).data[0];
+    return [pick(100, 150), pick(250, 50)];
+  });
+  expect(shades).toEqual([255, 0]);
+  await ok.click();
+  await expect(dialog).toBeHidden();
+  await copyLayer(page);
+  const copied = (await autosavedLayerPixels(page, "Layer 1", [
+    [100, 150],
+    [320, 120],
+    [250, 50],
+  ]))!;
+  expect(copied.width).toBe(340);
+  expect(copied.pixels.map((pixel) => pixel[3])).toEqual([255, 255, 0]);
+
+  // Inside a selection, Color Range only selects there; Shift-click adds the blue.
+  await page.keyboard.press("Escape");
+  await arm(page, "m", "Rectangle select");
+  await page.keyboard.press("Control+a");
+  await chooseMenu(page, "Select", "Color Range…");
+  await expect(dialog.getByText("inside the current selection")).toBeVisible();
+  const again = await previewPoint(100, 150);
+  await page.mouse.click(again.x, again.y);
+  const blue = await previewPoint(250, 50);
+  await page.keyboard.down("Shift");
+  await page.mouse.click(blue.x, blue.y);
+  await page.keyboard.up("Shift");
+  await dialog.getByLabel("Invert").check();
+  await ok.click();
+  await expect(dialog).toBeHidden();
+  // Every colour sampled, inverted: nothing.
+  await expect(page.getByText("No pixels matched")).toBeVisible();
+});
+
 /** Where a pixel of the photo is on screen. */
 async function photoPoint(page: Page, x: number, y: number) {
   const photo = (await autosavedObjects(page)).find((o) => o.name === "Background")!;

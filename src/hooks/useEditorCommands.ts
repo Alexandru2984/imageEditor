@@ -248,6 +248,8 @@ export interface EditorCommandContext {
   modifySelection: (modification: SelectionModification) => void;
   /** The magic wand's settings, which Select › Grow and Similar use. */
   wand: WandOptions;
+  /** Opens Select › Color Range. */
+  openColorRange: () => void;
   /** [ ] and Shift+[ ]: brush size and hardness. */
   adjustBrush: (setting: "width" | "hardness", direction: 1 | -1) => void;
   swapColors: () => void;
@@ -333,6 +335,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     showShortcuts,
     modifySelection,
     wand,
+    openColorRange,
     adjustBrush,
     swapColors,
     colors,
@@ -1396,6 +1399,13 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
         keywords: "invert selection",
       },
       {
+        id: "select.colorRange",
+        label: "Color Range…",
+        run: openColorRange,
+        isEnabled: () => !!canvas && documentGrid(canvas) !== null,
+        keywords: "colour sample fuzziness highlights shadows midtones reds skin",
+      },
+      {
         id: "select.quickMask",
         label: "Edit in Quick Mask Mode",
         icon: Paintbrush,
@@ -1919,6 +1929,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     showShortcuts,
     modifySelection,
     wand,
+    openColorRange,
     snapping,
     swapColors,
     colors,

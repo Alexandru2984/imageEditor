@@ -67,6 +67,7 @@ function editorCommands(): CommandMap {
     showShortcuts: noop,
     modifySelection: noop,
     wand: DEFAULT_WAND_OPTIONS,
+    openColorRange: noop,
     adjustBrush: noop,
     swapColors: noop,
     colors: { foreground: "#000000", background: "#ffffff" },

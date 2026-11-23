@@ -65,6 +65,7 @@ import {
 import { DEFAULT_WAND_OPTIONS, type WandOptions } from "@/selection/magicWand";
 import type { SelectionMode } from "@/selection/mask";
 import { SelectionModifyDialog, type SelectionModification } from "./SelectionModifyDialog";
+import { ColorRangeDialog } from "./ColorRangeDialog";
 import { LayerStyleDialog } from "./LayerStyleDialog";
 import { AdjustmentDialog, type AdjustmentKind } from "./adjustments/AdjustmentDialog";
 import { DocumentDialog, type DocumentDialogKind } from "./DocumentDialog";
@@ -640,6 +641,8 @@ export const EditorWorkspace = ({
   const openPanel = useCallback((tab: PanelTab) => setPanel(tab), [setPanel]);
   const showShortcuts = useCallback(() => setShortcutsOpen(true), []);
   const [selectionModification, setSelectionModification] = useState<SelectionModification | null>(null);
+  const [colorRangeOpen, setColorRangeOpen] = useState(false);
+  const openColorRange = useCallback(() => setColorRangeOpen(true), []);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
   /** The layer the Layer style dialog is open for. */
   const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
@@ -743,6 +746,7 @@ export const EditorWorkspace = ({
     showShortcuts,
     modifySelection: setSelectionModification,
     wand,
+    openColorRange,
     strokeSelection: openStrokeDialog,
     openLayerStyle: setStyledLayer,
     openDocumentDialog: setDocumentDialog,
@@ -1186,6 +1190,7 @@ export const EditorWorkspace = ({
         strokeColor={activeColor}
         onClose={() => setSelectionModification(null)}
       />
+      <ColorRangeDialog canvas={fabricCanvas} open={colorRangeOpen} onClose={() => setColorRangeOpen(false)} />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}
