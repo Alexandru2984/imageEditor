@@ -194,6 +194,8 @@ export const EDITOR_MENUS: readonly MenuDefinition[] = [
     items: [
       "filter.adjustments",
       "-",
+      "filter.liquify",
+      "-",
       { label: "Blur", items: ["filter.gaussianBlur", "filter.motionBlur"] },
       { label: "Noise", items: ["filter.addNoise"] },
       { label: "Pixelate", items: ["filter.mosaic"] },

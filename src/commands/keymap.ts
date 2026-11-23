@@ -108,6 +108,7 @@ export const KEYMAP = {
   cropTool: [{ key: "c" }],
   penTool: [{ key: "p" }],
   selectAndMask: [{ key: "r", mod: true, alt: true }],
+  liquify: [{ key: "x", mod: true, shift: true }],
   pathToSelection: [{ key: "Enter", mod: true }],
   directSelectTool: [{ key: "a" }],
   eyedropper: [{ key: "i" }],

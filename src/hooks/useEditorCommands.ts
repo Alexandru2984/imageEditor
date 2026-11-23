@@ -256,6 +256,8 @@ export interface EditorCommandContext {
   openColorRange: () => void;
   /** Opens Select › Select and Mask. */
   openSelectAndMask: () => void;
+  /** Opens Filter › Liquify. */
+  openLiquify: () => void;
   /** View › Paths: the Paths section under the layers. */
   pathsPanel: boolean;
   setPathsPanel: (open: boolean) => void;
@@ -346,6 +348,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     wand,
     openColorRange,
     openSelectAndMask,
+    openLiquify,
     pathsPanel,
     setPathsPanel,
     adjustBrush,
@@ -975,6 +978,19 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
           keywords,
         })
       ),
+      {
+        id: "filter.liquify",
+        label: "Liquify…",
+        shortcuts: KEYMAP.liquify,
+        run: () => {
+          if (!canvas) return;
+          const target = adjustTarget(canvas);
+          if (typeof target === "string") toast.error(target);
+          else openLiquify();
+        },
+        isEnabled: canAdjust,
+        keywords: "warp push twirl pucker bloat reshape distort face body",
+      },
       {
         id: "filter.findEdges",
         label: "Find Edges",
@@ -1996,6 +2012,7 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
     wand,
     openColorRange,
     openSelectAndMask,
+    openLiquify,
     pathsPanel,
     setPathsPanel,
     snapping,

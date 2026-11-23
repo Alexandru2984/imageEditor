@@ -27,6 +27,7 @@ import {
   type UnsharpSettings,
 } from "./filters";
 import { inpaint } from "./inpaint";
+import { liquifyPixels } from "./liquify";
 import { motionBlur } from "./motionBlur";
 
 /**
@@ -58,7 +59,13 @@ export type PixelJob =
    * Perspective/distort: the result (`width`×`height`, its own size) shows the
    * area's pixels through `inverse`, which takes result pixels to area pixels.
    */
-  | { op: "warp"; inverse: Homography };
+  | { op: "warp"; inverse: Homography }
+  /**
+   * Liquify: each pixel of the region shows the area at its place plus the
+   * displacement there, from a field of `columns` × `rows` nodes `cell`
+   * pixels apart (dx, dy each); `reach` is the longest displacement.
+   */
+  | { op: "liquify"; field: Float32Array; columns: number; rows: number; cell: number; reach: number };
 
 /** How many pixels around each one a job looks at. */
 export function jobReach(job: PixelJob): number {
@@ -77,6 +84,7 @@ export function jobReach(job: PixelJob): number {
     case "findEdges":
       return 1;
     case "inpaint":
+    case "liquify":
       return job.reach;
     default:
       return 0;
@@ -126,6 +134,8 @@ export function runJob(job: PixelJob, area: JobArea, width: number, height: numb
     }
     case "warp":
       return warpPixels(area, job.inverse, width, height);
+    case "liquify":
+      return liquifyPixels({ data: job.field, columns: job.columns, rows: job.rows, cell: job.cell }, area, width, height);
   }
   // Pixel by pixel: only the region itself.
   let source = area.data;

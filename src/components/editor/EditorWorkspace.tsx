@@ -68,6 +68,7 @@ import { SelectionModifyDialog, type SelectionModification } from "./SelectionMo
 import { ColorRangeDialog } from "./ColorRangeDialog";
 import { PathsPanel } from "./PathsPanel";
 import { SelectAndMaskDialog } from "./SelectAndMaskDialog";
+import { LiquifyDialog } from "./LiquifyDialog";
 import { LayerStyleDialog } from "./LayerStyleDialog";
 import { AdjustmentDialog, type AdjustmentKind } from "./adjustments/AdjustmentDialog";
 import { DocumentDialog, type DocumentDialogKind } from "./DocumentDialog";
@@ -648,6 +649,8 @@ export const EditorWorkspace = ({
   const openColorRange = useCallback(() => setColorRangeOpen(true), []);
   const [selectAndMaskOpen, setSelectAndMaskOpen] = useState(false);
   const openSelectAndMask = useCallback(() => setSelectAndMaskOpen(true), []);
+  const [liquifyOpen, setLiquifyOpen] = useState(false);
+  const openLiquify = useCallback(() => setLiquifyOpen(true), []);
   const openStrokeDialog = useCallback(() => setSelectionModification("stroke"), []);
   /** The layer the Layer style dialog is open for. */
   const [styledLayer, setStyledLayer] = useState<FabricObject | null>(null);
@@ -753,6 +756,7 @@ export const EditorWorkspace = ({
     wand,
     openColorRange,
     openSelectAndMask,
+    openLiquify,
     pathsPanel: pathsOpen,
     setPathsPanel: setPathsOpen,
     strokeSelection: openStrokeDialog,
@@ -1203,6 +1207,7 @@ export const EditorWorkspace = ({
       />
       <ColorRangeDialog canvas={fabricCanvas} open={colorRangeOpen} onClose={() => setColorRangeOpen(false)} />
       <SelectAndMaskDialog canvas={fabricCanvas} open={selectAndMaskOpen} onClose={() => setSelectAndMaskOpen(false)} />
+      <LiquifyDialog canvas={fabricCanvas} open={liquifyOpen} onClose={() => setLiquifyOpen(false)} />
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} commands={commands} />
       <CanvasContextMenu
         canvas={fabricCanvas}
