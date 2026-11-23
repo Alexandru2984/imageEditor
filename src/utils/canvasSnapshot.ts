@@ -25,8 +25,9 @@ export const SNAPSHOT_EXTRA_PROPS = [
   "globalCompositeOperation",
   "layerMask",
   "layerStyle",
-  // The document's guides, on the photo.
+  // The document's guides and paths, on the photo.
   "guides",
+  "paths",
   // Layer groups and clipping masks.
   "__clipped",
   "passThrough",

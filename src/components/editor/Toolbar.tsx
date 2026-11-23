@@ -8,6 +8,8 @@ import {
   ImagePlus,
   Pipette,
   Smile,
+  PenTool,
+  MousePointer,
 } from "lucide-react";
 import type { Canvas as FabricCanvas } from "fabric";
 import { Button } from "@/components/ui/button";
@@ -76,6 +78,8 @@ const ERASER_TOOL: ToolDef = { id: "eraser", icon: Eraser, label: "Eraser (E)" }
 
 
 const SECONDARY_TOOLS: ToolDef[] = [
+  { id: "pen", icon: PenTool, label: "Pen (P)" },
+  { id: "directSelect", icon: MousePointer, label: "Direct selection (A)" },
   { id: "text", icon: Type, label: "Text (T)" },
   { id: "crop", icon: Crop, label: "Crop (C)" },
 ];

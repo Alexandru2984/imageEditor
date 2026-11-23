@@ -2,6 +2,8 @@ import type { Canvas as FabricCanvas } from "fabric";
 import type { Mask } from "./mask";
 import { outlineSegments } from "./outline";
 import { QUICK_MASK_OPACITY, quickMaskTint } from "./quickMask";
+import { drawPathOverlay } from "@/paths/pathOverlay";
+import { pathViewOf } from "@/paths/paths";
 import { selectionOf, type DocumentGrid, type SelectionPreview } from "./state";
 
 /** Ants march one step this often (milliseconds). */
@@ -141,6 +143,7 @@ export function installSelectionOverlay(canvas: FabricCanvas, element: HTMLCanva
       ants(shape, ratio);
       animate = true;
     }
+    drawPathOverlay(canvas, context, ratio);
     return animate;
   };
 
@@ -167,11 +170,13 @@ export function installSelectionOverlay(canvas: FabricCanvas, element: HTMLCanva
   };
 
   const unsubscribe = store.subscribe(refresh);
+  const unsubscribePaths = pathViewOf(canvas).subscribe(refresh);
   canvas.on("after:render", onRender);
   refresh();
 
   return () => {
     unsubscribe();
+    unsubscribePaths();
     canvas.off("after:render", onRender);
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;

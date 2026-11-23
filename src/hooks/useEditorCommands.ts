@@ -16,6 +16,8 @@ import {
   Copy,
   CopyPlus,
   Crop,
+  PenTool,
+  MousePointer,
   Download,
   Eraser,
   FilePlus2,
@@ -1822,6 +1824,8 @@ export function useEditorCommands(context: EditorCommandContext): CommandMap {
       tool("tool.polygonLasso", "polygonLasso", "Polygonal lasso", Pentagon, undefined, "polygon selection corners"),
       tool("tool.magicWand", "magicWand", "Magic wand", WandSparkles, KEYMAP.magicWandTool, "colour color similar selection"),
       tool("tool.crop", "crop", "Crop", Crop, KEYMAP.cropTool, "trim aspect ratio"),
+      tool("tool.pen", "pen", "Pen", PenTool, KEYMAP.penTool, "path bezier curve anchor vector"),
+      tool("tool.directSelect", "directSelect", "Direct selection", MousePointer, KEYMAP.directSelectTool, "path anchor point handle edit"),
       {
         id: "tool.eyedropper",
         label: "Pick a colour",

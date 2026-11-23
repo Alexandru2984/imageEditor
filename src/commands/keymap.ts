@@ -106,5 +106,7 @@ export const KEYMAP = {
   nextLassoTool: [{ key: "l", shift: true }],
   magicWandTool: [{ key: "w" }],
   cropTool: [{ key: "c" }],
+  penTool: [{ key: "p" }],
+  directSelectTool: [{ key: "a" }],
   eyedropper: [{ key: "i" }],
 } satisfies Record<string, Shortcut[]>;

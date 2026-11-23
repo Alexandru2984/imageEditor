@@ -37,6 +37,8 @@ import {
   ShieldCheck,
   Check,
   X,
+  PenTool,
+  MousePointer,
   type LucideIcon,
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
@@ -163,6 +165,16 @@ const TOOL_INFO: Record<string, { icon: LucideIcon; name: string; hint: string }
     hint: "Click a colour · Shift adds · Alt subtracts",
   },
   crop: { icon: Crop, name: "Crop", hint: "Drag the frame · Enter applies · Esc cancels" },
+  pen: {
+    icon: PenTool,
+    name: "Pen",
+    hint: "Click for corners, drag for curves · Click the first point to close · Enter ends · Alt converts a point",
+  },
+  directSelect: {
+    icon: MousePointer,
+    name: "Direct selection",
+    hint: "Drag points, handles or curves · Shift adds · Alt breaks a handle · Arrows nudge · Delete removes",
+  },
   cloneStamp: {
     icon: Stamp,
     name: "Clone stamp",

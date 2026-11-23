@@ -4,6 +4,7 @@ import { documentGrid } from "@/selection/state";
 import { findBackgroundImage, isLayerObject } from "@/utils/editorObjects";
 import { isGuideList, mapGuides, MAX_GUIDES, nearestLines, type GridSettings, type Guide, type SceneMatrix } from "./guideData";
 import type { Box } from "./snapping";
+import { transformPaths } from "@/paths/paths";
 
 /**
  * The document's guides live on the photo, so they are saved with it, come
@@ -26,10 +27,14 @@ export function setGuides(canvas: FabricCanvas, guides: readonly Guide[]): boole
   return true;
 }
 
-/** Carry the guides through a change of the whole scene, inside that change's undo step. */
+/**
+ * Carry the guides (and the paths, which live on the photo too) through a
+ * change of the whole scene, inside that change's undo step.
+ */
 export function transformGuides(canvas: FabricCanvas, matrix: SceneMatrix): void {
   const photo = findBackgroundImage(canvas) as GuidedObject | undefined;
   if (photo && isGuideList(photo.guides) && photo.guides.length) photo.guides = mapGuides(photo.guides, matrix);
+  transformPaths(canvas, matrix);
 }
 
 /** A guide being dragged out of a ruler or moved: drawn in place of the one it replaces. */

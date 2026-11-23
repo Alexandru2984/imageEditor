@@ -16,6 +16,8 @@ import { clampZoom, fitToScreen, isFitted } from "@/utils/viewport";
 import { flattenRegion, nativeMultiplier, planRasterization } from "@/utils/flatten";
 import { cropGuides, type Guide } from "@/utils/guideData";
 import { guidesOf } from "@/utils/guides";
+import { pathsOf } from "@/paths/paths";
+import { mapPaths, type DocumentPath } from "@/paths/pathData";
 import { styleBrush, type BrushKind } from "@/utils/brushes";
 import { CROP_RATIOS, fitRatio, resolveRatio, type CropRatioId } from "@/utils/cropFrame";
 import { parseSnapshot, type CanvasSnapshot } from "@/utils/canvasSnapshot";
@@ -36,6 +38,7 @@ import { usePaintTool } from "@/hooks/usePaintTool";
 import { useRetouchTool } from "@/hooks/useRetouchTool";
 import type { RetouchOptions } from "@/raster/retouchSettings";
 import { useSelectionTool } from "@/hooks/useSelectionTool";
+import { usePenTool } from "@/hooks/usePenTool";
 import { installSelectionOverlay } from "@/selection/overlay";
 import { OUTSIDE_PHOTO } from "@/selection/actions";
 import { gridBoxToScene, selectionOf } from "@/selection/state";
@@ -787,8 +790,9 @@ export const Canvas = ({
       }
 
       removeCropOverlay(canvas);
-      // The guides go with the photo they live on; they are put back on the cropped one.
+      // The guides and paths go with the photo they live on; they are put back on the cropped one.
       const guides = guidesOf(canvas);
+      const paths = pathsOf(canvas);
       canvas.discardActiveObject();
       canvas.remove(...canvas.getObjects());
 
@@ -810,6 +814,18 @@ export const Canvas = ({
         height: img.height! * scale,
       });
       if (kept.length) (img as FabricImage & { guides?: Guide[] }).guides = kept;
+      if (paths.length && region.width > 0 && region.height > 0) {
+        const k = (img.width! * scale) / region.width;
+        const m = (img.height! * scale) / region.height;
+        (img as FabricImage & { paths?: DocumentPath[] }).paths = mapPaths(paths, [
+          k,
+          0,
+          0,
+          m,
+          img.left! - region.left * k,
+          img.top! - region.top * m,
+        ]);
+      }
       markBackgroundObject(img);
       canvas.add(img);
       canvas.sendObjectToBack(img);
@@ -941,6 +957,8 @@ export const Canvas = ({
     wand,
     spaceDownRef,
   });
+
+  usePenTool({ canvasRef: fabricCanvasRef, canvasKey: uploadedImage, activeTool, spaceDownRef });
 
   usePaintTool({
     canvasRef: fabricCanvasRef,

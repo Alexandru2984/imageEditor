@@ -28,7 +28,10 @@ export type Tool =
   | "sharpen"
   | "smudge"
   /** Edit › Transform › Distort or Perspective, on the selected layer. */
-  | "warp";
+  | "warp"
+  /** The Pen (P) and Direct Selection (A), which draw and edit paths. */
+  | "pen"
+  | "directSelect";
 
 export interface HistoryEntry {
   json: string;

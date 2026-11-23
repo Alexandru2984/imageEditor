@@ -322,6 +322,25 @@ describe("readProjectFile", () => {
     }
   });
 
+  it("accepts paths on the photo and rejects malformed ones", async () => {
+    const anchor = '{"x":1,"y":2,"inX":1,"inY":2,"outX":5,"outY":2,"smooth":false}';
+    const snapshot = {
+      json: `{"objects":[{"type":"image","src":"__snapshot_src_0","paths":[{"name":"Path 1","subpaths":[{"closed":true,"anchors":[${anchor}]}]}]}]}`,
+      srcs: [PNG_DATA_URL],
+    };
+    await expect(readProjectFile(fileOf(JSON.stringify({ snapshot })))).resolves.toBeTruthy();
+    for (const paths of [
+      '[{"name":"Path 1","subpaths":[{"closed":true,"anchors":[{"x":"1"}]}]}]',
+      `[{"name":"Path 1","subpaths":[{"closed":true,"anchors":[${anchor.replace("}", ',"href":"https://evil.example"}')}]}]}]`,
+      '[{"name":"","subpaths":[]}]',
+      '[{"name":"Path 1","subpaths":[],"src":"x"}]',
+      '{"name":"Path 1"}',
+    ]) {
+      const bad = { json: `{"objects":[{"type":"image","src":"__snapshot_src_0","paths":${paths}}]}`, srcs: [PNG_DATA_URL] };
+      await expect(readProjectFile(fileOf(JSON.stringify({ snapshot: bad }))), paths).rejects.toThrow();
+    }
+  });
+
   it("accepts guides on the photo and rejects malformed ones", async () => {
     const ok = {
       json: '{"objects":[{"type":"image","src":"__snapshot_src_0","guides":[{"axis":"x","position":12.5},{"axis":"y","position":40}]}]}',

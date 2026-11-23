@@ -10,6 +10,7 @@ import { isValidLayerStyle } from "@/raster/layerStyleData";
 import { readAdjustment } from "@/adjustments/adjustmentData";
 import { readFill } from "@/adjustments/fillLayer";
 import { isGuideList } from "./guideData";
+import { isPathList } from "@/paths/pathData";
 
 const FILE_VERSION = 1;
 const SRC_PLACEHOLDER_PATTERN = /^__snapshot_src_(0|[1-9]\d*)$/;
@@ -424,6 +425,10 @@ function assertSafeSources(snapshot: CanvasSnapshot): void {
       }
       if (key === "guides") {
         if (!isGuideList(child)) throw new Error("Project contains invalid guides");
+        continue;
+      }
+      if (key === "paths") {
+        if (!isPathList(child)) throw new Error("Project contains invalid paths");
         continue;
       }
       if ((key === "__clipped" || key === "passThrough" || key === "collapsed") && typeof child !== "boolean") {
